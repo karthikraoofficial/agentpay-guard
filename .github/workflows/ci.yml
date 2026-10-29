@@ -64,3 +64,6 @@ jobs:
       - name: Tests
         run: uv run pytest
 
+      - name: Evals (fails on any false-allow, false-block or wrong reason code)
+        run: uv run python -m evals.run_evals
+

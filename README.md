@@ -88,11 +88,12 @@ uv run ruff check . && uv run ruff format --check .
 uv run mypy
 uv run alembic upgrade head
 uv run pytest
+uv run python -m evals.run_evals
 ```
 
 The tests need local Postgres running (the `docker compose` step above) and a `.env`. They create and migrate their own `<database>_test` database on each run, so your dev data is left alone.
 
-The evals gate joins CI with the Evals PRD.
+The eval gate runs 44 hand-labelled cases (`evals/golden/phase1.jsonl`) through the engine. Each case changes only a few fields of `evals/golden/phase1_base.json`. The gate prints false-allow and false-block counts, and fails on any mismatch, including a wrong Reason code. The full 200+ case set and per-release thresholds come with the Evals PRD.
 
 ## Layout
 
@@ -104,7 +105,7 @@ The evals gate joins CI with the Evals PRD.
 | `workflows/` | Temporal workflows: step-up consent, dispute pack |
 | `agents/` | The dispute evidence agent: tools and versioned prompts |
 | `policy_packs/` | Released policy packs and their hash manifest |
-| `evals/` | Golden cases and the eval gate (from a later phase) |
+| `evals/` | Labelled golden cases and the eval gate |
 | `migrations/` | Alembic migrations |
 | `infra/` | Docker Compose for local dev; deploy config later |
 | `web/` | Next.js front end; pages arrive from Phase 3 |
