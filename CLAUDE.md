@@ -33,6 +33,7 @@ Run from the repo root. These are the same commands CI runs.
 - Create a Tenant (prints its API key once): `uv run python -m api.admin create-tenant <name>`
 - Replay a Decision / verify a Tenant's Audit chain: `uv run python -m api.admin replay <audit_record_id> --tenant <id>` and `uv run python -m api.admin verify --tenant <id>`
 - Policy pack hash / schema: `uv run python -m core.policy.packs --hash <pack.yaml>` and `--write-schema`
+- Evals: `uv run python -m evals.run_evals` (fails on any false-allow, false-block or wrong reason code)
 - Tests: `uv run pytest` (needs local infra up and `.env`; tests create their own `<database>_test`)
 - Web: `cd web && npm ci && npm run build`
 

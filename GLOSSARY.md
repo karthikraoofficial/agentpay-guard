@@ -108,6 +108,14 @@ _Avoid_: MCC (when the source matters)
 The Agent's own free-text explanation for a payment, kept as evidence and never used to decide.
 _Avoid_: Justification, intent
 
+**False-allow**:
+An allow where the label says the request should have been stepped up or blocked. The most serious kind of eval failure.
+_Avoid_: False negative, miss
+
+**False-block**:
+A block where the label says the request should have been allowed or stepped up.
+_Avoid_: False positive, false decline
+
 ## Policy
 
 **Policy pack**:
