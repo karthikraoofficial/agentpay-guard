@@ -24,18 +24,45 @@
     },
     "IntentParams": {
       "additionalProperties": false,
-      "description": "How long an Intent verdict can be cited by Decisions after the check.",
+      "description": "How long an Intent verdict can be cited after the check, and the lowest Risk tier\nthat needs a usable match.",
       "properties": {
         "verdict_ttl_seconds": {
           "exclusiveMinimum": 0,
           "title": "Verdict Ttl Seconds",
           "type": "integer"
+        },
+        "min_tier": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Min Tier",
+          "type": "string"
         }
       },
       "required": [
-        "verdict_ttl_seconds"
+        "verdict_ttl_seconds",
+        "min_tier"
       ],
       "title": "IntentParams",
+      "type": "object"
+    },
+    "PriceDriftParams": {
+      "additionalProperties": false,
+      "description": "Step up when the amount is more than `max_above_bps` above the Quoted total.",
+      "properties": {
+        "max_above_bps": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Max Above Bps",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_above_bps"
+      ],
+      "title": "PriceDriftParams",
       "type": "object"
     },
     "RuleSetting": {
@@ -54,7 +81,9 @@
             "monthly_cap",
             "step_up_threshold",
             "monthly_cap_near",
-            "velocity"
+            "velocity",
+            "intent",
+            "price_drift"
           ],
           "title": "Rule Id",
           "type": "string"
@@ -153,6 +182,17 @@
       "anyOf": [
         {
           "$ref": "#/$defs/IntentParams"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "price_drift": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PriceDriftParams"
         },
         {
           "type": "null"
