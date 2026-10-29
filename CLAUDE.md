@@ -20,6 +20,18 @@ Read the relevant PRD and ticket before changing code. docs/BUILD-PLAN.md is the
 9. All config through core/settings.py. No os.environ elsewhere. No secrets in code or logs.
 10. Every LLM call goes through ModelGateway and logs model, prompt version, tokens in/out, cost, latency.
 
+## Commands
+
+Run from the repo root. These are the same commands CI runs.
+
+- Setup: `uv sync`, then `cp .env.example .env`
+- Local infra: `docker compose -f infra/docker-compose.yml up -d`
+- Run the API: `uv run uvicorn api.main:asgi_app --factory --reload` (health: `/healthz`, docs: `/docs`)
+- Lint and format: `uv run ruff check .` and `uv run ruff format --check .`
+- Types: `uv run mypy`
+- Tests: `uv run pytest`
+- Web: `cd web && npm ci && npm run build`
+
 ## How to work
 - One SPEC section per task. Plan first, then code, then tests, then run evals.
 - Small PRs on a feature branch: feat/<spec-id>-<short-name>. Conventional commits.

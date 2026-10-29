@@ -43,7 +43,23 @@ Three rules keep the seams honest: business code never imports a vendor SDK dire
 
 Two paths, as in Module 10 of the study guide: a fast synchronous path that decides, and a durable async path for anything that waits or uses an LLM.
 
-&#91;embedded content: AgentPay Guard architecture · hot path and async path\]
+```mermaid
+flowchart LR
+  subgraph HOT["Hot path · synchronous · p95 under 150 ms"]
+    A["AI agent<br/>asks to pay with a quote"] --> B["Decision API<br/>auth, idempotency, tenant scoping"]
+    B --> C["Policy engine<br/>versioned YAML pack<br/>allow · step_up · block"]
+    C -- allow --> D["PaymentRail<br/>Mock, Razorpay or Stripe test mode"]
+  end
+  subgraph ASYNC["Async path · durable workflows on Temporal"]
+    E["Step-up consent<br/>notify user, wait, expire"]
+    F["Intent check<br/>POST /v1/intents, pre-cart<br/>small model via gateway"]
+    G["Dispute evidence pack<br/>agent cites audit IDs<br/>human signs off"]
+  end
+  B -- step_up --> E
+  F -- cached signal --> C
+  D -- chargeback --> G
+  S[("Postgres: mandates, decisions,<br/>hash-chained audit, outbox")]
+```
 
 The policy engine decides from deterministic rules and cached signals, so the decision never waits on a model. The intent check runs earlier, when the agent builds its cart; a missing or failed result maps to step\_up. Every step writes to the audit log that the dispute agent later cites.
 
@@ -134,6 +150,8 @@ Specs live in docs/specs/. Read the relevant SPEC before changing code.
 
 ## SPEC files to write before code
 
+> **How this is tracked now:** specs are not kept as `docs/specs/` files. Each phase gets one PRD issue on GitHub (label `prd`), written with `/grill-with-docs` and `/to-prd` and broken into tickets with `/to-issues`. The table below lists what those PRDs must decide. Domain terms live in `GLOSSARY.md` and decisions in `docs/adr/`.
+
 Write these in Phase 0, with Claude drafting and you editing. They are the PM artefacts recruiters will read, and the contract Claude Code builds against.
 
 | SPEC | Covers | Key decisions you must make |
@@ -167,7 +185,15 @@ Per task, the loop is: branch → Claude Code builds against the SPEC → run te
 
 At 10–20 hours a week you reach a live demo in 8 weeks, with a tagged release at each milestone, so the project is presentable even if you stop early.
 
-&#91;embedded content: build plan · 7 phases over 8 weeks\]
+| Phase | Weeks | Exit criterion |
+| --- | --- | --- |
+| 0 · Scaffold + SPECs | W1 | CI green; Phase 1 PRD grilled and filed |
+| 1 · Mandates, policy, audit | W2–W3 | Replay identical · tag v0.1.0 |
+| 2 · Signals + gateway | W4 | Fail-closed to step_up tested |
+| 3 · Step-up consent | W5 | Survives worker kill · v0.2.0 |
+| 4 · Sandbox rail | W6 | Test-mode payment end to end |
+| 5 · Dispute agent | W7 | Cited pack + sign-off · v0.3.0 |
+| 6 · Evals, deploy, video | W8 | 200+ evals in CI · live · v1.0.0 |
 
 Phase 1 gets two weeks because the policy engine and audit replay are the core everything else plugs into. If time runs short, cut Phase 4 to the mock rail and keep the evals.
 

@@ -1,0 +1,42 @@
+# Local stack: `docker compose -f infra/docker-compose.yml up -d`
+# Postgres on 5432, Temporal on 7233 (web UI on 8233), OTLP collector on 4317/4318.
+name: agentpay-guard
+
+services:
+  postgres:
+    image: postgres:16.6
+    environment:
+      POSTGRES_USER: agentpay
+      POSTGRES_PASSWORD: agentpay # local only; never reuse outside this compose file
+      POSTGRES_DB: agentpay
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentpay -d agentpay"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  temporal:
+    image: temporalio/temporal:1.1.2
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/data/temporal.db"]
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    volumes:
+      - temporaldata:/data
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.115.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+
+volumes:
+  pgdata:
+  temporaldata:
