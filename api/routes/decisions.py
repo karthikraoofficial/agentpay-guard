@@ -14,6 +14,7 @@ from api.deps import ClockDep, IdemKey, PackDep, StoreDep, Tenant
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
 from core.domain.audit import AuditRecord, DecisionInputs, seal
+from core.domain.consent import CONSENT_TTL, ConsentRequest, ConsentRequestId, ConsentStatus
 from core.domain.decisions import (
     AgentPaymentRequest,
     AuditRecordId,
@@ -23,12 +24,26 @@ from core.domain.decisions import (
     PackRef,
     ReasonCode,
     RiskTier,
+    month_window,
 )
 from core.domain.money import Money
 from core.domain.parties import new_id
 from core.policy.engine import decide
 
 router = APIRouter(prefix="/v1/decisions", tags=["decisions"])
+
+
+class StepUpOut(BaseModel):
+    """What an Agent is told on step_up: wait, the Payer has been asked. Thresholds and
+    caps are never included, so an Agent can't probe them by splitting payments."""
+
+    consent_request_id: ConsentRequestId
+    expires_at: AwareDatetime
+    status_url: str
+
+
+class ConsentOut(BaseModel):
+    status: ConsentStatus
 
 
 class DecisionOut(BaseModel):
@@ -39,12 +54,21 @@ class DecisionOut(BaseModel):
     policy_pack: PackRef
     audit_record_id: AuditRecordId
     decided_at: AwareDatetime
-    step_up: None = None
+    step_up: StepUpOut | None
+    consent: ConsentOut | None
 
 
-def _out(decision: Decision) -> DecisionOut:
+def _out(decision: Decision, consent: ConsentRequest | None, now: datetime) -> DecisionOut:
+    fields = decision.model_dump(include=set(DecisionOut.model_fields) - {"step_up", "consent"})
+    if consent is None:
+        return DecisionOut.model_validate({**fields, "step_up": None, "consent": None})
+    step_up = StepUpOut(
+        consent_request_id=consent.consent_request_id,
+        expires_at=consent.expires_at,
+        status_url=f"/v1/decisions/{decision.decision_id}",
+    )
     return DecisionOut.model_validate(
-        decision.model_dump(include=set(DecisionOut.model_fields) - {"step_up"})
+        {**fields, "step_up": step_up, "consent": ConsentOut(status=consent.status(now))}
     )
 
 
@@ -68,10 +92,15 @@ def create_decision(
         mandate = tx.lock_mandate(body.mandate_id)
         if mandate is None:
             raise ApiError(404, "MANDATE_NOT_FOUND", f"No Mandate {body.mandate_id}.")
+        # Summed inside the Mandate lock, so parallel requests can't both spend the same
+        # headroom. Only allowed Decisions count; pending step_ups don't.
+        spent = Money(
+            minor=tx.allowed_spend(mandate.mandate_id, *month_window(now)),
+            currency=mandate.currency,
+        )
         agent = tx.get_agent(body.agent_id)
-        seq, prev_hash = tx.lock_chain_head()
-        spent = Money(minor=0, currency=mandate.currency)  # summed from allowed Decisions in #21
         output = decide(body, mandate, agent, spent, pack.pack, now)
+        seq, prev_hash = tx.lock_chain_head()
 
         ref = PackRef(id=pack.pack.id, version=pack.pack.version, hash=pack.hash)
         decision = Decision(
@@ -104,17 +133,29 @@ def create_decision(
             )
         )
         tx.add_decision(decision)
+        consent = None
+        if output.outcome == "step_up":
+            consent = ConsentRequest(
+                consent_request_id=ConsentRequestId(new_id("csr")),
+                tenant_id=tenant,
+                decision_id=decision.decision_id,
+                created_at=now,
+                expires_at=now + CONSENT_TTL,
+            )
+            tx.add_consent_request(consent)
         tx.append_audit_record(sealed)
-        return 200, _out(decision)
+        return 200, _out(decision, consent, now)
 
     with store.transaction(tenant) as tx:
         return run_idempotent(tx, key, request_hash(request, body), clock, write)
 
 
 @router.get("/{decision_id}")
-def get_decision(decision_id: str, tenant: Tenant, store: StoreDep) -> DecisionOut:
+def get_decision(decision_id: str, tenant: Tenant, store: StoreDep, clock: ClockDep) -> DecisionOut:
+    """The Decision, with its Consent request's status if it was a step_up."""
     with store.transaction(tenant) as tx:
         decision = tx.get_decision(DecisionId(decision_id))
+        consent = tx.get_consent_request(DecisionId(decision_id))
     if decision is None:
         raise ApiError(404, "DECISION_NOT_FOUND", f"No Decision {decision_id}.")
-    return _out(decision)
+    return _out(decision, consent, clock.now())

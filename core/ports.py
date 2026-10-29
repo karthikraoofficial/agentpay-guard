@@ -21,6 +21,7 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from core.domain.audit import SealedAuditRecord
+from core.domain.consent import ConsentRequest
 from core.domain.decisions import AuditRecordId, Decision, DecisionId
 from core.domain.idempotency import IdempotencyKey as IdempotencyKey  # re-exported
 from core.domain.idempotency import IdempotencyRecord
@@ -167,6 +168,14 @@ class TenantTransaction(Protocol):
         ...
 
     def add_decision(self, decision: Decision) -> None: ...
+
+    def allowed_spend(self, mandate_id: MandateId, start: datetime, end: datetime) -> int:
+        """Total minor units of allowed Decisions on a Mandate decided in [start, end)."""
+        ...
+
+    def add_consent_request(self, consent: ConsentRequest) -> None: ...
+
+    def get_consent_request(self, decision_id: DecisionId) -> ConsentRequest | None: ...
 
     def get_decision(self, decision_id: DecisionId) -> Decision | None: ...
 

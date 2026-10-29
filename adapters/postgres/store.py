@@ -9,6 +9,7 @@ from adapters.postgres.tables import (
     agents,
     api_keys,
     audit_records,
+    consent_requests,
     decisions,
     idempotency_keys,
     mandates,
@@ -17,6 +18,7 @@ from adapters.postgres.tables import (
     tenants,
 )
 from core.domain.audit import ZERO_HASH, SealedAuditRecord, unseal
+from core.domain.consent import ConsentRequest
 from core.domain.decisions import AuditRecordId, Decision, DecisionId, PackRef
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.mandates import ConsentEvidence, Mandate, MandateId, RevokedBy
@@ -140,6 +142,35 @@ class PostgresTransaction:
                 decided_at=decision.decided_at,
             )
         )
+
+    def allowed_spend(self, mandate_id: MandateId, start: datetime, end: datetime) -> int:
+        total = self._conn.execute(
+            select(func.coalesce(func.sum(decisions.c.amount_minor), 0)).where(
+                decisions.c.tenant_id == self._tenant_id,
+                decisions.c.mandate_id == mandate_id,
+                decisions.c.outcome == "allow",
+                decisions.c.decided_at >= start,
+                decisions.c.decided_at < end,
+            )
+        ).scalar_one()
+        return int(total)
+
+    def add_consent_request(self, consent: ConsentRequest) -> None:
+        self._own(consent.tenant_id)
+        self._conn.execute(insert(consent_requests).values(**consent.model_dump()))
+
+    def get_consent_request(self, decision_id: DecisionId) -> ConsentRequest | None:
+        row = (
+            self._conn.execute(
+                select(consent_requests).where(
+                    consent_requests.c.tenant_id == self._tenant_id,
+                    consent_requests.c.decision_id == decision_id,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return None if row is None else ConsentRequest.model_validate(dict(row))
 
     def get_decision(self, decision_id: DecisionId) -> Decision | None:
         row = (

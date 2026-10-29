@@ -81,11 +81,86 @@ def agent_disabled(rule_id: str, f: Facts) -> RuleResult:
     return _passes(rule_id)
 
 
+def _steps_up(rule_id: str, code: ReasonCode) -> RuleResult:
+    return RuleResult(rule_id=rule_id, result="step_up", reason_code=code)
+
+
+def _same_currency(f: Facts) -> bool:
+    return f.request.amount.currency == f.mandate.currency
+
+
+def currency_match(rule_id: str, f: Facts) -> RuleResult:
+    """Amounts are never compared across currencies: on a mismatch the four amount rules
+    are recorded as not evaluated."""
+    if not _same_currency(f):
+        return _blocks(rule_id, "CURRENCY_MISMATCH")
+    return _passes(rule_id)
+
+
+def mcc_high_risk(rule_id: str, f: Facts) -> RuleResult:
+    if f.request.merchant.mcc in f.pack.high_risk_mccs:
+        return _blocks(rule_id, "MCC_HIGH_RISK")
+    return _passes(rule_id)
+
+
+def mcc_allowed(rule_id: str, f: Facts) -> RuleResult:
+    if f.request.merchant.mcc not in f.mandate.allowed_mccs:
+        return _blocks(rule_id, "MCC_NOT_ALLOWED")
+    return _passes(rule_id)
+
+
+def _amount_rule(check: Callable[[str, Facts], RuleResult]) -> Rule:
+    def rule(rule_id: str, f: Facts) -> RuleResult:
+        if not _same_currency(f):
+            return RuleResult(rule_id=rule_id, result="not_evaluated")
+        return check(rule_id, f)
+
+    return rule
+
+
+@_amount_rule
+def per_txn_cap(rule_id: str, f: Facts) -> RuleResult:
+    """A cap breach blocks; it never steps up, so approval can't widen a Payer's limit."""
+    if f.request.amount.minor > f.mandate.per_txn_cap.minor:
+        return _blocks(rule_id, "PER_TXN_CAP_EXCEEDED")
+    return _passes(rule_id)
+
+
+@_amount_rule
+def monthly_cap(rule_id: str, f: Facts) -> RuleResult:
+    if f.spent_this_month.minor + f.request.amount.minor > f.mandate.monthly_cap.minor:
+        return _blocks(rule_id, "MONTHLY_CAP_EXCEEDED")
+    return _passes(rule_id)
+
+
+@_amount_rule
+def step_up_threshold(rule_id: str, f: Facts) -> RuleResult:
+    bands = f.pack.currencies.get(f.request.amount.currency)
+    if bands is None or f.request.amount.minor >= bands.step_up_threshold:
+        return _steps_up(rule_id, "AMOUNT_ABOVE_STEP_UP_THRESHOLD")
+    return _passes(rule_id)
+
+
+@_amount_rule
+def monthly_cap_near(rule_id: str, f: Facts) -> RuleResult:
+    after = f.spent_this_month.minor + f.request.amount.minor
+    if after * 10_000 >= f.mandate.monthly_cap.minor * f.pack.monthly_cap_near_ratio_bps:
+        return _steps_up(rule_id, "MONTHLY_CAP_NEAR")
+    return _passes(rule_id)
+
+
 RULES: dict[str, Rule] = {
     "mandate_revoked": mandate_revoked,
     "mandate_validity": mandate_validity,
     "agent_allowed": agent_allowed,
     "agent_disabled": agent_disabled,
+    "currency_match": currency_match,
+    "mcc_high_risk": mcc_high_risk,
+    "mcc_allowed": mcc_allowed,
+    "per_txn_cap": per_txn_cap,
+    "monthly_cap": monthly_cap,
+    "step_up_threshold": step_up_threshold,
+    "monthly_cap_near": monthly_cap_near,
 }
 
 _SEVERITY: dict[str, int] = {"block": 2, "step_up": 1, "pass": 0, "not_evaluated": 0}

@@ -1,5 +1,6 @@
 """Agent payment requests, Decisions and the engine's output (see GLOSSARY.md)."""
 
+from datetime import UTC, datetime
 from typing import Annotated, Literal, NewType, Self
 
 from pydantic import (
@@ -108,3 +109,16 @@ class Decision(_Frozen):
     policy_pack: PackRef
     audit_record_id: AuditRecordId
     decided_at: AwareDatetime
+
+
+def month_window(now: datetime) -> tuple[datetime, datetime]:
+    """The UTC calendar month containing `now`, as [start, end). Spent this month counts
+    allowed Decisions in this window."""
+    utc = now.astimezone(UTC)
+    start = utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    end = (
+        start.replace(year=start.year + 1, month=1)
+        if start.month == 12
+        else start.replace(month=start.month + 1)
+    )
+    return start, end
