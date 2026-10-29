@@ -4,8 +4,8 @@ A trust layer for payments that AI agents make on a user's behalf. For each agen
 payment it decides, in real time, whether to **allow** it, ask the user for fresh consent
 (**step_up**), or **block** it, and it builds the evidence pack when a payment is disputed.
 
-> Status: Phase 0 (scaffold). See [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md) for the plan and
-> GitHub Issues for PRDs and tickets.
+> Status: Phase 1 (`v0.1.0`): Mandates, the deterministic policy engine and the audit log.
+> See [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md) for the plan and GitHub Issues for PRDs and tickets.
 
 ## Design in one paragraph
 
@@ -21,7 +21,10 @@ Enforced by code from the first commit:
 - no environment reads outside `core/settings.py` (architecture test);
 - no `ModelGateway` reference in `core/policy` (architecture test);
 - money as integer minor units + ISO currency (the `Money` type rejects floats);
-- idempotency keys and tenant IDs in every write-shaped port signature (`mypy --strict`).
+- idempotency keys and tenant IDs in every write-shaped port signature (`mypy --strict`);
+- a pure policy engine that imports no clock, store, gateway or I/O (architecture test);
+- append-only Audit records (Postgres triggers), with every Decision in the test suite replayed byte for byte;
+- latency budgets (`decide()` p99 < 5 ms, `POST /v1/decisions` p95 < 150 ms) and a zero-mismatch eval gate in CI.
 
 ## Run it locally
 
@@ -89,6 +92,7 @@ uv run mypy
 uv run alembic upgrade head
 uv run pytest
 uv run python -m evals.run_evals
+uv run pytest -m perf -s -o addopts=""   # latency budgets
 ```
 
 The tests need local Postgres running (the `docker compose` step above) and a `.env`. They create and migrate their own `<database>_test` database on each run, so your dev data is left alone.
@@ -109,6 +113,21 @@ The eval gate runs 44 hand-labelled cases (`evals/golden/phase1.jsonl`) through 
 | `migrations/` | Alembic migrations |
 | `infra/` | Docker Compose for local dev; deploy config later |
 | `web/` | Next.js front end; pages arrive from Phase 3 |
+
+## Who is liable (draft)
+
+- **Inside the Mandate:** a payment the Mandate permits, under Consent evidence the Tenant attested, is the Tenant's to resolve with its Payer. If that attestation was false, the Tenant bears the loss (ADR-0005).
+- **Outside the Mandate:** if AgentPay Guard allowed a request that a correct evaluation of the recorded inputs would have blocked, that is a false-allow and our defect. Replay of the Audit record shows which case it was.
+- **Disabled Agents and revoked Mandates:** protection starts from the moment the change commits. A Decision made before then stands.
+
+## Known limitations (Phase 1)
+
+- **An allow uses up cap even if the Agent never charges.** There is no void yet; it comes with the payment rail.
+- **The Declared MCC is trusted.** The merchant category the Agent states isn't yet checked against what the rail reports.
+- **Monthly caps reset at midnight UTC,** which is 05:30 IST on the 1st.
+- **Decisions within one Tenant queue briefly on that Tenant's Audit chain lock,** so per-Tenant throughput has a ceiling. Measured: p50 53 ms and p95 62 ms for one client on local Postgres. A load test against a real server is still to do.
+- **step_up only creates a pending Consent request.** Approval, notification and the durable workflow come in Phase 3.
+- **Only INR and USD,** and one Policy pack for every Tenant.
 
 ## Proving a Decision
 

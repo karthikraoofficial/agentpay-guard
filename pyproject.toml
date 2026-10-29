@@ -1,6 +1,6 @@
 [project]
 name = "agentpay-guard"
-version = "0.0.1"
+version = "0.1.0"
 description = "Trust layer for agent-initiated payments: mandates, real-time decisions, durable consent and dispute evidence packs."
 readme = "README.md"
 license = { text = "MIT" }
@@ -54,4 +54,5 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not perf'"
+markers = ["perf: latency budgets; run with `uv run pytest -m perf -s`"]

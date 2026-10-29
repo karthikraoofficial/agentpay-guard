@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "agentpay-guard"
-    app_version: str = "0.0.1"
+    app_version: str = "0.1.0"
     env: Literal["local", "test", "staging", "production"]
 
     database_url: AnyUrl
