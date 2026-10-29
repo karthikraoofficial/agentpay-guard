@@ -137,6 +137,15 @@ class InMemoryTransaction:
             if d.mandate_id == mandate_id and d.outcome == "allow" and start <= d.decided_at < end
         )
 
+    def has_allowed_payment_to(self, payer_id: PayerId, merchant_id: str) -> bool:
+        mandates = self._data.mandates
+        return any(
+            d.outcome == "allow"
+            and d.merchant_id == merchant_id
+            and mandates[d.mandate_id].payer_id == payer_id
+            for d in self._data.decisions.values()
+        )
+
     def count_decisions(self, mandate_id: MandateId, after: datetime, until: datetime) -> int:
         return sum(
             1

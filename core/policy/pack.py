@@ -34,6 +34,7 @@ RuleId = Literal[
     "step_up_threshold",
     "monthly_cap_near",
     "velocity",
+    "merchant_new",
     "intent",
     "price_drift",
 ]
@@ -74,6 +75,12 @@ class IntentParams(_Strict):
     min_tier: Literal["low", "medium", "high"]
 
 
+class MerchantNewParams(_Strict):
+    """The lowest Risk tier at which a first payment to a merchant needs approval."""
+
+    min_tier: Literal["low", "medium", "high"]
+
+
 class PriceDriftParams(_Strict):
     """Step up when the amount is more than `max_above_bps` above the Quoted total."""
 
@@ -95,6 +102,7 @@ class PolicyPack(_Strict):
     # Signal parameters (ADR-0006). Optional, so packs released before a Signal existed
     # still validate, and left out of the Pack hash when unset.
     velocity: VelocityParams | None = None
+    merchant_new: MerchantNewParams | None = None
     intent: IntentParams | None = None
     price_drift: PriceDriftParams | None = None
 
@@ -105,6 +113,7 @@ class PolicyPack(_Strict):
             raise ValueError("each rule_id may appear only once")
         for rule_id, section in (
             ("velocity", self.velocity),
+            ("merchant_new", self.merchant_new),
             ("intent", self.intent),
             ("price_drift", self.price_drift),
         ):

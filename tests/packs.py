@@ -77,3 +77,13 @@ def signals_pack(root: Path, version: str = "1.0.1") -> Path:
             "rules": rules_plus("velocity", "intent", "price_drift"),
         },
     )
+
+
+MERCHANT_NEW = {"min_tier": "medium"}
+
+
+def merchant_new_pack(root: Path, version: str = "1.0.1") -> Path:
+    """A test pack with only the New merchant Signal added to 1.0.0."""
+    return release_test_pack(
+        root, version, {"merchant_new": MERCHANT_NEW, "rules": rules_plus("merchant_new")}
+    )

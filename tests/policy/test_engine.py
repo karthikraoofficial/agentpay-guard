@@ -456,3 +456,63 @@ def test_signal_reasons_follow_velocity_then_intent_then_drift() -> None:
         "INTENT_UNKNOWN",
         "PRICE_DRIFT",
     )
+
+
+# --- New merchant (#39) ------------------------------------------------------------------
+
+MERCHANT_PACK = PolicyPack.model_validate(
+    SIGNALS_PACK.model_dump(mode="json", exclude_none=True)
+    | {
+        "version": "1.0.3",
+        "merchant_new": {"min_tier": "medium"},
+        "rules": [
+            *[
+                r
+                for r in SIGNALS_PACK.model_dump(mode="json")["rules"]
+                if r["rule_id"] not in ("intent", "price_drift")
+            ],
+            {"rule_id": "merchant_new", "enabled": True},
+            {"rule_id": "intent", "enabled": True},
+            {"rule_id": "price_drift", "enabled": True},
+        ],
+    }
+)
+
+
+def merchant(is_new: bool | None, minor: int = MEDIUM, **kw: Any):  # type: ignore[no-untyped-def]
+    signals = Signals(
+        velocity_count=0, merchant_is_new=is_new, intent=verdict(), intent_resolution="used"
+    )
+    return run(**({"signals": signals, "pack": MERCHANT_PACK, "request": pay(minor)} | kw))
+
+
+def test_a_medium_payment_to_a_new_merchant_steps_up_and_a_known_one_passes() -> None:
+    assert (merchant(True).outcome, merchant(True).reason_codes) == ("step_up", ("MERCHANT_NEW",))
+    assert merchant(False).outcome == "allow"
+
+
+def test_a_low_tier_first_purchase_is_not_stepped_up() -> None:
+    output = merchant(True, minor=1_250_00)
+
+    assert output.outcome == "allow"
+    assert result_of(output, "merchant_new") == "pass"
+
+
+def test_a_missing_merchant_history_is_treated_as_new() -> None:
+    assert merchant(None).reason_codes == ("MERCHANT_NEW",)
+
+
+def test_new_merchant_comes_after_velocity_and_before_intent() -> None:
+    signals = Signals(velocity_count=9, merchant_is_new=True, intent_resolution="none_cited")
+
+    output = run(signals=signals, pack=MERCHANT_PACK, request=pay(MEDIUM))
+
+    assert output.reason_codes == ("VELOCITY_HIGH", "MERCHANT_NEW", "INTENT_MISSING")
+
+
+def test_new_merchant_never_changes_a_block_and_skips_a_currency_mismatch() -> None:
+    blocked = merchant(True, request=pay(MEDIUM, mcc="7995"))
+    assert blocked.outcome == "block" and "MERCHANT_NEW" in blocked.reason_codes
+
+    mismatch = merchant(True, request=pay(MEDIUM, currency="USD"))
+    assert result_of(mismatch, "merchant_new") == "not_evaluated"

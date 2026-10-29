@@ -167,13 +167,29 @@ def velocity(rule_id: str, f: Facts) -> RuleResult:
 _TIER_RANK: dict[RiskTier, int] = {"low": 0, "medium": 1, "high": 2}
 
 
+def _below(tier: RiskTier, f: Facts) -> bool:
+    return _TIER_RANK[risk_tier(f.request.amount, f.pack)] < _TIER_RANK[tier]
+
+
+@_amount_rule
+def merchant_new(rule_id: str, f: Facts) -> RuleResult:
+    """A Signal (ADR-0006): from `min_tier` up, a first payment to a merchant steps up.
+    Unknown history counts as new."""
+    params = f.pack.merchant_new
+    if params is None:
+        return RuleResult(rule_id=rule_id, result="not_evaluated")
+    if _below(params.min_tier, f) or f.signals.merchant_is_new is False:
+        return _passes(rule_id)
+    return _steps_up(rule_id, "MERCHANT_NEW")
+
+
 @_amount_rule
 def intent(rule_id: str, f: Facts) -> RuleResult:
     """A Signal (ADR-0006): from `min_tier` up, only a usable match passes."""
     params = f.pack.intent
     if params is None:
         return RuleResult(rule_id=rule_id, result="not_evaluated")
-    if _TIER_RANK[risk_tier(f.request.amount, f.pack)] < _TIER_RANK[params.min_tier]:
+    if _below(params.min_tier, f):
         return _passes(rule_id)
     used = f.signals.intent if f.signals.intent_resolution == "used" else None
     if used is None:
@@ -212,6 +228,7 @@ RULES: dict[str, Rule] = {
     "step_up_threshold": step_up_threshold,
     "monthly_cap_near": monthly_cap_near,
     "velocity": velocity,
+    "merchant_new": merchant_new,
     "intent": intent,
     "price_drift": price_drift,
 }

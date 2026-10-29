@@ -103,6 +103,7 @@ decisions = Table(
     Column("decision_id", String, primary_key=True),
     Column("mandate_id", String, nullable=False),
     Column("agent_id", String, nullable=False),
+    Column("merchant_id", String, nullable=False),
     Column("amount_minor", BigInteger, nullable=False),
     Column("currency", String(3), nullable=False),
     Column("outcome", String, nullable=False),
@@ -117,6 +118,7 @@ decisions = Table(
         ["tenant_id", "mandate_id"], ["mandates.tenant_id", "mandates.mandate_id"]
     ),
     Index("ix_decisions_tenant_mandate_decided", "tenant_id", "mandate_id", "decided_at"),
+    Index("ix_decisions_tenant_merchant_outcome", "tenant_id", "merchant_id", "outcome"),
 )
 
 audit_records = Table(
