@@ -9,6 +9,7 @@ from tests.architecture.rules import (
     impure_engine,
     model_gateway_in_policy,
     vendor_imports,
+    vendors_outside_their_adapter,
 )
 
 REPO = Path(__file__).resolve().parents[2]
@@ -44,6 +45,11 @@ def test_the_policy_engine_reads_no_clock_store_gateway_or_io() -> None:
     assert not violations, "Pass values into decide() (ADR-0003):\n" + _report(list(violations))
 
 
+def test_each_vendor_is_imported_only_by_its_own_adapter() -> None:
+    violations = vendors_outside_their_adapter(REPO, CODE_DIRS)
+    assert not violations, "Import this vendor only in its adapter:\n" + _report(list(violations))
+
+
 # --- Proof the rules fire -----------------------------------------------------
 
 
@@ -75,4 +81,16 @@ def test_engine_rule_flags_impure_imports_and_clock_reads() -> None:
         ("core/policy/engine.py", "imports core.ports"),
         ("core/policy/engine.py", "imports pathlib"),
         ("core/policy/engine.py", "calls .now()"),
+    }
+
+
+def test_vendor_home_rule_flags_imports_outside_the_adapter() -> None:
+    root = FIXTURES / "vendor_home"
+    found = {
+        (v.path.as_posix(), v.detail)
+        for v in vendors_outside_their_adapter(root, ["api", "adapters"])
+    }
+    assert found == {
+        ("api/main.py", "imports opentelemetry.sdk.trace outside adapters/otel"),
+        ("adapters/stray.py", "imports opentelemetry.trace outside adapters/otel"),
     }

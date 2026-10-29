@@ -10,7 +10,7 @@ from datetime import datetime
 from fastapi import APIRouter, Request, Response
 from pydantic import AwareDatetime, BaseModel
 
-from api.deps import ClockDep, IdemKey, PackDep, StoreDep, Tenant
+from api.deps import ClockDep, IdemKey, PackDep, StoreDep, TelemetryDep, Tenant
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
 from core.domain.audit import AuditRecord, DecisionInputs, seal
@@ -86,6 +86,7 @@ def create_decision(
     store: StoreDep,
     clock: ClockDep,
     pack: PackDep,
+    telemetry: TelemetryDep,
     key: IdemKey,
 ) -> Response:
     def write(read_at: datetime) -> tuple[int, DecisionOut]:
@@ -151,10 +152,19 @@ def create_decision(
             )
             tx.add_consent_request(consent)
         tx.append_audit_record(sealed)
+        # Identifiers and codes only: no merchant name, line items or Agent reasoning.
+        span.set_attribute("decision_id", decision.decision_id)
+        span.set_attribute("outcome", output.outcome)
+        if output.reason_codes:
+            span.set_attribute("primary_reason_code", output.reason_codes[0])
+        span.set_attribute("pack_id", ref.id)
+        span.set_attribute("pack_version", ref.version)
         return 200, _out(decision, consent, now)
 
-    with store.transaction(tenant) as tx:
-        return run_idempotent(tx, key, request_hash(request, body), clock, write)
+    # One span per request. A replayed idempotent response carries only the Tenant.
+    with telemetry.start_span("decision", {"tenant_id": tenant}) as span:
+        with store.transaction(tenant) as tx:
+            return run_idempotent(tx, key, request_hash(request, body), clock, write)
 
 
 @router.get("/{decision_id}")

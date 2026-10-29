@@ -1,4 +1,4 @@
-"""Request dependencies: the caller's Tenant, the store, the clock, the idempotency key."""
+"""Request dependencies: the Tenant, store, clock, telemetry and idempotency key."""
 
 from typing import Annotated, Protocol
 
@@ -7,7 +7,7 @@ from fastapi import Depends, Header, Request
 from api.errors import ApiError
 from core.domain.parties import hash_api_key
 from core.policy.packs import LoadedPack
-from core.ports import Clock, IdempotencyKey, TenantDirectory, TenantId, UnitOfWork
+from core.ports import Clock, IdempotencyKey, Telemetry, TenantDirectory, TenantId, UnitOfWork
 
 
 class Store(UnitOfWork, TenantDirectory, Protocol):
@@ -27,6 +27,11 @@ def get_pack(request: Request) -> LoadedPack:
 def get_clock(request: Request) -> Clock:
     clock: Clock = request.app.state.clock
     return clock
+
+
+def get_telemetry(request: Request) -> Telemetry:
+    telemetry: Telemetry = request.app.state.telemetry
+    return telemetry
 
 
 def authenticated_tenant(
@@ -57,4 +62,5 @@ Tenant = Annotated[TenantId, Depends(authenticated_tenant)]
 StoreDep = Annotated[Store, Depends(get_store)]
 ClockDep = Annotated[Clock, Depends(get_clock)]
 PackDep = Annotated[LoadedPack, Depends(get_pack)]
+TelemetryDep = Annotated[Telemetry, Depends(get_telemetry)]
 IdemKey = Annotated[IdempotencyKey, Depends(idempotency_key)]

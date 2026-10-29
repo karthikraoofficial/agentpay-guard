@@ -147,3 +147,28 @@ def impure_engine(root: Path) -> list[Violation]:
             ):
                 found.append(Violation(Path(rel), node.lineno, f"calls .{node.func.attr}()"))
     return found
+
+
+# Non-negotiable 2, one step further: a vendor SDK lives in exactly one adapter, so
+# swapping the vendor means replacing one directory. Add an entry when an adapter lands.
+VENDOR_HOMES = {
+    "opentelemetry": "adapters/otel",
+}
+
+
+def vendors_outside_their_adapter(root: Path, code_dirs: list[str]) -> list[Violation]:
+    """Every import of a homed vendor package from outside its adapter directory."""
+    found: list[Violation] = []
+    for path in python_files(root, *code_dirs):
+        rel = path.relative_to(root)
+        for node in ast.walk(_tree(path)):
+            names: list[str] = []
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                names = [node.module]
+            for name in names:
+                home = VENDOR_HOMES.get(name.split(".")[0])
+                if home is not None and not rel.as_posix().startswith(home + "/"):
+                    found.append(Violation(rel, node.lineno, f"imports {name} outside {home}"))
+    return found
