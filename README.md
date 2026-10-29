@@ -53,6 +53,11 @@ Send the key as `Authorization: Bearer apg_test_…` on every call, and an `Idem
 | `POST /v1/payers`, `GET /v1/payers/{id}` | Register and fetch a Payer. `contact_ref` must be a token you can resolve, not a raw email or phone number. |
 | `POST /v1/agents`, `GET /v1/agents/{id}` | Register and fetch an Agent |
 | `POST /v1/agents/{id}/disable`, `/enable` | Stop an Agent under every Mandate, or let it act again |
+| `POST /v1/mandates`, `GET /v1/mandates/{id}` | Record a Payer's Mandate (Agents, caps, MCCs, validity of at most a year, Consent evidence) and read it back with its current status |
+| `GET /v1/mandates?payer_id=…` | List a Payer's Mandates, newest first. Pass `next_cursor` back as `cursor` |
+| `POST /v1/mandates/{id}/revoke` | End a Mandate for good, recording `revoked_by` (`payer` or `tenant`) |
+
+Mandates can't be edited. To change terms, create a new Mandate with `supersedes` set to the old one, and revoke the old one.
 
 Repeating a write with the same `Idempotency-Key` is safe for 24 hours:
 

@@ -6,6 +6,7 @@ from fastapi import Depends, Header, Request
 
 from api.errors import ApiError
 from core.domain.parties import hash_api_key
+from core.policy.packs import LoadedPack
 from core.ports import Clock, IdempotencyKey, TenantDirectory, TenantId, UnitOfWork
 
 
@@ -16,6 +17,11 @@ class Store(UnitOfWork, TenantDirectory, Protocol):
 def get_store(request: Request) -> Store:
     store: Store = request.app.state.store
     return store
+
+
+def get_pack(request: Request) -> LoadedPack:
+    pack: LoadedPack = request.app.state.policy_pack
+    return pack
 
 
 def get_clock(request: Request) -> Clock:
@@ -50,4 +56,5 @@ def idempotency_key(
 Tenant = Annotated[TenantId, Depends(authenticated_tenant)]
 StoreDep = Annotated[Store, Depends(get_store)]
 ClockDep = Annotated[Clock, Depends(get_clock)]
+PackDep = Annotated[LoadedPack, Depends(get_pack)]
 IdemKey = Annotated[IdempotencyKey, Depends(idempotency_key)]

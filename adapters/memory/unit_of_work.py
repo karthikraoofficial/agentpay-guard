@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
+from core.domain.mandates import Mandate, MandateId, RevokedBy
 from core.domain.parties import Agent, AgentId, AgentStatus, Payer, PayerId
 from core.ports import TenantDirectory, TenantId, UnitOfWork
 
@@ -14,9 +15,12 @@ class _TenantData:
     payers: dict[PayerId, Payer] = field(default_factory=dict)
     agents: dict[AgentId, Agent] = field(default_factory=dict)
     idempotency: dict[IdempotencyKey, IdempotencyRecord] = field(default_factory=dict)
+    mandates: dict[MandateId, Mandate] = field(default_factory=dict)
 
     def copy(self) -> "_TenantData":
-        return _TenantData(dict(self.payers), dict(self.agents), dict(self.idempotency))
+        return _TenantData(
+            dict(self.payers), dict(self.agents), dict(self.idempotency), dict(self.mandates)
+        )
 
 
 class _Claims:
@@ -70,6 +74,34 @@ class InMemoryTransaction:
         updated = agent.model_copy(update={"status": status})
         self._data.agents[agent_id] = updated
         return updated
+
+    def add_mandate(self, mandate: Mandate) -> None:
+        self._own(mandate.tenant_id)
+        self._data.mandates[mandate.mandate_id] = mandate
+
+    def get_mandate(self, mandate_id: MandateId) -> Mandate | None:
+        return self._data.mandates.get(mandate_id)
+
+    def revoke_mandate(self, mandate_id: MandateId, revoked_by: RevokedBy, at: datetime) -> bool:
+        mandate = self._data.mandates.get(mandate_id)
+        if mandate is None or mandate.revoked_at is not None:
+            return False
+        self._data.mandates[mandate_id] = mandate.model_copy(
+            update={"revoked_by": revoked_by, "revoked_at": at}
+        )
+        return True
+
+    def list_mandates(
+        self, payer_id: PayerId, limit: int, before: tuple[datetime, MandateId] | None
+    ) -> list[Mandate]:
+        rows = sorted(
+            (m for m in self._data.mandates.values() if m.payer_id == payer_id),
+            key=lambda m: (m.created_at, m.mandate_id),
+            reverse=True,
+        )
+        if before is not None:
+            rows = [m for m in rows if (m.created_at, m.mandate_id) < before]
+        return rows[:limit]
 
     def claim_idempotency_key(self, key: IdempotencyKey) -> bool:
         claim = (self._tenant_id, key)

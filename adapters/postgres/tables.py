@@ -2,16 +2,20 @@
 tenant_id (non-negotiable 3); tenant-owned tables key on (tenant_id, id)."""
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
+    Index,
     Integer,
     LargeBinary,
     MetaData,
     String,
     Table,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 
 metadata = MetaData()
 
@@ -62,4 +66,32 @@ idempotency_keys = Table(
     Column("status_code", Integer, nullable=False),
     Column("body", LargeBinary, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+mandates = Table(
+    "mandates",
+    metadata,
+    Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+    Column("mandate_id", String, primary_key=True),
+    Column("payer_id", String, nullable=False),
+    Column("allowed_agent_ids", ARRAY(String), nullable=False),
+    Column("currency", String(3), nullable=False),
+    Column("per_txn_cap_minor", BigInteger, nullable=False),
+    Column("monthly_cap_minor", BigInteger, nullable=False),
+    Column("allowed_mccs", ARRAY(String), nullable=False),
+    Column("valid_from", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("supersedes", String, nullable=True),
+    Column("consent_method", String, nullable=False),
+    Column("consent_reference", String, nullable=False),
+    Column("consent_captured_at", DateTime(timezone=True), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("revoked_by", String, nullable=True),
+    Column("revoked_at", DateTime(timezone=True), nullable=True),
+    ForeignKeyConstraint(["tenant_id", "payer_id"], ["payers.tenant_id", "payers.payer_id"]),
+    CheckConstraint("revoked_by IN ('payer', 'tenant')", name="mandates_revoked_by_valid"),
+    CheckConstraint(
+        "(revoked_by IS NULL) = (revoked_at IS NULL)", name="mandates_revocation_whole"
+    ),
+    Index("ix_mandates_tenant_payer_created", "tenant_id", "payer_id", "created_at", "mandate_id"),
 )

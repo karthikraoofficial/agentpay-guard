@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict
 
 from core.domain.idempotency import IdempotencyKey as IdempotencyKey  # re-exported
 from core.domain.idempotency import IdempotencyRecord
+from core.domain.mandates import Mandate, MandateId, RevokedBy
 from core.domain.money import Money
 from core.domain.parties import Agent, AgentId, AgentStatus, Payer, PayerId
 from core.domain.parties import TenantId as TenantId  # re-exported for adapters
@@ -140,6 +141,22 @@ class TenantTransaction(Protocol):
 
     def set_agent_status(self, agent_id: AgentId, status: AgentStatus) -> Agent | None:
         """Change an Agent's status; None if the Agent isn't in this Tenant."""
+        ...
+
+    def add_mandate(self, mandate: Mandate) -> None: ...
+
+    def get_mandate(self, mandate_id: MandateId) -> Mandate | None: ...
+
+    def revoke_mandate(self, mandate_id: MandateId, revoked_by: RevokedBy, at: datetime) -> bool:
+        """Revoke an unrevoked Mandate. False if it was already revoked or doesn't exist,
+        so two racing revocations can't both succeed."""
+        ...
+
+    def list_mandates(
+        self, payer_id: PayerId, limit: int, before: tuple[datetime, MandateId] | None
+    ) -> list[Mandate]:
+        """A Payer's Mandates, newest first by (created_at, mandate_id), strictly older
+        than `before` when given."""
         ...
 
     def claim_idempotency_key(self, key: IdempotencyKey) -> bool:

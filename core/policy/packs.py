@@ -25,6 +25,7 @@ from pydantic import (
 )
 
 from core.domain.canonical_json import canonical_json
+from core.domain.mandates import Mcc
 from core.domain.money import CurrencyCode
 
 RuleId = Literal[
@@ -40,7 +41,6 @@ RuleId = Literal[
     "step_up_threshold",
     "monthly_cap_near",
 ]
-Mcc = Annotated[str, StringConstraints(pattern=r"^\d{4}$", strict=True)]
 SemVer = Annotated[str, StringConstraints(pattern=r"^\d+\.\d+\.\d+$", strict=True)]
 
 
