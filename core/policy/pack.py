@@ -64,6 +64,12 @@ class VelocityParams(_Strict):
     window_seconds: StrictInt = Field(gt=0)
 
 
+class IntentParams(_Strict):
+    """How long an Intent verdict can be cited by Decisions after the check."""
+
+    verdict_ttl_seconds: StrictInt = Field(gt=0)
+
+
 class RuleSetting(_Strict):
     rule_id: RuleId
     enabled: StrictBool
@@ -79,6 +85,7 @@ class PolicyPack(_Strict):
     # Signal parameters (ADR-0006). Optional, so packs released before a Signal existed
     # still validate, and left out of the Pack hash when unset.
     velocity: VelocityParams | None = None
+    intent: IntentParams | None = None
 
     @model_validator(mode="after")
     def _unique_rules(self) -> "PolicyPack":

@@ -7,7 +7,16 @@ from fastapi import Depends, Header, Request
 from api.errors import ApiError
 from core.domain.parties import hash_api_key
 from core.policy.packs import LoadedPack
-from core.ports import Clock, IdempotencyKey, Telemetry, TenantDirectory, TenantId, UnitOfWork
+from core.ports import (
+    Clock,
+    IdempotencyKey,
+    ModelGateway,
+    Telemetry,
+    TenantDirectory,
+    TenantId,
+    UnitOfWork,
+)
+from core.settings import Settings
 
 
 class Store(UnitOfWork, TenantDirectory, Protocol):
@@ -32,6 +41,16 @@ def get_clock(request: Request) -> Clock:
 def get_telemetry(request: Request) -> Telemetry:
     telemetry: Telemetry = request.app.state.telemetry
     return telemetry
+
+
+def get_gateway(request: Request) -> ModelGateway:
+    gateway: ModelGateway = request.app.state.gateway
+    return gateway
+
+
+def get_app_settings(request: Request) -> Settings:
+    settings: Settings = request.app.state.settings
+    return settings
 
 
 def authenticated_tenant(
@@ -63,4 +82,6 @@ StoreDep = Annotated[Store, Depends(get_store)]
 ClockDep = Annotated[Clock, Depends(get_clock)]
 PackDep = Annotated[LoadedPack, Depends(get_pack)]
 TelemetryDep = Annotated[Telemetry, Depends(get_telemetry)]
+GatewayDep = Annotated[ModelGateway, Depends(get_gateway)]
+SettingsDep = Annotated[Settings, Depends(get_app_settings)]
 IdemKey = Annotated[IdempotencyKey, Depends(idempotency_key)]

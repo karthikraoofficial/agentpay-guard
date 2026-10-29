@@ -22,6 +22,22 @@
       "title": "CurrencyBands",
       "type": "object"
     },
+    "IntentParams": {
+      "additionalProperties": false,
+      "description": "How long an Intent verdict can be cited by Decisions after the check.",
+      "properties": {
+        "verdict_ttl_seconds": {
+          "exclusiveMinimum": 0,
+          "title": "Verdict Ttl Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "verdict_ttl_seconds"
+      ],
+      "title": "IntentParams",
+      "type": "object"
+    },
     "RuleSetting": {
       "additionalProperties": false,
       "properties": {
@@ -126,6 +142,17 @@
       "anyOf": [
         {
           "$ref": "#/$defs/VelocityParams"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "intent": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/IntentParams"
         },
         {
           "type": "null"
