@@ -54,6 +54,15 @@ Send the key as `Authorization: Bearer apg_test_…` on every call, and an `Idem
 | `POST /v1/agents`, `GET /v1/agents/{id}` | Register and fetch an Agent |
 | `POST /v1/agents/{id}/disable`, `/enable` | Stop an Agent under every Mandate, or let it act again |
 
+Repeating a write with the same `Idempotency-Key` is safe for 24 hours:
+
+- **Same request:** you get the first response back byte for byte, with `Idempotent-Replayed: true`.
+- **Different body or endpoint:** `409 IDEMPOTENCY_KEY_REUSED`.
+- **First call still running:** `409 IDEMPOTENCY_IN_PROGRESS` with `Retry-After: 1`.
+- **First call failed:** errors are never stored, so a retry runs fresh.
+
+Keys are per Tenant.
+
 Errors are `application/problem+json` with a stable `code`, such as `UNAUTHENTICATED`, `IDEMPOTENCY_KEY_MISSING` or `VALIDATION_FAILED`. An ID that belongs to another Tenant returns 404.
 
 ## Checks (what CI runs on every PR)

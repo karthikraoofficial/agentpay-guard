@@ -16,15 +16,15 @@ Store. Later PRDs may refine any of them.
 from collections.abc import Mapping
 from contextlib import AbstractContextManager
 from datetime import datetime
-from typing import Literal, NewType, Protocol
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
+from core.domain.idempotency import IdempotencyKey as IdempotencyKey  # re-exported
+from core.domain.idempotency import IdempotencyRecord
 from core.domain.money import Money
 from core.domain.parties import Agent, AgentId, AgentStatus, Payer, PayerId
 from core.domain.parties import TenantId as TenantId  # re-exported for adapters
-
-IdempotencyKey = NewType("IdempotencyKey", str)
 
 AttributeValue = str | int | float | bool
 Attributes = Mapping[str, AttributeValue]
@@ -140,6 +140,17 @@ class TenantTransaction(Protocol):
 
     def set_agent_status(self, agent_id: AgentId, status: AgentStatus) -> Agent | None:
         """Change an Agent's status; None if the Agent isn't in this Tenant."""
+        ...
+
+    def claim_idempotency_key(self, key: IdempotencyKey) -> bool:
+        """Hold `key` until this transaction ends. False, without waiting, if another
+        transaction holds it: that call is still in flight."""
+        ...
+
+    def get_idempotency_record(self, key: IdempotencyKey) -> IdempotencyRecord | None: ...
+
+    def save_idempotency_record(self, record: IdempotencyRecord) -> None:
+        """Store a response, replacing an expired record with the same key."""
         ...
 
 
