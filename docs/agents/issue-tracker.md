@@ -50,3 +50,11 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 - **Frontier query**: list the map's open children (`gh issue list --state open`, scoped to the map's sub-issues / task list), drop any with an open blocker (see **Count open blockers**, or an open issue in the `Blocked by` line) or an assignee; first in map order wins.
 - **Claim**: `gh issue edit <n> --add-assignee @me`, the session's first write.
 - **Resolve**: `gh issue comment <n> --body "<answer>"`, then `gh issue close <n>`, then append a context pointer (gist + link) to the map's Decisions-so-far.
+
+## Kanban board
+
+GitHub Project **AgentPay Guard** (user project #6): https://github.com/users/karthikraoofficial/projects/6. Its Status columns are **Backlog** (blocked or not yet ready), **Ready** (every blocker closed), **In progress** and **Done**.
+
+- **Add an issue or PR**: `gh project item-add 6 --owner karthikraoofficial --url <issue-or-pr-url>`.
+- **Move an item**: `gh project item-edit --id <item-id> --project-id <project-node-id> --field-id <status-field-id> --single-select-option-id <option-id>`. Get the IDs from `gh project item-list 6 --owner karthikraoofficial --format json` and `gh project field-list 6 --owner karthikraoofficial --format json`.
+- **Keep it in sync**: move a ticket to In progress when work starts and to Done when it closes. When a ticket closes, move every ticket it unblocks from Backlog to Ready. A PRD stays In progress until its last ticket ships.
