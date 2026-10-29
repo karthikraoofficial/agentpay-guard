@@ -38,7 +38,7 @@ def test_policy_never_references_model_gateway() -> None:
 
 
 def test_vendor_rule_flags_each_vendor_import() -> None:
-    found = {(str(v.path), v.detail) for v in vendor_imports(FIXTURES / "vendor_import")}
+    found = {(v.path.as_posix(), v.detail) for v in vendor_imports(FIXTURES / "vendor_import")}
     assert found == {
         ("core/repo.py", "imports sqlalchemy"),
         ("core/llm.py", "imports anthropic.types"),
@@ -47,7 +47,7 @@ def test_vendor_rule_flags_each_vendor_import() -> None:
 
 def test_environment_rule_flags_attribute_and_from_import_reads() -> None:
     found = {
-        str(v.path) for v in environment_reads(FIXTURES / "env_read", ["api", "core"], SETTINGS)
+        v.path.as_posix() for v in environment_reads(FIXTURES / "env_read", ["api", "core"], SETTINGS)
     }
     assert found == {"api/app.py", "core/util.py"}
 
