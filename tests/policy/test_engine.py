@@ -13,7 +13,7 @@ from core.domain.money import Money
 from core.domain.parties import Agent
 from core.domain.signals import Signals
 from core.policy.engine import decide
-from core.policy.packs import load_active_pack
+from core.policy.packs import PolicyPack, load_active_pack
 
 PACK = load_active_pack(Path(__file__).resolve().parents[2] / "policy_packs", "default").pack
 NOW = datetime(2026, 11, 2, 9, 30, tzinfo=UTC)
@@ -282,3 +282,61 @@ def test_signals_are_an_input_and_an_empty_set_changes_nothing() -> None:
 
     assert output.outcome == "allow"
     assert canonical_json(output) == canonical_json(run())
+
+
+# --- Velocity (#38) ----------------------------------------------------------------------
+
+VELOCITY_PACK = PolicyPack.model_validate(
+    PACK.model_dump(mode="json", exclude_none=True)
+    | {
+        "version": "1.0.1",
+        "velocity": {"max_decisions": 5, "window_seconds": 600},
+        "rules": [*PACK.model_dump(mode="json")["rules"], {"rule_id": "velocity", "enabled": True}],
+    }
+)
+
+
+def velocity(count: int | None, **kw: Any):  # type: ignore[no-untyped-def]
+    return run(**({"signals": Signals(velocity_count=count), "pack": VELOCITY_PACK} | kw))
+
+
+def test_four_earlier_decisions_in_the_window_pass_and_five_step_up() -> None:
+    assert velocity(4).outcome == "allow"
+    assert result_of(velocity(4), "velocity") == "pass"
+
+    output = velocity(5)
+    assert output.outcome == "step_up"
+    assert output.reason_codes == ("VELOCITY_HIGH",)
+
+
+def test_a_missing_velocity_count_steps_up_rather_than_passing() -> None:
+    output = velocity(None)
+
+    assert output.outcome == "step_up"
+    assert output.reason_codes == ("VELOCITY_HIGH",)
+
+
+def test_velocity_never_turns_a_block_into_a_step_up() -> None:
+    output = velocity(9, request=pay(1_250_00, mcc="7995"))
+
+    assert output.outcome == "block"
+    assert output.reason_codes == ("MCC_HIGH_RISK", "MCC_NOT_ALLOWED", "VELOCITY_HIGH")
+
+
+def test_a_phase_1_step_up_stays_the_primary_reason_when_velocity_fires() -> None:
+    output = velocity(5, request=pay(6_000_00))
+
+    assert output.reason_codes == ("AMOUNT_ABOVE_STEP_UP_THRESHOLD", "VELOCITY_HIGH")
+
+
+def test_velocity_is_not_evaluated_when_the_pack_disables_it_or_leaves_it_out() -> None:
+    disabled = VELOCITY_PACK.model_copy(
+        update={
+            "rules": tuple(
+                r.model_copy(update={"enabled": False}) if r.rule_id == "velocity" else r
+                for r in VELOCITY_PACK.rules
+            )
+        }
+    )
+    assert result_of(velocity(9, pack=disabled), "velocity") == "not_evaluated"
+    assert run(signals=Signals(velocity_count=9)).outcome == "allow"  # 1.0.0 has no velocity

@@ -37,7 +37,8 @@
             "per_txn_cap",
             "monthly_cap",
             "step_up_threshold",
-            "monthly_cap_near"
+            "monthly_cap_near",
+            "velocity"
           ],
           "title": "Rule Id",
           "type": "string"
@@ -52,6 +53,28 @@
         "enabled"
       ],
       "title": "RuleSetting",
+      "type": "object"
+    },
+    "VelocityParams": {
+      "additionalProperties": false,
+      "description": "Step up once `max_decisions` earlier Decisions on the Mandate, of any Outcome,\nwere made less than `window_seconds` before the Decision time (or at it).",
+      "properties": {
+        "max_decisions": {
+          "exclusiveMinimum": 0,
+          "title": "Max Decisions",
+          "type": "integer"
+        },
+        "window_seconds": {
+          "exclusiveMinimum": 0,
+          "title": "Window Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_decisions",
+        "window_seconds"
+      ],
+      "title": "VelocityParams",
       "type": "object"
     }
   },
@@ -98,6 +121,17 @@
       "minItems": 1,
       "title": "Rules",
       "type": "array"
+    },
+    "velocity": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VelocityParams"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

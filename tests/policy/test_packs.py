@@ -97,3 +97,14 @@ def test_the_committed_json_schema_matches_the_pack_model() -> None:
         "policy_packs/schema.json is stale; regenerate it with "
         "`uv run python -m core.policy.packs --write-schema`"
     )
+
+
+def test_a_pack_that_enables_velocity_without_its_parameters_is_refused() -> None:
+    doc = load_active_pack(PACKS, "default").pack.model_dump(mode="json", exclude_none=True)
+    doc["rules"] = [*doc["rules"], {"rule_id": "velocity", "enabled": True}]
+
+    with pytest.raises(ValueError, match="velocity rule needs a velocity section"):
+        PolicyPack.model_validate(doc)
+    assert PolicyPack.model_validate(
+        doc | {"velocity": {"max_decisions": 5, "window_seconds": 600}}
+    )

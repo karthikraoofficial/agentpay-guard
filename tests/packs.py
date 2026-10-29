@@ -52,3 +52,12 @@ def release_test_pack(
         entry["active"] = version
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return root
+
+
+def rules_plus(*rule_ids: str, based_on: str = "1.0.0") -> list[dict[str, Any]]:
+    """The `based_on` pack's rule list with `rule_ids` appended, all enabled."""
+    source = yaml.safe_load((PACKS / "default" / f"{based_on}.yaml").read_text(encoding="utf-8"))
+    return [*source["rules"], *({"rule_id": r, "enabled": True} for r in rule_ids)]
+
+
+VELOCITY = {"max_decisions": 5, "window_seconds": 600}
