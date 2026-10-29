@@ -67,3 +67,6 @@ jobs:
       - name: Evals (fails on any false-allow, false-block or wrong reason code)
         run: uv run python -m evals.run_evals
 
+      - name: Latency budgets (decide p99 < 5 ms, POST /v1/decisions p95 < 150 ms)
+        run: uv run pytest -m perf -s -o addopts=""
+

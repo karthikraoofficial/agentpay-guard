@@ -39,7 +39,7 @@ The Payer or Tenant permanently ending a Mandate. A revoked Mandate cannot be re
 _Avoid_: Cancellation, suspension, deactivation
 
 **Superseding Mandate**:
-A new Mandate that replaces an earlier, revoked one with changed terms.
+A new Mandate that replaces an earlier one for the same Payer with changed terms. The earlier one is revoked before or after the new one is granted.
 _Avoid_: Mandate update, amendment
 
 **Per-transaction cap**:
