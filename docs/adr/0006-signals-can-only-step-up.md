@@ -1,0 +1,5 @@
+# Signals can only step up; block is reserved for Mandate and pack breaches
+
+A Signal (Velocity, New merchant, price drift, Intent verdict) can at most change an Outcome to step_up. A fired Signal, a missing one and a failed one all give step_up. No Signal blocks, and no Signal lowers an Outcome. Block stays reserved for deterministic breaches of the Mandate's terms or the Policy pack, such as caps, MCCs, validity and Agents.
+
+We chose this because Signals are evidence of risk, not proof. An Intent verdict comes from a model, and a Velocity spike can be legitimate. Letting either one block would make a probabilistic input final and impossible to appeal, and the Payer would never see the payment. With step_up, the Payer is the tiebreaker. That keeps false-blocks from Signals at zero by construction, and it makes the fail-closed default (step_up, from the non-negotiables in CLAUDE.md) the same as the fired result. Blocking on high-confidence signals is a later option, through a new pack version and a new ADR.

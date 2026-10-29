@@ -236,6 +236,8 @@ on 1,000 decisions locally). Plan first.
 
 **Phase 2 — signals and model gateway** (`/clear` first)
 
+> Superseded in detail by the Phase 2 PRD (#35): Intent verdicts are linked by `intent_id` and stored in Postgres rather than cached by `(mandate_id, intent_hash)`, and every Signal can at most step up (ADR-0006).
+
 ```text
 Read CLAUDE.md, SPEC-04. Implement signals: velocity, new merchant, price drift vs quoted price, and
 intent match. Intent match runs at POST /v1/intents, which the agent calls when it builds the cart,
