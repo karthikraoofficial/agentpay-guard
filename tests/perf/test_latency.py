@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 
+from adapters.memory.model_gateway import ScriptedGateway
 from adapters.postgres.store import PostgresStore
 from api.main import create_app
 from tests.api.conftest import NOW, Api, MovableClock
@@ -52,7 +53,9 @@ def test_decide_p99_is_under_5_ms() -> None:
 def api(migrated_database_url: str) -> Iterator[Api]:
     store = PostgresStore(create_engine(migrated_database_url, pool_size=8))
     clock = MovableClock(NOW)
-    yield Api(TestClient(create_app(make_settings(), store=store, clock=clock)), store, clock)
+    gateway = ScriptedGateway()  # the Intent check's model call is off the decision path
+    app = create_app(make_settings(), store=store, clock=clock, gateway=gateway)
+    yield Api(TestClient(app), store, clock, gateway=gateway)
 
 
 def test_post_decisions_p95_is_under_150_ms_across_50_mandates_and_5_tenants(api: Api) -> None:
@@ -61,11 +64,31 @@ def test_post_decisions_p95_is_under_150_ms_across_50_mandates_and_5_tenants(api
         tenant = Setup(api, f"perf-{t}")
         for _ in range(10):
             mandate_id = tenant.create()["mandate_id"]
+            # Medium tier, citing an Intent check, so every Signal lookup runs under
+            # default@1.1.0: Velocity, New merchant, the Intent check and Price drift.
+            amount = {"minor": 3_000_00, "currency": "INR"}
+            merchant = {"id": "m_1", "name": "FreshMart", "mcc": "5411"}
+            intent = api.post(
+                "/v1/intents",
+                tenant.tenant,
+                {
+                    "mandate_id": mandate_id,
+                    "agent_id": tenant.agent_ids[0],
+                    "payer_instruction": "Weekly groceries",
+                    "merchant": merchant,
+                    "line_items": [
+                        {"description": "Groceries", "quantity": 1, "unit_amount": amount}
+                    ],
+                    "quoted_total": amount,
+                },
+            )
+            assert intent.status_code == 201, intent.text
             body = {
                 "mandate_id": mandate_id,
                 "agent_id": tenant.agent_ids[0],
-                "amount": {"minor": 1_00, "currency": "INR"},
-                "merchant": {"id": "m_1", "name": "FreshMart", "mcc": "5411"},
+                "amount": amount,
+                "merchant": merchant,
+                "intent_id": intent.json()["intent_id"],
             }
             targets.append((tenant.tenant, body))
     samples: list[float] = []
@@ -79,4 +102,4 @@ def test_post_decisions_p95_is_under_150_ms_across_50_mandates_and_5_tenants(api
         assert response.status_code == 200, response.text
 
     assert len(samples) == 1_000
-    assert _report("POST /v1/decisions", samples)["p95"] < 150
+    assert _report("POST /v1/decisions (Signals on)", samples)["p95"] < 150

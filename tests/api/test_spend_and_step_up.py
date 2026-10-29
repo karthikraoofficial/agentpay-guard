@@ -1,5 +1,6 @@
 import threading
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -11,6 +12,7 @@ from api.main import create_app
 from tests.api.conftest import NOW, Api, MovableClock
 from tests.api.test_decisions import Pay
 from tests.conftest import make_settings
+from tests.packs import phase_1_packs
 
 
 def inr(minor: int) -> dict[str, Any]:
@@ -18,7 +20,11 @@ def inr(minor: int) -> dict[str, Any]:
 
 
 @pytest.fixture
-def pay(api: Api) -> Pay:
+def pay(api: Api, tmp_path: Path) -> Pay:
+    # Caps and Spent this month are Phase 1 rules: tested on default@1.0.0 so medium
+    # amounts don't also need an Intent check. Their edges under 1.1.0 are in the Phase 2
+    # golden set.
+    api.use_packs(phase_1_packs(tmp_path))
     return Pay(api)
 
 
@@ -43,7 +49,8 @@ def test_only_allowed_decisions_count_towards_the_monthly_cap(pay: Pay) -> None:
     assert spend(pay, 4_000_00)["reason_codes"] == ["MONTHLY_CAP_NEAR"]  # 40,000 would be 80%
 
 
-def test_the_monthly_total_resets_at_the_utc_month_boundary(api: Api) -> None:
+def test_the_monthly_total_resets_at_the_utc_month_boundary(api: Api, tmp_path: Path) -> None:
+    api.use_packs(phase_1_packs(tmp_path))
     api.clock.at = datetime(2026, 11, 30, 23, 59, tzinfo=UTC)
     pay = Pay(api)
     for _ in range(9):

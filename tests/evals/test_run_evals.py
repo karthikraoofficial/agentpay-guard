@@ -104,3 +104,21 @@ def test_each_golden_file_decides_with_the_pack_its_base_names(tmp_path: Path) -
     # The real Phase 1 file stays on 1.0.0 even though 1.0.1 is active here.
     pinned = run_cases(load_cases(GOLDEN / "phase1.jsonl"), packs)
     assert pinned.mismatches == []
+
+
+def test_the_phase2_set_is_pinned_to_1_1_0_and_covers_every_signal_code() -> None:
+    cases = load_cases(GOLDEN / "phase2.jsonl")
+
+    assert {(c.pack.id, c.pack.version) for c in cases} == {("default", "1.1.0")}
+    assert len({c.id for c in cases}) == len(cases)
+    covered = {code for c in cases for code in c.expected.reason_codes}
+    assert covered >= SIGNAL_CODES
+    assert {c.expected.outcome for c in cases} == {"allow", "step_up", "block"}
+
+
+def test_by_default_every_golden_file_runs_against_its_own_pack(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main([]) == 0
+    out = capsys.readouterr().out
+    assert "phase1.jsonl" in out and "phase2.jsonl" in out

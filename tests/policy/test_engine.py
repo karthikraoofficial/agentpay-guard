@@ -13,9 +13,12 @@ from core.domain.money import Money
 from core.domain.parties import Agent
 from core.domain.signals import IntentSignal, Signals
 from core.policy.engine import decide
-from core.policy.packs import PolicyPack, load_active_pack
+from core.policy.packs import PolicyPack, load_pack
 
-PACK = load_active_pack(Path(__file__).resolve().parents[2] / "policy_packs", "default").pack
+# The Phase 1 rules are tested on the pack that introduced them; Signal tests below build
+# test packs on top of it. default@1.1.0 itself is covered by tests/policy/test_packs.py
+# and the Phase 2 golden set.
+PACK = load_pack(Path(__file__).resolve().parents[2] / "policy_packs", "default", "1.0.0").pack
 NOW = datetime(2026, 11, 2, 9, 30, tzinfo=UTC)
 ZERO = Money(minor=0, currency="INR")
 
