@@ -11,7 +11,7 @@ from core.domain.decisions import AgentPaymentRequest
 from core.domain.mandates import Mandate
 from core.domain.money import Money
 from core.domain.parties import Agent
-from core.domain.signals import Signals
+from core.domain.signals import IntentSignal, Signals
 from core.policy.engine import decide
 from core.policy.packs import PolicyPack, load_active_pack
 
@@ -340,3 +340,119 @@ def test_velocity_is_not_evaluated_when_the_pack_disables_it_or_leaves_it_out() 
     )
     assert result_of(velocity(9, pack=disabled), "velocity") == "not_evaluated"
     assert run(signals=Signals(velocity_count=9)).outcome == "allow"  # 1.0.0 has no velocity
+
+
+# --- Intent and Price drift (#42) ---------------------------------------------------------
+
+SIGNALS_PACK = PolicyPack.model_validate(
+    VELOCITY_PACK.model_dump(mode="json", exclude_none=True)
+    | {
+        "version": "1.0.2",
+        "intent": {"verdict_ttl_seconds": 1800, "min_tier": "medium"},
+        "price_drift": {"max_above_bps": 200},
+        "rules": [
+            *VELOCITY_PACK.model_dump(mode="json")["rules"],
+            {"rule_id": "intent", "enabled": True},
+            {"rule_id": "price_drift", "enabled": True},
+        ],
+    }
+)
+MEDIUM = 3_000_00  # INR 3,000: medium tier, inside every cap
+
+
+def verdict(v: str = "match", quoted: int = MEDIUM) -> IntentSignal:
+    return IntentSignal(
+        intent_id="int_1",
+        verdict=v,
+        failure_cause=None if v != "unknown" else "timeout",
+        quoted_total=inr(quoted),
+        model="claude-haiku-5-5",
+        prompt_version="intent_check@1",
+        content_hash="sha256:" + "ab" * 32,
+    )
+
+
+def with_intent(intent: IntentSignal | None, minor: int = MEDIUM, **kw: Any):  # type: ignore[no-untyped-def]
+    resolution = "used" if intent is not None else "none_cited"
+    signals = Signals(velocity_count=0, intent=intent, intent_resolution=resolution)
+    return run(**({"signals": signals, "pack": SIGNALS_PACK, "request": pay(minor)} | kw))
+
+
+def test_a_medium_payment_with_a_matching_intent_is_allowed() -> None:
+    output = with_intent(verdict("match"))
+
+    assert output.outcome == "allow"
+    assert result_of(output, "intent") == "pass"
+    assert result_of(output, "price_drift") == "pass"
+
+
+@pytest.mark.parametrize(
+    ("intent", "code"),
+    [(None, "INTENT_MISSING"), ("mismatch", "INTENT_MISMATCH"), ("unknown", "INTENT_UNKNOWN")],
+)
+def test_without_a_usable_match_a_medium_payment_steps_up(intent: str | None, code: str) -> None:
+    output = with_intent(None if intent is None else verdict(intent))
+
+    assert (output.outcome, output.reason_codes) == ("step_up", (code,))
+
+
+def test_a_low_tier_payment_needs_no_intent_check() -> None:
+    output = with_intent(None, minor=1_250_00)
+
+    assert output.outcome == "allow"
+    assert result_of(output, "intent") == "pass"
+
+
+def test_a_missing_resolution_is_treated_as_no_usable_intent() -> None:
+    output = run(signals=Signals(velocity_count=0), pack=SIGNALS_PACK, request=pay(MEDIUM))
+
+    assert output.reason_codes == ("INTENT_MISSING",)
+
+
+def test_drift_up_to_two_percent_passes_and_one_minor_unit_more_steps_up() -> None:
+    quoted = 3_000_00
+    at_limit = quoted * 10_200 // 10_000  # +2.00% exactly
+
+    assert with_intent(verdict(quoted=quoted), minor=at_limit).outcome == "allow"
+    over = with_intent(verdict(quoted=quoted), minor=at_limit + 1)
+    assert (over.outcome, over.reason_codes) == ("step_up", ("PRICE_DRIFT",))
+
+
+def test_paying_less_than_the_quote_is_never_drift() -> None:
+    assert with_intent(verdict(quoted=4_000_00), minor=MEDIUM).outcome == "allow"
+
+
+def test_price_drift_is_not_evaluated_without_a_usable_intent() -> None:
+    output = with_intent(None, minor=1_250_00)
+
+    assert result_of(output, "price_drift") == "not_evaluated"
+
+
+def test_a_currency_mismatch_leaves_intent_and_drift_not_evaluated() -> None:
+    output = with_intent(verdict(), request=pay(MEDIUM, currency="USD"))
+
+    assert result_of(output, "intent") == "not_evaluated"
+    assert result_of(output, "price_drift") == "not_evaluated"
+
+
+def test_no_signal_turns_a_block_into_anything_else() -> None:
+    output = with_intent(verdict("mismatch", quoted=1_00), request=pay(MEDIUM, mcc="7995"))
+
+    assert output.outcome == "block"
+    assert output.reason_codes[:2] == ("MCC_HIGH_RISK", "MCC_NOT_ALLOWED")
+    assert output.reason_codes[2:] == ("INTENT_MISMATCH", "PRICE_DRIFT")
+
+
+def test_signal_reasons_follow_velocity_then_intent_then_drift() -> None:
+    signals = Signals(
+        velocity_count=9, intent=verdict("unknown", quoted=1_00), intent_resolution="used"
+    )
+
+    output = run(signals=signals, pack=SIGNALS_PACK, request=pay(6_000_00))
+
+    assert output.reason_codes == (
+        "AMOUNT_ABOVE_STEP_UP_THRESHOLD",
+        "VELOCITY_HIGH",
+        "INTENT_UNKNOWN",
+        "PRICE_DRIFT",
+    )

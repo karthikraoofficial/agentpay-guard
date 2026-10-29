@@ -61,3 +61,19 @@ def rules_plus(*rule_ids: str, based_on: str = "1.0.0") -> list[dict[str, Any]]:
 
 
 VELOCITY = {"max_decisions": 5, "window_seconds": 600}
+INTENT = {"verdict_ttl_seconds": 1800, "min_tier": "medium"}
+PRICE_DRIFT = {"max_above_bps": 200}
+
+
+def signals_pack(root: Path, version: str = "1.0.1") -> Path:
+    """A test pack with every Signal built so far."""
+    return release_test_pack(
+        root,
+        version,
+        {
+            "velocity": VELOCITY,
+            "intent": INTENT,
+            "price_drift": PRICE_DRIFT,
+            "rules": rules_plus("velocity", "intent", "price_drift"),
+        },
+    )

@@ -63,7 +63,7 @@ Send the key as `Authorization: Bearer apg_test_…` on every call, and an `Idem
 | `POST /v1/mandates/{id}/revoke` | End a Mandate for good, recording `revoked_by` (`payer` or `tenant`) |
 
 | `POST /v1/intents`, `GET /v1/intents/{id}` | Before checkout, submit the Payer instruction and the proposed cart for an Intent check by Claude Haiku 5.5. The POST returns only `intent_id` and `expires_at`; the verdict (`match`, `mismatch`, `unknown`) is readable by the Tenant through GET. A timeout, error or unclear reply is stored as `unknown` |
-| `POST /v1/decisions`, `GET /v1/decisions/{id}` | Ask whether an Agent may pay under a Mandate. Every Outcome (`allow`, `step_up`, `block`) is a 200 with Reason codes, Risk tier, the Policy pack hash and an Audit record ID |
+| `POST /v1/decisions`, `GET /v1/decisions/{id}` | Ask whether an Agent may pay under a Mandate. Every Outcome (`allow`, `step_up`, `block`) is a 200 with Reason codes, Risk tier, the Policy pack hash and an Audit record ID. Pass the `intent_id` from `POST /v1/intents` to cite an Intent check; packs from `1.1.0` step up a medium or high payment without a usable match |
 
 How a Decision is reached:
 

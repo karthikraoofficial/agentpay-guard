@@ -34,6 +34,8 @@ RuleId = Literal[
     "step_up_threshold",
     "monthly_cap_near",
     "velocity",
+    "intent",
+    "price_drift",
 ]
 SemVer = Annotated[str, StringConstraints(pattern=r"^\d+\.\d+\.\d+$", strict=True)]
 
@@ -65,9 +67,17 @@ class VelocityParams(_Strict):
 
 
 class IntentParams(_Strict):
-    """How long an Intent verdict can be cited by Decisions after the check."""
+    """How long an Intent verdict can be cited after the check, and the lowest Risk tier
+    that needs a usable match."""
 
     verdict_ttl_seconds: StrictInt = Field(gt=0)
+    min_tier: Literal["low", "medium", "high"]
+
+
+class PriceDriftParams(_Strict):
+    """Step up when the amount is more than `max_above_bps` above the Quoted total."""
+
+    max_above_bps: StrictInt = Field(ge=0, le=10_000)
 
 
 class RuleSetting(_Strict):
@@ -86,14 +96,20 @@ class PolicyPack(_Strict):
     # still validate, and left out of the Pack hash when unset.
     velocity: VelocityParams | None = None
     intent: IntentParams | None = None
+    price_drift: PriceDriftParams | None = None
 
     @model_validator(mode="after")
     def _unique_rules(self) -> "PolicyPack":
         ids = [r.rule_id for r in self.rules]
         if len(ids) != len(set(ids)):
             raise ValueError("each rule_id may appear only once")
-        if "velocity" in ids and self.velocity is None:
-            raise ValueError("the velocity rule needs a velocity section")
+        for rule_id, section in (
+            ("velocity", self.velocity),
+            ("intent", self.intent),
+            ("price_drift", self.price_drift),
+        ):
+            if rule_id in ids and section is None:
+                raise ValueError(f"the {rule_id} rule needs a {rule_id} section")
         return self
 
 

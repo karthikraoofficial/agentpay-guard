@@ -36,6 +36,10 @@ ReasonCode = Literal[
     "AMOUNT_ABOVE_STEP_UP_THRESHOLD",
     "MONTHLY_CAP_NEAR",
     "VELOCITY_HIGH",
+    "INTENT_MISSING",
+    "INTENT_MISMATCH",
+    "INTENT_UNKNOWN",
+    "PRICE_DRIFT",
 ]
 
 _Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
@@ -67,6 +71,9 @@ class AgentPaymentRequest(_Frozen):
     amount: Money
     merchant: Merchant
     quote_id: _Text | None = None
+    # The Intent check this request relies on, from POST /v1/intents. Resolved by the API
+    # into a Signal; never read by rules directly.
+    intent_id: Annotated[str, StringConstraints(max_length=64)] | None = None
     line_items: tuple[LineItem, ...] | None = None
     agent_reasoning: Annotated[str, StringConstraints(max_length=1000)] | None = None
 

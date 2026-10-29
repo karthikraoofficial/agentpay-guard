@@ -164,6 +164,41 @@ def velocity(rule_id: str, f: Facts) -> RuleResult:
     return _passes(rule_id)
 
 
+_TIER_RANK: dict[RiskTier, int] = {"low": 0, "medium": 1, "high": 2}
+
+
+@_amount_rule
+def intent(rule_id: str, f: Facts) -> RuleResult:
+    """A Signal (ADR-0006): from `min_tier` up, only a usable match passes."""
+    params = f.pack.intent
+    if params is None:
+        return RuleResult(rule_id=rule_id, result="not_evaluated")
+    if _TIER_RANK[risk_tier(f.request.amount, f.pack)] < _TIER_RANK[params.min_tier]:
+        return _passes(rule_id)
+    used = f.signals.intent if f.signals.intent_resolution == "used" else None
+    if used is None:
+        return _steps_up(rule_id, "INTENT_MISSING")
+    if used.verdict == "mismatch":
+        return _steps_up(rule_id, "INTENT_MISMATCH")
+    if used.verdict == "unknown":
+        return _steps_up(rule_id, "INTENT_UNKNOWN")
+    return _passes(rule_id)
+
+
+@_amount_rule
+def price_drift(rule_id: str, f: Facts) -> RuleResult:
+    """A Signal (ADR-0006): the amount may be at most `max_above_bps` above the Quoted
+    total of the usable Intent check. Paying less is never drift."""
+    params = f.pack.price_drift
+    used = f.signals.intent if f.signals.intent_resolution == "used" else None
+    if params is None or used is None:
+        return RuleResult(rule_id=rule_id, result="not_evaluated")
+    quoted = used.quoted_total.minor
+    if f.request.amount.minor * 10_000 > quoted * (10_000 + params.max_above_bps):
+        return _steps_up(rule_id, "PRICE_DRIFT")
+    return _passes(rule_id)
+
+
 RULES: dict[str, Rule] = {
     "mandate_revoked": mandate_revoked,
     "mandate_validity": mandate_validity,
@@ -177,6 +212,8 @@ RULES: dict[str, Rule] = {
     "step_up_threshold": step_up_threshold,
     "monthly_cap_near": monthly_cap_near,
     "velocity": velocity,
+    "intent": intent,
+    "price_drift": price_drift,
 }
 
 _SEVERITY: dict[str, int] = {"block": 2, "step_up": 1, "pass": 0, "not_evaluated": 0}

@@ -26,10 +26,11 @@ from core.domain.decisions import (
     RiskTier,
     month_window,
 )
+from core.domain.intents import IntentId
 from core.domain.mandates import MandateId
 from core.domain.money import Money
 from core.domain.parties import new_id
-from core.domain.signals import Signals
+from core.domain.signals import IntentResolution, IntentSignal, Signals
 from core.policy.engine import decide
 from core.policy.pack import PolicyPack
 from core.ports import Telemetry, TenantId, TenantTransaction
@@ -76,8 +77,39 @@ def _out(decision: Decision, consent: ConsentRequest | None, now: datetime) -> D
     )
 
 
+def resolve_intent(
+    tx: TenantTransaction, body: AgentPaymentRequest, mandate_id: MandateId, now: datetime
+) -> tuple[IntentResolution, IntentSignal | None]:
+    """Whether the cited Intent check may be used by this Decision: same Tenant (the
+    transaction is scoped), Mandate, Agent, merchant and Declared MCC, and not expired."""
+    if body.intent_id is None:
+        return "none_cited", None
+    check = tx.get_intent_check(IntentId(body.intent_id))
+    if check is None:
+        return "not_found", None
+    if check.mandate_id != mandate_id:
+        return "wrong_mandate", None
+    if check.agent_id != body.agent_id:
+        return "wrong_agent", None
+    cart_merchant = check.content.merchant
+    if (cart_merchant.id, cart_merchant.mcc) != (body.merchant.id, body.merchant.mcc):
+        return "merchant_mismatch", None
+    if now >= check.expires_at:
+        return "expired", None
+    return "used", IntentSignal(
+        intent_id=check.intent_id,
+        verdict=check.verdict,
+        failure_cause=check.failure_cause,
+        quoted_total=check.content.quoted_total,
+        model=check.model,
+        prompt_version=check.prompt_version,
+        content_hash=check.content_hash,
+    )
+
+
 def compute_signals(
     tx: TenantTransaction,
+    body: AgentPaymentRequest,
     mandate_id: MandateId,
     pack: PolicyPack,
     now: datetime,
@@ -92,7 +124,19 @@ def compute_signals(
             window = timedelta(seconds=pack.velocity.window_seconds)
             velocity_count = tx.count_decisions(mandate_id, now - window, now)
             span.set_attribute("velocity_count", velocity_count)
-        return Signals(velocity_count=velocity_count)
+        resolution: IntentResolution | None = None
+        intent = None
+        if pack.intent is not None:
+            resolution, intent = resolve_intent(tx, body, mandate_id, now)
+            span.set_attribute("intent_resolution", resolution)
+            if intent is not None:
+                span.set_attribute("intent_verdict", intent.verdict)
+        return Signals(
+            velocity_count=velocity_count,
+            cited_intent_id=None if body.intent_id is None else IntentId(body.intent_id),
+            intent_resolution=resolution,
+            intent=intent,
+        )
 
 
 def decision_time(now: datetime) -> datetime:
@@ -123,7 +167,7 @@ def create_decision(
             currency=mandate.currency,
         )
         agent = tx.get_agent(body.agent_id)
-        signals = compute_signals(tx, mandate.mandate_id, pack.pack, now, tenant, telemetry)
+        signals = compute_signals(tx, body, mandate.mandate_id, pack.pack, now, tenant, telemetry)
         output = decide(body, mandate, agent, spent, signals, pack.pack, now)
         seq, prev_hash = tx.lock_chain_head()
 
