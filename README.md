@@ -59,6 +59,15 @@ Send the key as `Authorization: Bearer apg_test_…` on every call, and an `Idem
 
 | `POST /v1/decisions`, `GET /v1/decisions/{id}` | Ask whether an Agent may pay under a Mandate. Every Outcome (`allow`, `step_up`, `block`) is a 200 with Reason codes, Risk tier, the Policy pack hash and an Audit record ID |
 
+How a Decision is reached:
+
+- **Every rule runs** and the most severe result wins: block, then step_up, then allow.
+- **Blocks:** a revoked or out-of-date Mandate, an Agent that isn't on the Mandate or is disabled, a currency mismatch, a high-risk MCC (gambling, quasi-cash, money transfer) or one the Mandate doesn't list, and an amount over the per-transaction cap or past the monthly cap.
+- **Steps up:** INR 5,000 / USD 100 or more, or reaching 80% of the monthly cap.
+- **Spend:** only allowed Decisions count towards the monthly cap, per UTC calendar month.
+- **On step_up,** the response carries a pending Consent request (`step_up.consent_request_id`, `expires_at`, `status_url`). Its `consent.status` reads `expired` after 10 minutes. Approving it arrives in a later phase.
+- **No amounts are disclosed:** responses never include thresholds or caps.
+
 Mandates can't be edited. To change terms, create a new Mandate with `supersedes` set to the old one, and revoke the old one.
 
 Repeating a write with the same `Idempotency-Key` is safe for 24 hours:

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from core.domain.audit import ZERO_HASH, SealedAuditRecord
+from core.domain.consent import ConsentRequest
 from core.domain.decisions import AuditRecordId, Decision, DecisionId
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.mandates import Mandate, MandateId, RevokedBy
@@ -21,6 +22,7 @@ class _TenantData:
     decisions: dict[DecisionId, Decision] = field(default_factory=dict)
     audit: dict[AuditRecordId, SealedAuditRecord] = field(default_factory=dict)
     head: tuple[int, str] = (0, ZERO_HASH)
+    consents: dict[DecisionId, ConsentRequest] = field(default_factory=dict)
 
     def copy(self) -> "_TenantData":
         return _TenantData(
@@ -31,6 +33,7 @@ class _TenantData:
             dict(self.decisions),
             dict(self.audit),
             self.head,
+            dict(self.consents),
         )
 
 
@@ -123,6 +126,20 @@ class InMemoryTransaction:
 
     def get_decision(self, decision_id: DecisionId) -> Decision | None:
         return self._data.decisions.get(decision_id)
+
+    def allowed_spend(self, mandate_id: MandateId, start: datetime, end: datetime) -> int:
+        return sum(
+            d.amount.minor
+            for d in self._data.decisions.values()
+            if d.mandate_id == mandate_id and d.outcome == "allow" and start <= d.decided_at < end
+        )
+
+    def add_consent_request(self, consent: ConsentRequest) -> None:
+        self._own(consent.tenant_id)
+        self._data.consents[consent.decision_id] = consent
+
+    def get_consent_request(self, decision_id: DecisionId) -> ConsentRequest | None:
+        return self._data.consents.get(decision_id)
 
     def lock_chain_head(self) -> tuple[int, str]:
         return self._data.head

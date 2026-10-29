@@ -159,3 +159,117 @@ def test_agent_reasoning_line_items_and_quote_never_change_the_output() -> None:
 
 def test_the_same_inputs_give_the_same_bytes() -> None:
     assert canonical_json(run()) == canonical_json(run())
+
+
+# --- Currency, merchant category, caps and step-up (#21) -------------------------
+
+INR = "INR"
+
+
+def inr(minor: int) -> Money:
+    return Money(minor=minor, currency=INR)
+
+
+def pay(minor: int, mcc: str = "5411", currency: str = INR) -> AgentPaymentRequest:
+    return request(
+        amount={"minor": minor, "currency": currency},
+        merchant={"id": "m_1", "name": "Shop", "mcc": mcc},
+    )
+
+
+def test_a_currency_mismatch_blocks_and_skips_the_amount_rules() -> None:
+    output = run(request=pay(100_00, currency="USD"))
+
+    assert output.reason_codes == ("CURRENCY_MISMATCH",)
+    for rule_id in ("per_txn_cap", "monthly_cap", "step_up_threshold", "monthly_cap_near"):
+        assert result_of(output, rule_id) == "not_evaluated"
+
+
+def test_a_high_risk_mcc_blocks_even_if_the_mandate_allows_it() -> None:
+    output = run(request=pay(100_00, mcc="7995"), mandate=mandate(allowed_mccs=("5411", "7995")))
+
+    assert output.reason_codes == ("MCC_HIGH_RISK",)
+
+
+def test_an_mcc_outside_the_mandate_blocks() -> None:
+    assert run(request=pay(100_00, mcc="5812")).reason_codes == ("MCC_NOT_ALLOWED",)
+
+
+def test_the_per_transaction_cap_blocks_above_but_not_at_the_cap() -> None:
+    capped = mandate(per_txn_cap=inr(4_000_00))
+
+    assert run(request=pay(4_000_00), mandate=capped).outcome == "allow"
+    assert run(request=pay(4_000_01), mandate=capped).reason_codes == ("PER_TXN_CAP_EXCEEDED",)
+
+
+def test_the_monthly_cap_blocks_when_spend_plus_amount_exceeds_it() -> None:
+    near_full = {"mandate": mandate(monthly_cap=inr(10_000_00), per_txn_cap=inr(4_000_00))}
+
+    at_cap = run(request=pay(1_000_00), spent_this_month=inr(9_000_00), **near_full)
+    over = run(request=pay(1_000_01), spent_this_month=inr(9_000_00), **near_full)
+
+    assert "MONTHLY_CAP_EXCEEDED" not in at_cap.reason_codes
+    assert over.reason_codes[0] == "MONTHLY_CAP_EXCEEDED"
+    assert over.outcome == "block"
+
+
+def test_the_step_up_threshold_starts_at_inr_5000() -> None:
+    below = run(request=pay(4_999_99))
+    at = run(request=pay(5_000_00))
+
+    assert (below.outcome, below.risk_tier) == ("allow", "medium")
+    assert (at.outcome, at.reason_codes, at.risk_tier) == (
+        "step_up",
+        ("AMOUNT_ABOVE_STEP_UP_THRESHOLD",),
+        "high",
+    )
+
+
+def test_reaching_80_percent_of_the_monthly_cap_steps_up() -> None:
+    cap = {"mandate": mandate(monthly_cap=inr(50_000_00))}
+
+    just_under = run(request=pay(1_000_00), spent_this_month=inr(38_999_99), **cap)
+    at = run(request=pay(1_000_00), spent_this_month=inr(39_000_00), **cap)
+
+    assert just_under.outcome == "allow"
+    assert (at.outcome, at.reason_codes) == ("step_up", ("MONTHLY_CAP_NEAR",))
+
+
+def test_risk_tiers_follow_the_pack_bands() -> None:
+    assert run(request=pay(1_999_99)).risk_tier == "low"
+    assert run(request=pay(2_000_00)).risk_tier == "medium"
+    usd = mandate(
+        currency="USD",
+        per_txn_cap=Money(minor=500_00, currency="USD"),
+        monthly_cap=Money(minor=900_00, currency="USD"),
+    )
+    assert run(request=pay(99_99, currency="USD"), mandate=usd).risk_tier == "medium"
+    assert run(request=pay(100_00, currency="USD"), mandate=usd).outcome == "step_up"
+
+
+def test_blocks_come_before_step_ups_then_rule_order() -> None:
+    output = run(
+        request=pay(12_000_00, mcc="5812"),
+        mandate=mandate(monthly_cap=inr(12_000_00)),
+    )
+
+    assert output.outcome == "block"
+    assert output.reason_codes == (
+        "MCC_NOT_ALLOWED",
+        "PER_TXN_CAP_EXCEEDED",
+        "AMOUNT_ABOVE_STEP_UP_THRESHOLD",
+        "MONTHLY_CAP_NEAR",
+    )
+
+
+def test_a_cap_breach_never_steps_up_instead_of_blocking() -> None:
+    output = run(request=pay(10_000_01))
+
+    assert output.outcome == "block"
+    assert output.reason_codes[0] == "PER_TXN_CAP_EXCEEDED"
+
+
+def test_every_rule_is_now_evaluated_for_a_normal_request() -> None:
+    output = run()
+
+    assert {r.result for r in output.rule_results} == {"pass"}

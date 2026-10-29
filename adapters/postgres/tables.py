@@ -139,3 +139,17 @@ tenant_chain_heads = Table(
     Column("seq", BigInteger, nullable=False),
     Column("record_hash", String, nullable=False),
 )
+
+consent_requests = Table(
+    "consent_requests",
+    metadata,
+    Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+    Column("consent_request_id", String, primary_key=True),
+    Column("decision_id", String, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    ForeignKeyConstraint(
+        ["tenant_id", "decision_id"], ["decisions.tenant_id", "decisions.decision_id"]
+    ),
+    Index("ux_consent_requests_decision", "tenant_id", "decision_id", unique=True),
+)
