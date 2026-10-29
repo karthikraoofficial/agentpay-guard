@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AnyUrl, Field, SecretStr
+from pydantic import AnyUrl, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,8 +39,24 @@ class Settings(BaseSettings):
     # hash-checked at startup; a mismatch stops the app (ADR-0002).
     policy_packs_dir: Path = Path("policy_packs")
 
-    # Optional until Phase 2 (intent check). SecretStr keeps the value out of repr and logs.
+    # SecretStr keeps the value out of repr and logs. Without a key every Intent check
+    # fails closed to an unknown verdict.
     anthropic_api_key: SecretStr | None = None
+
+    # The Intent check (POST /v1/intents). Off: every check is unknown, no model call.
+    intent_check_enabled: bool = True
+    intent_check_model: str = "claude-haiku-5-5"
+    # Measured ~900 ms round trip from a dev machine; the check is off the decision path.
+    intent_check_timeout_ms: int = Field(default=2500, gt=0, le=30_000)
+
+    @model_validator(mode="after")
+    def _key_when_checking(self) -> "Settings":
+        if self.intent_check_enabled and self.env != "test" and self.anthropic_api_key is None:
+            raise ValueError(
+                "AGENTPAY_ANTHROPIC_API_KEY is required while the Intent check is enabled; "
+                "set it or set AGENTPAY_INTENT_CHECK_ENABLED=false"
+            )
+        return self
 
 
 @lru_cache

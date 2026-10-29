@@ -34,3 +34,11 @@ def test_secret_never_appears_in_repr_or_str(settings: Settings) -> None:
     assert "sk-test-do-not-print" not in str(settings)
     assert settings.anthropic_api_key is not None
     assert settings.anthropic_api_key.get_secret_value() == "sk-test-do-not-print"
+
+
+def test_outside_tests_the_intent_check_needs_an_api_key_unless_it_is_off() -> None:
+    with pytest.raises(ValidationError, match="AGENTPAY_ANTHROPIC_API_KEY is required"):
+        make_settings(env="local", anthropic_api_key=None)
+
+    assert make_settings(env="local", intent_check_enabled=False).anthropic_api_key is None
+    assert make_settings(env="test").intent_check_timeout_ms == 2500

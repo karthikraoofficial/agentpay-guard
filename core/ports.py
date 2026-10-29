@@ -25,6 +25,7 @@ from core.domain.consent import ConsentRequest
 from core.domain.decisions import AuditRecordId, Decision, DecisionId
 from core.domain.idempotency import IdempotencyKey as IdempotencyKey  # re-exported
 from core.domain.idempotency import IdempotencyRecord
+from core.domain.intents import IntentCheck, IntentId
 from core.domain.mandates import Mandate, MandateId, RevokedBy
 from core.domain.money import Money
 from core.domain.parties import Agent, AgentId, AgentStatus, Payer, PayerId
@@ -196,6 +197,10 @@ class TenantTransaction(Protocol):
         ...
 
     def add_consent_request(self, consent: ConsentRequest) -> None: ...
+
+    def add_intent_check(self, check: IntentCheck) -> None: ...
+
+    def get_intent_check(self, intent_id: IntentId) -> IntentCheck | None: ...
 
     def get_consent_request(self, decision_id: DecisionId) -> ConsentRequest | None: ...
 

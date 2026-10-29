@@ -12,6 +12,7 @@ from adapters.postgres.tables import (
     consent_requests,
     decisions,
     idempotency_keys,
+    intent_checks,
     mandates,
     payers,
     tenant_chain_heads,
@@ -21,6 +22,7 @@ from core.domain.audit import ZERO_HASH, SealedAuditRecord, StoredAuditRow, unse
 from core.domain.consent import ConsentRequest
 from core.domain.decisions import AuditRecordId, Decision, DecisionId, PackRef
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
+from core.domain.intents import IntentCheck, IntentContent, IntentId
 from core.domain.mandates import ConsentEvidence, Mandate, MandateId, RevokedBy
 from core.domain.money import Money
 from core.domain.parties import Agent, AgentId, AgentStatus, Payer, PayerId
@@ -182,6 +184,37 @@ class PostgresTransaction:
             .one_or_none()
         )
         return None if row is None else ConsentRequest.model_validate(dict(row))
+
+    def add_intent_check(self, check: IntentCheck) -> None:
+        self._own(check.tenant_id)
+        c = check.content
+        self._conn.execute(
+            insert(intent_checks).values(
+                **check.model_dump(exclude={"content"}),
+                merchant_id=c.merchant.id,
+                merchant_mcc=c.merchant.mcc,
+                quoted_total_minor=c.quoted_total.minor,
+                currency=c.quoted_total.currency,
+                content=c.canonical(),
+            )
+        )
+
+    def get_intent_check(self, intent_id: IntentId) -> IntentCheck | None:
+        row = (
+            self._conn.execute(
+                select(intent_checks).where(
+                    intent_checks.c.tenant_id == self._tenant_id,
+                    intent_checks.c.intent_id == intent_id,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            return None
+        fields = {k: v for k, v in row.items() if k in IntentCheck.model_fields}
+        content = IntentContent.model_validate_json(row["content"])
+        return IntentCheck.model_validate({**fields, "content": content})
 
     def get_decision(self, decision_id: DecisionId) -> Decision | None:
         row = (

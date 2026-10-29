@@ -153,3 +153,38 @@ consent_requests = Table(
     ),
     Index("ux_consent_requests_decision", "tenant_id", "decision_id", unique=True),
 )
+
+# Intent checks (ADR-0007): `content` holds the canonical JSON of the Payer instruction
+# and cart that `content_hash` was taken over. It is nullable so the text can be erased
+# later; the columns Decisions compare (merchant, MCC, Quoted total) stay.
+intent_checks = Table(
+    "intent_checks",
+    metadata,
+    Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+    Column("intent_id", String, primary_key=True),
+    Column("mandate_id", String, nullable=False),
+    Column("agent_id", String, nullable=False),
+    Column("merchant_id", String, nullable=False),
+    Column("merchant_mcc", String(4), nullable=False),
+    Column("quoted_total_minor", BigInteger, nullable=False),
+    Column("currency", String(3), nullable=False),
+    Column("content", LargeBinary, nullable=True),
+    Column("content_hash", String, nullable=False),
+    Column("verdict", String, nullable=False),
+    Column("failure_cause", String, nullable=True),
+    Column("model", String, nullable=False),
+    Column("prompt_version", String, nullable=False),
+    Column("tokens_in", Integer, nullable=True),
+    Column("tokens_out", Integer, nullable=True),
+    Column("cost_usd_micros", BigInteger, nullable=True),
+    Column("latency_ms", Integer, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    ForeignKeyConstraint(
+        ["tenant_id", "mandate_id"], ["mandates.tenant_id", "mandates.mandate_id"]
+    ),
+    CheckConstraint("verdict IN ('match', 'mismatch', 'unknown')", name="intent_verdict_valid"),
+    CheckConstraint(
+        "(failure_cause IS NULL) OR (verdict = 'unknown')", name="intent_cause_means_unknown"
+    ),
+)

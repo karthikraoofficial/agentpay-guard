@@ -7,14 +7,16 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from sqlalchemy import create_engine
 
+from adapters.claude.gateway import ClaudeGateway
+from adapters.memory.model_gateway import UnconfiguredGateway
 from adapters.otel.telemetry import OtelTelemetry
 from adapters.postgres.store import PostgresStore
 from adapters.system_clock import SystemClock
 from api import errors
 from api.deps import Store
-from api.routes import decisions, mandates, parties
+from api.routes import decisions, intents, mandates, parties
 from core.policy.packs import load_active_pack
-from core.ports import Clock, Telemetry
+from core.ports import Clock, ModelGateway, Telemetry
 from core.settings import Settings, get_settings
 
 
@@ -30,6 +32,7 @@ def create_app(
     store: Store | None = None,
     clock: Clock | None = None,
     telemetry: Telemetry | None = None,
+    gateway: ModelGateway | None = None,
 ) -> FastAPI:
     """Build the app from explicit settings, so tests need no global state. Without a
     store, it uses Postgres at `settings.database_url` (connecting on first use).
@@ -52,10 +55,13 @@ def create_app(
     )
     app.state.clock = clock or SystemClock()
     app.state.telemetry = telemetry or otel
+    app.state.settings = settings
+    app.state.gateway = gateway or _default_gateway(settings, app.state.telemetry)
     errors.install(app)
     app.include_router(parties.router)
     app.include_router(mandates.router)
     app.include_router(decisions.router)
+    app.include_router(intents.router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> Health:
@@ -64,6 +70,14 @@ def create_app(
         return Health(status="ok", service=settings.app_name, version=settings.app_version)
 
     return app
+
+
+def _default_gateway(settings: Settings, telemetry: Telemetry) -> ModelGateway:
+    """Claude when a key is configured. Settings refuse to load without one outside the
+    test env while the Intent check is on, so the fallback only serves tests."""
+    if settings.anthropic_api_key is None:
+        return UnconfiguredGateway()
+    return ClaudeGateway(settings.anthropic_api_key, telemetry)
 
 
 def asgi_app() -> FastAPI:

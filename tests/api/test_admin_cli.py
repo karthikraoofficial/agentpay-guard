@@ -1,4 +1,5 @@
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import create_engine, text
 
 from api import admin
@@ -39,7 +40,11 @@ def test_production_keys_are_live_keys(monkeypatch: pytest.MonkeyPatch) -> None:
         def create_tenant(self, tenant_id, name, key_prefix, key_hash, created_at):  # type: ignore[no-untyped-def]
             created.append(key_prefix)
 
-    monkeypatch.setattr(admin, "get_settings", lambda: make_settings(env="production"))
+    monkeypatch.setattr(
+        admin,
+        "get_settings",
+        lambda: make_settings(env="production", anthropic_api_key=SecretStr("sk-test")),
+    )
     monkeypatch.setattr(admin, "PostgresStore", lambda _engine: Directory())
 
     admin.main(["create-tenant", "Acme"])

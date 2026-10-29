@@ -8,6 +8,7 @@ from core.domain.audit import ZERO_HASH, SealedAuditRecord, StoredAuditRow
 from core.domain.consent import ConsentRequest
 from core.domain.decisions import AuditRecordId, Decision, DecisionId
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
+from core.domain.intents import IntentCheck, IntentId
 from core.domain.mandates import Mandate, MandateId, RevokedBy
 from core.domain.parties import Agent, AgentId, AgentStatus, Payer, PayerId
 from core.ports import TenantDirectory, TenantId, UnitOfWork
@@ -23,6 +24,7 @@ class _TenantData:
     audit: dict[AuditRecordId, SealedAuditRecord] = field(default_factory=dict)
     head: tuple[int, str] = (0, ZERO_HASH)
     consents: dict[DecisionId, ConsentRequest] = field(default_factory=dict)
+    intents: dict[IntentId, IntentCheck] = field(default_factory=dict)
 
     def copy(self) -> "_TenantData":
         return _TenantData(
@@ -34,6 +36,7 @@ class _TenantData:
             dict(self.audit),
             self.head,
             dict(self.consents),
+            dict(self.intents),
         )
 
 
@@ -140,6 +143,13 @@ class InMemoryTransaction:
             for d in self._data.decisions.values()
             if d.mandate_id == mandate_id and after < d.decided_at <= until
         )
+
+    def add_intent_check(self, check: IntentCheck) -> None:
+        self._own(check.tenant_id)
+        self._data.intents[check.intent_id] = check
+
+    def get_intent_check(self, intent_id: IntentId) -> IntentCheck | None:
+        return self._data.intents.get(intent_id)
 
     def add_consent_request(self, consent: ConsentRequest) -> None:
         self._own(consent.tenant_id)

@@ -13,12 +13,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 
 from adapters.memory.clock import FixedClock
+from adapters.memory.model_gateway import ScriptedGateway
 from adapters.memory.telemetry import InMemoryTelemetry
 from adapters.memory.unit_of_work import InMemoryUnitOfWork
 from adapters.postgres.store import PostgresStore
 from api.admin import create_tenant, replay_record, verify_chain
 from api.main import create_app
 from core.ports import TenantId
+from core.settings import Settings
 from tests.conftest import make_settings
 
 PACKS = Path(__file__).resolve().parents[2] / "policy_packs"
@@ -47,6 +49,7 @@ class Api:
     clock: MovableClock
     tenants: list[TenantId] = field(default_factory=list)
     telemetry: InMemoryTelemetry = field(default_factory=InMemoryTelemetry)
+    gateway: ScriptedGateway = field(default_factory=ScriptedGateway)
     packs: Path = PACKS
 
     def use_packs(self, packs: Path) -> None:
@@ -57,9 +60,21 @@ class Api:
             store=self.store,
             clock=self.clock,
             telemetry=self.telemetry,
+            gateway=self.gateway,
         )
         self.client = TestClient(app)
         self.packs = packs
+
+    def use_settings(self, settings: Settings) -> None:
+        """Serve with `settings` (same store, clock, fakes and packs)."""
+        app = create_app(
+            settings.model_copy(update={"policy_packs_dir": self.packs}),
+            store=self.store,
+            clock=self.clock,
+            telemetry=self.telemetry,
+            gateway=self.gateway,
+        )
+        self.client = TestClient(app)
 
     def client_with(self, clock: object, *, raise_server_exceptions: bool = True) -> TestClient:
         """A client for an app sharing this store but reading time from `clock`."""
@@ -102,7 +117,10 @@ def api(request: pytest.FixtureRequest) -> Iterator[Api]:
         store = PostgresStore(create_engine(url))
     clock = MovableClock(NOW)
     telemetry = InMemoryTelemetry()
-    app = create_app(make_settings(), store=store, clock=clock, telemetry=telemetry)
-    api = Api(TestClient(app), store, clock, telemetry=telemetry)
+    gateway = ScriptedGateway()
+    app = create_app(
+        make_settings(), store=store, clock=clock, telemetry=telemetry, gateway=gateway
+    )
+    api = Api(TestClient(app), store, clock, telemetry=telemetry, gateway=gateway)
     yield api
     api.assert_evidence_holds()
