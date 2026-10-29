@@ -37,6 +37,25 @@ uv run uvicorn api.main:asgi_app --factory --reload
 Then open http://localhost:8000/healthz (liveness) and http://localhost:8000/docs (OpenAPI).
 The Temporal UI is at http://localhost:8233.
 
+## Using the API
+
+Create a Tenant and its API key. The key is printed once and only its hash is stored:
+
+```bash
+uv run alembic upgrade head
+uv run python -m api.admin create-tenant "Acme Wallet"
+```
+
+Send the key as `Authorization: Bearer apg_test_…` on every call, and an `Idempotency-Key` header on every write. Available so far:
+
+| Endpoint | Does |
+| --- | --- |
+| `POST /v1/payers`, `GET /v1/payers/{id}` | Register and fetch a Payer. `contact_ref` must be a token you can resolve, not a raw email or phone number. |
+| `POST /v1/agents`, `GET /v1/agents/{id}` | Register and fetch an Agent |
+| `POST /v1/agents/{id}/disable`, `/enable` | Stop an Agent under every Mandate, or let it act again |
+
+Errors are `application/problem+json` with a stable `code`, such as `UNAUTHENTICATED`, `IDEMPOTENCY_KEY_MISSING` or `VALIDATION_FAILED`. An ID that belongs to another Tenant returns 404.
+
 ## Checks (what CI runs on every PR)
 
 ```bash
