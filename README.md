@@ -65,6 +65,18 @@ The evals gate joins CI with the Evals PRD.
 | `infra/` | Docker Compose for local dev; deploy config later |
 | `web/` | Next.js front end; pages arrive from Phase 3 |
 
+## Policy packs
+
+The decision rules read their parameters from a Policy pack, `policy_packs/<id>/<version>.yaml`. `policy_packs/manifest.json` records each released version's hash and which version is active. The API refuses to start if the active pack doesn't match its hash, and CI fails any PR that edits or deletes a released pack file.
+
+To change a value, release a new version:
+
+1. Copy the current file to the next version, for example `default/1.0.1.yaml`. Then edit `version` and the values.
+2. Run `uv run python -m core.policy.packs --hash policy_packs/default/1.0.1.yaml`, then add the printed hash under `versions` in the manifest. Point `active` at the new version.
+3. Keep the old version. Replay needs every released pack.
+
+`policy_packs/schema.json` documents the format. It is generated from the pack model: regenerate it with `uv run python -m core.policy.packs --write-schema`, and a test fails if it's stale.
+
 ## License
 
 MIT

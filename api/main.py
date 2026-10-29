@@ -4,6 +4,7 @@ their PRDs; Phase 0 ships only the liveness check. OpenAPI docs are served at /d
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from core.policy.packs import load_active_pack
 from core.settings import Settings, get_settings
 
 
@@ -14,8 +15,13 @@ class Health(BaseModel):
 
 
 def create_app(settings: Settings) -> FastAPI:
-    """Build the app from explicit settings, so tests need no global state."""
+    """Build the app from explicit settings, so tests need no global state.
+
+    Raises PackError if the active Policy pack doesn't match its Manifest hash, so an
+    edited pack can never decide silently.
+    """
     app = FastAPI(title="AgentPay Guard", version=settings.app_version)
+    app.state.policy_pack = load_active_pack(settings.policy_packs_dir, "default")
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> Health:

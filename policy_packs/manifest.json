@@ -1,0 +1,10 @@
+{
+  "packs": {
+    "default": {
+      "active": "1.0.0",
+      "versions": {
+        "1.0.0": "sha256:a9037729f2af9b6ad63761c6a396c9483a3277c7a876e9d119e8b424342551ea"
+      }
+    }
+  }
+}

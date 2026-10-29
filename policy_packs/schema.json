@@ -1,0 +1,113 @@
+{
+  "$defs": {
+    "CurrencyBands": {
+      "additionalProperties": false,
+      "description": "Risk tier bands for one currency, in integer minor units. An amount below\n`medium_from` is low; from `step_up_threshold` up it is high and needs step_up.",
+      "properties": {
+        "medium_from": {
+          "exclusiveMinimum": 0,
+          "title": "Medium From",
+          "type": "integer"
+        },
+        "step_up_threshold": {
+          "exclusiveMinimum": 0,
+          "title": "Step Up Threshold",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "medium_from",
+        "step_up_threshold"
+      ],
+      "title": "CurrencyBands",
+      "type": "object"
+    },
+    "RuleSetting": {
+      "additionalProperties": false,
+      "properties": {
+        "rule_id": {
+          "enum": [
+            "mandate_revoked",
+            "mandate_validity",
+            "agent_allowed",
+            "agent_disabled",
+            "currency_match",
+            "mcc_high_risk",
+            "mcc_allowed",
+            "per_txn_cap",
+            "monthly_cap",
+            "step_up_threshold",
+            "monthly_cap_near"
+          ],
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "rule_id",
+        "enabled"
+      ],
+      "title": "RuleSetting",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "version": {
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "title": "Version",
+      "type": "string"
+    },
+    "currencies": {
+      "minProperties": 1,
+      "patternProperties": {
+        "^[A-Z]{3}$": {
+          "$ref": "#/$defs/CurrencyBands"
+        }
+      },
+      "title": "Currencies",
+      "type": "object"
+    },
+    "high_risk_mccs": {
+      "items": {
+        "pattern": "^\\d{4}$",
+        "type": "string"
+      },
+      "title": "High Risk Mccs",
+      "type": "array"
+    },
+    "monthly_cap_near_ratio_bps": {
+      "exclusiveMinimum": 0,
+      "maximum": 10000,
+      "title": "Monthly Cap Near Ratio Bps",
+      "type": "integer"
+    },
+    "rules": {
+      "items": {
+        "$ref": "#/$defs/RuleSetting"
+      },
+      "minItems": 1,
+      "title": "Rules",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "currencies",
+    "high_risk_mccs",
+    "monthly_cap_near_ratio_bps",
+    "rules"
+  ],
+  "title": "PolicyPack",
+  "type": "object"
+}

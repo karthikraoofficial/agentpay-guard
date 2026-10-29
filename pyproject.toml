@@ -15,6 +15,7 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "opentelemetry-api>=1.28",
     "opentelemetry-sdk>=1.28",
+    "pyyaml>=6.0",
 ]
 
 [dependency-groups]
@@ -23,6 +24,7 @@ dev = [
     "mypy>=1.13",
     "pytest>=8.3",
     "httpx>=0.28",
+    "types-pyyaml>=6.0.12.20260906",
 ]
 
 [build-system]

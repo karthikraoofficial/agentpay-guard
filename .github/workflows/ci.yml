@@ -50,6 +50,14 @@ jobs:
       - name: Type check
         run: uv run mypy
 
+      - name: Released policy packs are unchanged
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          bash .github/scripts/check-released-packs.sh FETCH_HEAD
+
       - name: Migrations
         run: uv run alembic upgrade head
 

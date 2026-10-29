@@ -1,0 +1,36 @@
+# Default Policy pack. Released packs are immutable (ADR-0002): to change a value,
+# copy this file to a new version, edit the copy, and add it to manifest.json.
+# Amounts are integer minor units (paise, cents).
+id: default
+version: "1.0.0"
+
+# Risk tier bands. Below medium_from is low; at or above step_up_threshold is high and
+# needs Payer approval. INR 5,000 is deliberately stricter than RBI's current INR 15,000
+# e-mandate limit for debits without an additional factor of authentication.
+currencies:
+  INR:
+    medium_from: 200000        # INR 2,000.00
+    step_up_threshold: 500000  # INR 5,000.00
+  USD:
+    medium_from: 2500          # USD 25.00
+    step_up_threshold: 10000   # USD 100.00
+
+# Blocked for every Tenant and Mandate: gambling, quasi-cash, money transfer.
+high_risk_mccs: ["4829", "6051", "7995"]
+
+# Step up once Spent this month plus the amount reaches this share of the Monthly cap.
+monthly_cap_near_ratio_bps: 8000  # 80%
+
+# Evaluated in this order; every enabled rule runs and the most severe result wins.
+rules:
+  - {rule_id: mandate_revoked, enabled: true}
+  - {rule_id: mandate_validity, enabled: true}
+  - {rule_id: agent_allowed, enabled: true}
+  - {rule_id: agent_disabled, enabled: true}
+  - {rule_id: currency_match, enabled: true}
+  - {rule_id: mcc_high_risk, enabled: true}
+  - {rule_id: mcc_allowed, enabled: true}
+  - {rule_id: per_txn_cap, enabled: true}
+  - {rule_id: monthly_cap, enabled: true}
+  - {rule_id: step_up_threshold, enabled: true}
+  - {rule_id: monthly_cap_near, enabled: true}
