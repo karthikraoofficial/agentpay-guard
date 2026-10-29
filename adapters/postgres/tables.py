@@ -1,7 +1,17 @@
 """Table definitions shared by the Postgres store and Alembic. Every table has
 tenant_id (non-negotiable 3); tenant-owned tables key on (tenant_id, id)."""
 
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, MetaData, String, Table
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    MetaData,
+    String,
+    Table,
+)
 
 metadata = MetaData()
 
@@ -41,4 +51,15 @@ agents = Table(
     Column("status", String, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     CheckConstraint("status IN ('active', 'disabled')", name="agents_status_valid"),
+)
+
+idempotency_keys = Table(
+    "idempotency_keys",
+    metadata,
+    Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+    Column("key", String, primary_key=True),
+    Column("request_hash", String, nullable=False),
+    Column("status_code", Integer, nullable=False),
+    Column("body", LargeBinary, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
 )

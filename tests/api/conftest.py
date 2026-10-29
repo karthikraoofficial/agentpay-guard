@@ -3,7 +3,7 @@ fake can't drift from the real adapter."""
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from itertools import count
 
 import pytest
@@ -21,10 +21,29 @@ NOW = datetime(2026, 11, 2, 9, 30, tzinfo=UTC)
 _keys = count()
 
 
+class MovableClock:
+    """A Clock tests can move forward."""
+
+    def __init__(self, at: datetime) -> None:
+        self.at = at
+
+    def now(self) -> datetime:
+        return self.at
+
+    def advance(self, by: timedelta) -> None:
+        self.at += by
+
+
 @dataclass
 class Api:
     client: TestClient
     store: InMemoryUnitOfWork | PostgresStore
+    clock: MovableClock
+
+    def client_with(self, clock: object, *, raise_server_exceptions: bool = True) -> TestClient:
+        """A client for an app sharing this store but reading time from `clock`."""
+        app = create_app(make_settings(), store=self.store, clock=clock)  # type: ignore[arg-type]
+        return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
     def new_tenant(self, name: str = "acme") -> dict[str, str]:
         """Create a Tenant and return headers that authenticate as it."""
@@ -46,5 +65,6 @@ def api(request: pytest.FixtureRequest) -> Iterator[Api]:
     else:
         url = request.getfixturevalue("migrated_database_url")
         store = PostgresStore(create_engine(url))
-    app = create_app(make_settings(), store=store, clock=FixedClock(NOW))
-    yield Api(TestClient(app), store)
+    clock = MovableClock(NOW)
+    app = create_app(make_settings(), store=store, clock=clock)
+    yield Api(TestClient(app), store, clock)

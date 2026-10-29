@@ -2,9 +2,11 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
 
-from sqlalchemy import Connection, Engine, insert, select, update
+from sqlalchemy import Connection, Engine, func, insert, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from adapters.postgres.tables import agents, api_keys, payers, tenants
+from adapters.postgres.tables import agents, api_keys, idempotency_keys, payers, tenants
+from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.parties import Agent, AgentId, AgentStatus, Payer, PayerId
 from core.ports import TenantDirectory, TenantId, UnitOfWork
 
@@ -52,6 +54,38 @@ class PostgresTransaction:
             .returning(*agents.c)
         ).one_or_none()
         return None if row is None else Agent.model_validate(row._asdict())
+
+    def claim_idempotency_key(self, key: IdempotencyKey) -> bool:
+        # A transaction-scoped advisory lock: released at commit or rollback, and a second
+        # caller gets False at once instead of queueing behind the first. Tenant ids never
+        # contain ':', so the first ':' separates tenant from key.
+        lock_id = func.hashtextextended(f"{self._tenant_id}:{key}", 0)
+        held: bool = self._conn.execute(
+            select(func.pg_try_advisory_xact_lock(lock_id))
+        ).scalar_one()
+        return held
+
+    def get_idempotency_record(self, key: IdempotencyKey) -> IdempotencyRecord | None:
+        row = self._conn.execute(
+            select(idempotency_keys).where(
+                idempotency_keys.c.tenant_id == self._tenant_id, idempotency_keys.c.key == key
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        return IdempotencyRecord.model_validate(
+            {k: v for k, v in row._asdict().items() if k != "tenant_id"}
+        )
+
+    def save_idempotency_record(self, record: IdempotencyRecord) -> None:
+        values = {"tenant_id": self._tenant_id, **record.model_dump()}
+        statement = pg_insert(idempotency_keys).values(**values)
+        self._conn.execute(
+            statement.on_conflict_do_update(
+                index_elements=["tenant_id", "key"],
+                set_={c: statement.excluded[c] for c in values if c not in ("tenant_id", "key")},
+            )
+        )
 
     def _own(self, tenant_id: TenantId) -> None:
         if tenant_id != self._tenant_id:

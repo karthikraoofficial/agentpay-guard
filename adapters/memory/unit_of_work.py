@@ -1,8 +1,10 @@
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.parties import Agent, AgentId, AgentStatus, Payer, PayerId
 from core.ports import TenantDirectory, TenantId, UnitOfWork
 
@@ -11,15 +13,37 @@ from core.ports import TenantDirectory, TenantId, UnitOfWork
 class _TenantData:
     payers: dict[PayerId, Payer] = field(default_factory=dict)
     agents: dict[AgentId, Agent] = field(default_factory=dict)
+    idempotency: dict[IdempotencyKey, IdempotencyRecord] = field(default_factory=dict)
 
     def copy(self) -> "_TenantData":
-        return _TenantData(dict(self.payers), dict(self.agents))
+        return _TenantData(dict(self.payers), dict(self.agents), dict(self.idempotency))
+
+
+class _Claims:
+    """Idempotency keys held by open transactions, shared across threads."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._held: set[tuple[TenantId, IdempotencyKey]] = set()
+
+    def try_claim(self, claim: tuple[TenantId, IdempotencyKey]) -> bool:
+        with self._lock:
+            if claim in self._held:
+                return False
+            self._held.add(claim)
+            return True
+
+    def release(self, claims: set[tuple[TenantId, IdempotencyKey]]) -> None:
+        with self._lock:
+            self._held -= claims
 
 
 class InMemoryTransaction:
-    def __init__(self, tenant_id: TenantId, data: _TenantData) -> None:
+    def __init__(self, tenant_id: TenantId, data: _TenantData, claims: _Claims) -> None:
         self._tenant_id = tenant_id
         self._data = data
+        self._claims = claims
+        self.held: set[tuple[TenantId, IdempotencyKey]] = set()
 
     @property
     def tenant_id(self) -> TenantId:
@@ -47,6 +71,21 @@ class InMemoryTransaction:
         self._data.agents[agent_id] = updated
         return updated
 
+    def claim_idempotency_key(self, key: IdempotencyKey) -> bool:
+        claim = (self._tenant_id, key)
+        if claim in self.held:
+            return True
+        if not self._claims.try_claim(claim):
+            return False
+        self.held.add(claim)
+        return True
+
+    def get_idempotency_record(self, key: IdempotencyKey) -> IdempotencyRecord | None:
+        return self._data.idempotency.get(key)
+
+    def save_idempotency_record(self, record: IdempotencyRecord) -> None:
+        self._data.idempotency[record.key] = record
+
     def _own(self, tenant_id: TenantId) -> None:
         if tenant_id != self._tenant_id:
             raise ValueError(f"record for {tenant_id} written in a transaction for another Tenant")
@@ -59,12 +98,19 @@ class InMemoryUnitOfWork:
     def __init__(self) -> None:
         self._tenants: dict[TenantId, _TenantData] = {}
         self._keys: dict[str, TenantId] = {}
+        self._claims = _Claims()
+        self._commit = threading.Lock()
 
     @contextmanager
     def transaction(self, tenant_id: TenantId) -> Iterator[InMemoryTransaction]:
         working = self._tenants.get(tenant_id, _TenantData()).copy()
-        yield InMemoryTransaction(tenant_id, working)
-        self._tenants[tenant_id] = working
+        tx = InMemoryTransaction(tenant_id, working, self._claims)
+        try:
+            yield tx
+            with self._commit:
+                self._tenants[tenant_id] = working
+        finally:
+            self._claims.release(tx.held)
 
     def create_tenant(
         self, tenant_id: TenantId, name: str, key_prefix: str, key_hash: str, created_at: datetime

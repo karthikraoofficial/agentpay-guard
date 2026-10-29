@@ -28,11 +28,14 @@ _TITLES = {
 
 
 class ApiError(Exception):
-    def __init__(self, status: int, code: str, detail: str) -> None:
+    def __init__(
+        self, status: int, code: str, detail: str, headers: dict[str, str] | None = None
+    ) -> None:
         super().__init__(detail)
         self.status = status
         self.code = code
         self.detail = detail
+        self.headers = headers or {}
 
 
 def problem(request: Request, status: int, code: str, detail: str, **extra: object) -> JSONResponse:
@@ -65,7 +68,9 @@ def install(app: FastAPI) -> None:
 
     @app.exception_handler(ApiError)
     async def api_error(request: Request, exc: ApiError) -> JSONResponse:
-        return problem(request, exc.status, exc.code, exc.detail)
+        response = problem(request, exc.status, exc.code, exc.detail)
+        response.headers.update(exc.headers)
+        return response
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
