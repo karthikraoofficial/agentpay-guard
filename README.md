@@ -40,6 +40,8 @@ uv run uvicorn api.main:asgi_app --factory --reload
 Then open http://localhost:8000/healthz (liveness) and http://localhost:8000/docs (OpenAPI).
 The Temporal UI is at http://localhost:8233.
 
+Every Decision emits a `decision` trace span (Tenant, Outcome, primary Reason code, Policy pack version) over OTLP to the collector, which prints it (`docker compose -f infra/docker-compose.yml logs otel-collector`). Spans carry identifiers and codes only, never merchant names, line items or Agent reasoning. Set `AGENTPAY_TELEMETRY_EXPORTER=none` to build spans without exporting them.
+
 ## Using the API
 
 Create a Tenant and its API key. The key is printed once and only its hash is stored:

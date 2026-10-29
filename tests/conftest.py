@@ -16,6 +16,7 @@ VALID: dict[str, Any] = {
     "database_url": "postgresql+psycopg://user:pw@localhost:5432/agentpay_test",
     "temporal_address": "localhost:7233",
     "otel_exporter_endpoint": "http://localhost:4318",
+    "telemetry_exporter": "none",
 }
 
 

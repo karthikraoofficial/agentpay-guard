@@ -1,4 +1,4 @@
-# Phase 0: receive OTLP and print it. Phase 2 adds an exporter for Langfuse.
+# Receive OTLP from the API and print it. A Langfuse exporter comes with the dispute agent (Phase 5).
 receivers:
   otlp:
     protocols:

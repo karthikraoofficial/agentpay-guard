@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 
 from adapters.memory.clock import FixedClock
+from adapters.memory.telemetry import InMemoryTelemetry
 from adapters.memory.unit_of_work import InMemoryUnitOfWork
 from adapters.postgres.store import PostgresStore
 from api.admin import create_tenant, replay_record, verify_chain
@@ -45,18 +46,24 @@ class Api:
     store: InMemoryUnitOfWork | PostgresStore
     clock: MovableClock
     tenants: list[TenantId] = field(default_factory=list)
+    telemetry: InMemoryTelemetry = field(default_factory=InMemoryTelemetry)
     packs: Path = PACKS
 
     def use_packs(self, packs: Path) -> None:
         """Serve from `packs` (e.g. one made by tests.packs.release_test_pack), with its
         active pack deciding, and replay against it when the test ends."""
-        app = create_app(make_settings(policy_packs_dir=packs), store=self.store, clock=self.clock)
+        app = create_app(
+            make_settings(policy_packs_dir=packs),
+            store=self.store,
+            clock=self.clock,
+            telemetry=self.telemetry,
+        )
         self.client = TestClient(app)
         self.packs = packs
 
     def client_with(self, clock: object, *, raise_server_exceptions: bool = True) -> TestClient:
         """A client for an app sharing this store but reading time from `clock`."""
-        app = create_app(make_settings(), store=self.store, clock=clock)  # type: ignore[arg-type]
+        app = create_app(make_settings(), store=self.store, clock=clock, telemetry=self.telemetry)  # type: ignore[arg-type]
         return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
     def new_tenant(self, name: str = "acme") -> dict[str, str]:
@@ -94,7 +101,8 @@ def api(request: pytest.FixtureRequest) -> Iterator[Api]:
         url = request.getfixturevalue("migrated_database_url")
         store = PostgresStore(create_engine(url))
     clock = MovableClock(NOW)
-    app = create_app(make_settings(), store=store, clock=clock)
-    api = Api(TestClient(app), store, clock)
+    telemetry = InMemoryTelemetry()
+    app = create_app(make_settings(), store=store, clock=clock, telemetry=telemetry)
+    api = Api(TestClient(app), store, clock, telemetry=telemetry)
     yield api
     api.assert_evidence_holds()

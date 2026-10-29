@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     database_url: AnyUrl
     temporal_address: str = Field(pattern=r"^[\w.\-]+:\d+$")
     otel_exporter_endpoint: AnyUrl
+    # "otlp" exports spans and metrics to otel_exporter_endpoint; "none" builds them but
+    # exports nothing, for tests and CI where no collector runs.
+    telemetry_exporter: Literal["otlp", "none"] = "otlp"
 
     # Released Policy packs and their Manifest. The active `default` pack is loaded and
     # hash-checked at startup; a mismatch stops the app (ADR-0002).
