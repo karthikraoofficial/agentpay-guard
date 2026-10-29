@@ -6,7 +6,9 @@ from sqlalchemy import engine_from_config, pool
 from core.settings import get_settings
 
 config = context.config
-config.set_main_option("sqlalchemy.url", str(get_settings().database_url))
+# Tests pass their own database through `config.attributes`; otherwise use settings.
+url = config.attributes.get("database_url") or str(get_settings().database_url)
+config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))  # escape for configparser
 
 target_metadata = None  # set to the SQLAlchemy MetaData once Phase 1 defines tables
 

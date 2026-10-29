@@ -47,7 +47,8 @@ def test_vendor_rule_flags_each_vendor_import() -> None:
 
 def test_environment_rule_flags_attribute_and_from_import_reads() -> None:
     found = {
-        v.path.as_posix() for v in environment_reads(FIXTURES / "env_read", ["api", "core"], SETTINGS)
+        v.path.as_posix()
+        for v in environment_reads(FIXTURES / "env_read", ["api", "core"], SETTINGS)
     }
     assert found == {"api/app.py", "core/util.py"}
 

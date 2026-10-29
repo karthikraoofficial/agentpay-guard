@@ -42,8 +42,11 @@ The Temporal UI is at http://localhost:8233.
 ```bash
 uv run ruff check . && uv run ruff format --check .
 uv run mypy
+uv run alembic upgrade head
 uv run pytest
 ```
+
+The tests need local Postgres running (the `docker compose` step above) and a `.env`. They create and migrate their own `<database>_test` database on each run, so your dev data is left alone.
 
 The evals gate joins CI with the Evals PRD.
 
