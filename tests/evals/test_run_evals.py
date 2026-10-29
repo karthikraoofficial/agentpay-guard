@@ -11,7 +11,13 @@ from tests.packs import release_test_pack
 
 PACKS = Path(__file__).resolve().parents[2] / "policy_packs"
 # Codes default@1.0.0 can never produce; the Phase 2 golden set covers them.
-SIGNAL_CODES = {"VELOCITY_HIGH"}
+SIGNAL_CODES = {
+    "VELOCITY_HIGH",
+    "INTENT_MISSING",
+    "INTENT_MISMATCH",
+    "INTENT_UNKNOWN",
+    "PRICE_DRIFT",
+}
 
 
 def test_the_phase1_set_has_at_least_40_cases_covering_every_phase_1_reason_code() -> None:
