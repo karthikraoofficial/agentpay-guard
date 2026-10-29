@@ -140,6 +140,10 @@ _Avoid_: Log, event, history
 A copy of a Mandate's terms stored inside an Audit record, so evidence never depends on looking the Mandate up again.
 _Avoid_: Mandate reference
 
+**Chain head**:
+The position and hash of a Tenant's latest Audit record, which the next record must follow.
+_Avoid_: Tip, last record
+
 **Audit chain**:
 A Tenant's Audit records linked in sequence, each carrying the hash of the one before, so any edit or gap can be detected.
 _Avoid_: Ledger, blockchain, log

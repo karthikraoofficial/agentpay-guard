@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from core.domain.audit import ZERO_HASH, SealedAuditRecord
+from core.domain.audit import ZERO_HASH, SealedAuditRecord, StoredAuditRow
 from core.domain.consent import ConsentRequest
 from core.domain.decisions import AuditRecordId, Decision, DecisionId
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
@@ -153,6 +153,13 @@ class InMemoryTransaction:
 
     def get_audit_record(self, audit_record_id: AuditRecordId) -> SealedAuditRecord | None:
         return self._data.audit.get(audit_record_id)
+
+    def read_audit_chain(self) -> tuple[list[StoredAuditRow], tuple[int, str]]:
+        rows = sorted(
+            (StoredAuditRow.from_sealed(s) for s in self._data.audit.values()),
+            key=lambda r: r.seq,
+        )
+        return rows, self._data.head
 
     def claim_idempotency_key(self, key: IdempotencyKey) -> bool:
         claim = (self._tenant_id, key)

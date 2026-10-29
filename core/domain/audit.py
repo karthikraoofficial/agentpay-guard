@@ -6,9 +6,10 @@ uses 32 zero bytes as the previous hash. Any edit, deletion or insertion breaks 
 """
 
 import hashlib
-from typing import Any, Literal
+from collections.abc import Sequence
+from typing import Any, Literal, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 
 from core.domain.canonical_json import canonical_json
 from core.domain.decisions import (
@@ -87,3 +88,58 @@ def unseal(body: bytes, record_hash: str) -> SealedAuditRecord:
     return SealedAuditRecord(
         record=AuditRecord.model_validate_json(body), body=body, record_hash=record_hash
     )
+
+
+class StoredAuditRow(_Frozen):
+    """An Audit record exactly as stored: the hashed bytes plus the columns kept beside
+    them for lookup. Verification checks the columns against the bytes too."""
+
+    seq: int
+    audit_record_id: str
+    kind: str
+    decision_id: str
+    body: bytes
+    prev_hash: str
+    record_hash: str
+
+    @classmethod
+    def from_sealed(cls, sealed: SealedAuditRecord) -> Self:
+        r = sealed.record
+        return cls(
+            seq=r.seq,
+            audit_record_id=r.audit_record_id,
+            kind=r.kind,
+            decision_id=r.decision_id,
+            body=sealed.body,
+            prev_hash=r.prev_hash,
+            record_hash=sealed.record_hash,
+        )
+
+
+def first_broken_seq(rows: Sequence[StoredAuditRow], head: tuple[int, str]) -> int | None:
+    """Walk a Tenant's chain in seq order and return the first seq that is missing,
+    edited or out of place, or None if the whole chain and its head check out."""
+    prev, expected = ZERO_HASH, 1
+    for row in sorted(rows, key=lambda r: r.seq):
+        if row.seq != expected:
+            return expected
+        if row.prev_hash != prev or chain_hash(row.prev_hash, row.body) != row.record_hash:
+            return row.seq
+        try:
+            record = AuditRecord.model_validate_json(row.body)
+        except ValidationError:
+            return row.seq
+        columns = (row.seq, row.prev_hash, row.audit_record_id, row.kind, row.decision_id)
+        if columns != (
+            record.seq,
+            record.prev_hash,
+            record.audit_record_id,
+            record.kind,
+            record.decision_id,
+        ):
+            return row.seq
+        prev, expected = row.record_hash, expected + 1
+    last = expected - 1
+    if head == (last, prev):
+        return None
+    return expected if head[0] > last else max(last, 1)
