@@ -95,3 +95,47 @@ mandates = Table(
     ),
     Index("ix_mandates_tenant_payer_created", "tenant_id", "payer_id", "created_at", "mandate_id"),
 )
+
+decisions = Table(
+    "decisions",
+    metadata,
+    Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+    Column("decision_id", String, primary_key=True),
+    Column("mandate_id", String, nullable=False),
+    Column("agent_id", String, nullable=False),
+    Column("amount_minor", BigInteger, nullable=False),
+    Column("currency", String(3), nullable=False),
+    Column("outcome", String, nullable=False),
+    Column("reason_codes", ARRAY(String), nullable=False),
+    Column("risk_tier", String, nullable=False),
+    Column("pack_id", String, nullable=False),
+    Column("pack_version", String, nullable=False),
+    Column("pack_hash", String, nullable=False),
+    Column("audit_record_id", String, nullable=False),
+    Column("decided_at", DateTime(timezone=True), nullable=False),
+    ForeignKeyConstraint(
+        ["tenant_id", "mandate_id"], ["mandates.tenant_id", "mandates.mandate_id"]
+    ),
+    Index("ix_decisions_tenant_mandate_decided", "tenant_id", "mandate_id", "decided_at"),
+)
+
+audit_records = Table(
+    "audit_records",
+    metadata,
+    Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+    Column("seq", BigInteger, primary_key=True),
+    Column("audit_record_id", String, nullable=False, unique=True),
+    Column("kind", String, nullable=False),
+    Column("decision_id", String, nullable=False),
+    Column("body", LargeBinary, nullable=False),
+    Column("prev_hash", String, nullable=False),
+    Column("record_hash", String, nullable=False),
+)
+
+tenant_chain_heads = Table(
+    "tenant_chain_heads",
+    metadata,
+    Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+    Column("seq", BigInteger, nullable=False),
+    Column("record_hash", String, nullable=False),
+)

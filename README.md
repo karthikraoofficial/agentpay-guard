@@ -57,6 +57,8 @@ Send the key as `Authorization: Bearer apg_test_…` on every call, and an `Idem
 | `GET /v1/mandates?payer_id=…` | List a Payer's Mandates, newest first. Pass `next_cursor` back as `cursor` |
 | `POST /v1/mandates/{id}/revoke` | End a Mandate for good, recording `revoked_by` (`payer` or `tenant`) |
 
+| `POST /v1/decisions`, `GET /v1/decisions/{id}` | Ask whether an Agent may pay under a Mandate. Every Outcome (`allow`, `step_up`, `block`) is a 200 with Reason codes, Risk tier, the Policy pack hash and an Audit record ID |
+
 Mandates can't be edited. To change terms, create a new Mandate with `supersedes` set to the old one, and revoke the old one.
 
 Repeating a write with the same `Idempotency-Key` is safe for 24 hours:

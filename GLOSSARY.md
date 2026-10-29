@@ -92,6 +92,10 @@ _Avoid_: Risk score, risk level
 Merchant category codes the Policy pack blocks for every Tenant and Mandate.
 _Avoid_: Blacklist, deny-list
 
+**Rule result**:
+What one rule concluded for one Agent payment request: pass, step_up, block, or not evaluated (the rule was off or couldn't apply).
+_Avoid_: Check, verdict
+
 **Consent request**:
 A pending ask to the Payer to approve or decline one step_up Decision.
 _Avoid_: Step-up request, approval, challenge
@@ -129,7 +133,7 @@ Re-running a past Decision from its Audit record and getting byte-identical outp
 _Avoid_: Re-evaluation, re-decision
 
 **Audit record**:
-The append-only entry for one Decision: its full inputs, Mandate snapshot, Policy pack and Pack hash, each rule's result, and the output.
+The append-only entry for one Decision: its full inputs (the request, Mandate snapshot, the Agent as it was, Spent this month and Decision time), the Policy pack and Pack hash, and the output with every Rule result.
 _Avoid_: Log, event, history
 
 **Mandate snapshot**:

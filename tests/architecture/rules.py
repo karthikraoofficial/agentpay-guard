@@ -104,3 +104,46 @@ def model_gateway_in_policy(root: Path) -> list[Violation]:
                     )
                 )
     return found
+
+
+# ADR-0003. The engine and the pack model may import only these; nothing that reads a
+# clock, a store, a gateway, files or the network.
+ENGINE_MODULES = ("core/policy/engine.py", "core/policy/pack.py")
+ENGINE_ALLOWED_IMPORTS = (
+    "collections",
+    "dataclasses",
+    "datetime",
+    "enum",
+    "functools",
+    "hashlib",
+    "typing",
+    "pydantic",
+    "core.domain",
+    "core.policy.pack",
+)
+CLOCK_CALLS = frozenset({"now", "utcnow", "today", "time", "monotonic", "perf_counter"})
+
+
+def impure_engine(root: Path) -> list[Violation]:
+    """Imports outside the allow-list, and clock reads, in the policy engine."""
+    found: list[Violation] = []
+    for rel in ENGINE_MODULES:
+        path = root / rel
+        if not path.is_file():
+            continue
+        for node in ast.walk(_tree(path)):
+            names: list[str] = []
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                names = [node.module]
+            for name in names:
+                if not any(name == a or name.startswith(a + ".") for a in ENGINE_ALLOWED_IMPORTS):
+                    found.append(Violation(Path(rel), node.lineno, f"imports {name}"))
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in CLOCK_CALLS
+            ):
+                found.append(Violation(Path(rel), node.lineno, f"calls .{node.func.attr}()"))
+    return found
