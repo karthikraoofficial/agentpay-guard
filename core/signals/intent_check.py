@@ -12,11 +12,21 @@ import json
 from dataclasses import dataclass
 
 from core.domain.intents import FailureCause, IntentContent, IntentVerdict
-from core.ports import Completion, ModelGateway, ModelTimeout, ModelUnavailable, TenantId
+from core.ports import (
+    Completion,
+    Effort,
+    ModelGateway,
+    ModelTimeout,
+    ModelUnavailable,
+    TenantId,
+)
 
 PROMPT_VERSION = "intent_check@1"
-# Room for a short reply after any default thinking; the reply itself is one word.
-MAX_TOKENS = 64
+# Measured with evals/run_intent_evals.py on Claude Haiku 5.5: default effort hit 64
+# max_tokens while thinking (empty replies) and its slowest call took 3.9 s; low effort
+# with room to think scored 30/30 with the slowest call at 2.2 s, inside the timeout.
+EFFORT: Effort = "low"
+MAX_TOKENS = 1024
 
 SYSTEM = """You check whether a shopping cart matches what a person asked an AI agent to buy.
 
@@ -87,6 +97,7 @@ def run_intent_check(
             user=user_prompt(content),
             max_tokens=MAX_TOKENS,
             timeout_ms=timeout_ms,
+            effort=EFFORT,
         )
     except ModelTimeout:
         return IntentResult("unknown", "timeout", None)

@@ -111,6 +111,9 @@ class Completion(_Frozen):
     latency_ms: int
 
 
+Effort = Literal["low", "medium", "high", "xhigh", "max"]
+
+
 class ModelGatewayError(Exception):
     """A model call produced no reply. Callers fail closed (non-negotiable 1)."""
 
@@ -126,7 +129,8 @@ class ModelUnavailable(ModelGatewayError):
 
 class ModelGateway(Protocol):
     """The only route to an LLM. Never called from core/policy (non-negotiable 1).
-    Returns a `Completion`, or raises `ModelTimeout` or `ModelUnavailable`."""
+    Returns a `Completion`, or raises `ModelTimeout` or `ModelUnavailable`. `effort`
+    is passed to the model when given; None leaves the model's default."""
 
     def complete(
         self,
@@ -138,6 +142,7 @@ class ModelGateway(Protocol):
         user: str,
         max_tokens: int,
         timeout_ms: int,
+        effort: Effort | None = None,
     ) -> Completion: ...
 
 

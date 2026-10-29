@@ -207,3 +207,10 @@ def test_a_revoked_mandate_still_gets_a_check_because_the_decision_enforces_stat
     assert revoke.status_code == 200, revoke.text
 
     assert intents.check().status_code == 201
+
+
+def test_the_check_runs_at_low_effort_with_room_to_think(intents: Intents) -> None:
+    intents.check()
+
+    (call,) = intents.api.gateway.calls
+    assert (call.effort, call.max_tokens) == ("low", 1024)
