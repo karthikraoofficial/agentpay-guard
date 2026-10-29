@@ -17,6 +17,7 @@ dependencies = [
     "opentelemetry-sdk>=1.28",
     "pyyaml>=6.0",
     "opentelemetry-exporter-otlp-proto-http>=1.28",
+    "anthropic>=1.0",
 ]
 
 [dependency-groups]
@@ -55,5 +56,8 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q -m 'not perf'"
-markers = ["perf: latency budgets; run with `uv run pytest -m perf -s`"]
+addopts = "-q -m 'not perf and not contract'"
+markers = [
+    "perf: latency budgets; run with `uv run pytest -m perf -s`",
+    "contract: calls a real vendor API; run with `uv run pytest -m contract -o addopts=\"\"`",
+]

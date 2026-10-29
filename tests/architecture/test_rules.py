@@ -93,4 +93,5 @@ def test_vendor_home_rule_flags_imports_outside_the_adapter() -> None:
     assert found == {
         ("api/main.py", "imports opentelemetry.sdk.trace outside adapters/otel"),
         ("adapters/stray.py", "imports opentelemetry.trace outside adapters/otel"),
+        ("api/llm.py", "imports anthropic outside adapters/claude"),
     }

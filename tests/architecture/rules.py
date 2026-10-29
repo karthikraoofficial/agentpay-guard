@@ -152,6 +152,7 @@ def impure_engine(root: Path) -> list[Violation]:
 # Non-negotiable 2, one step further: a vendor SDK lives in exactly one adapter, so
 # swapping the vendor means replacing one directory. Add an entry when an adapter lands.
 VENDOR_HOMES = {
+    "anthropic": "adapters/claude",
     "opentelemetry": "adapters/otel",
 }
 

@@ -96,9 +96,12 @@ class PaymentRail(Protocol):
 
 
 class Completion(_Frozen):
-    """A model reply plus the usage that non-negotiable 10 requires on every call."""
+    """A model reply plus the usage that non-negotiable 10 requires on every call.
+    `stop_reason` is passed through (e.g. "end_turn", "max_tokens", "refusal"), so a
+    caller can treat anything but a clean finish as unusable."""
 
     text: str
+    stop_reason: str
     model: str
     prompt_version: str
     tokens_in: int
@@ -107,8 +110,22 @@ class Completion(_Frozen):
     latency_ms: int
 
 
+class ModelGatewayError(Exception):
+    """A model call produced no reply. Callers fail closed (non-negotiable 1)."""
+
+
+class ModelTimeout(ModelGatewayError):
+    """No reply within `timeout_ms`."""
+
+
+class ModelUnavailable(ModelGatewayError):
+    """The provider refused or failed the call: a network, auth, rate-limit or server
+    error."""
+
+
 class ModelGateway(Protocol):
-    """The only route to an LLM. Never called from core/policy (non-negotiable 1)."""
+    """The only route to an LLM. Never called from core/policy (non-negotiable 1).
+    Returns a `Completion`, or raises `ModelTimeout` or `ModelUnavailable`."""
 
     def complete(
         self,
