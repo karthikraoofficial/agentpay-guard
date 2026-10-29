@@ -30,6 +30,7 @@ Run from the repo root. These are the same commands CI runs.
 - Lint and format: `uv run ruff check .` and `uv run ruff format --check .`
 - Types: `uv run mypy`
 - Migrations: `uv run alembic upgrade head`
+- Policy pack hash / schema: `uv run python -m core.policy.packs --hash <pack.yaml>` and `--write-schema`
 - Tests: `uv run pytest` (needs local infra up and `.env`; tests create their own `<database>_test`)
 - Web: `cd web && npm ci && npm run build`
 

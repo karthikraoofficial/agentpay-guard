@@ -8,6 +8,7 @@ malformed one fails at startup rather than at the first request.
 """
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import AnyUrl, Field, SecretStr
@@ -30,6 +31,10 @@ class Settings(BaseSettings):
     database_url: AnyUrl
     temporal_address: str = Field(pattern=r"^[\w.\-]+:\d+$")
     otel_exporter_endpoint: AnyUrl
+
+    # Released Policy packs and their Manifest. The active `default` pack is loaded and
+    # hash-checked at startup; a mismatch stops the app (ADR-0002).
+    policy_packs_dir: Path = Path("policy_packs")
 
     # Optional until Phase 2 (intent check). SecretStr keeps the value out of repr and logs.
     anthropic_api_key: SecretStr | None = None
