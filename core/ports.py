@@ -21,8 +21,9 @@ from typing import Literal, NewType, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from core.domain.money import Money
+from core.domain.parties import Agent, AgentId, AgentStatus, Payer, PayerId
+from core.domain.parties import TenantId as TenantId  # re-exported for adapters
 
-TenantId = NewType("TenantId", str)
 IdempotencyKey = NewType("IdempotencyKey", str)
 
 AttributeValue = str | int | float | bool
@@ -129,6 +130,18 @@ class TenantTransaction(Protocol):
     @property
     def tenant_id(self) -> TenantId: ...
 
+    def add_payer(self, payer: Payer) -> None: ...
+
+    def get_payer(self, payer_id: PayerId) -> Payer | None: ...
+
+    def add_agent(self, agent: Agent) -> None: ...
+
+    def get_agent(self, agent_id: AgentId) -> Agent | None: ...
+
+    def set_agent_status(self, agent_id: AgentId, status: AgentStatus) -> Agent | None:
+        """Change an Agent's status; None if the Agent isn't in this Tenant."""
+        ...
+
 
 class UnitOfWork(Protocol):
     """Opens tenant-scoped transactions. Work done in one commits together when the block
@@ -136,6 +149,17 @@ class UnitOfWork(Protocol):
     idempotency entry are stored together or not at all (ADR-0004)."""
 
     def transaction(self, tenant_id: TenantId) -> AbstractContextManager[TenantTransaction]: ...
+
+
+class TenantDirectory(Protocol):
+    """Tenants and their API keys. The only lookup that isn't tenant-scoped, because it
+    is how a request's Tenant is found. Keys are stored as hashes only."""
+
+    def create_tenant(
+        self, tenant_id: TenantId, name: str, key_prefix: str, key_hash: str, created_at: datetime
+    ) -> None: ...
+
+    def tenant_for_key(self, key_hash: str) -> TenantId | None: ...
 
 
 # --- EventBus ------------------------------------------------------------------

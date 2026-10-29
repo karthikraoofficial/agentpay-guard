@@ -1,21 +1,81 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 
-from core.ports import TenantId, UnitOfWork
+from core.domain.parties import Agent, AgentId, AgentStatus, Payer, PayerId
+from core.ports import TenantDirectory, TenantId, UnitOfWork
 
 
-@dataclass(frozen=True)
+@dataclass
+class _TenantData:
+    payers: dict[PayerId, Payer] = field(default_factory=dict)
+    agents: dict[AgentId, Agent] = field(default_factory=dict)
+
+    def copy(self) -> "_TenantData":
+        return _TenantData(dict(self.payers), dict(self.agents))
+
+
 class InMemoryTransaction:
-    tenant_id: TenantId
+    def __init__(self, tenant_id: TenantId, data: _TenantData) -> None:
+        self._tenant_id = tenant_id
+        self._data = data
+
+    @property
+    def tenant_id(self) -> TenantId:
+        return self._tenant_id
+
+    def add_payer(self, payer: Payer) -> None:
+        self._own(payer.tenant_id)
+        self._data.payers[payer.payer_id] = payer
+
+    def get_payer(self, payer_id: PayerId) -> Payer | None:
+        return self._data.payers.get(payer_id)
+
+    def add_agent(self, agent: Agent) -> None:
+        self._own(agent.tenant_id)
+        self._data.agents[agent.agent_id] = agent
+
+    def get_agent(self, agent_id: AgentId) -> Agent | None:
+        return self._data.agents.get(agent_id)
+
+    def set_agent_status(self, agent_id: AgentId, status: AgentStatus) -> Agent | None:
+        agent = self._data.agents.get(agent_id)
+        if agent is None:
+            return None
+        updated = agent.model_copy(update={"status": status})
+        self._data.agents[agent_id] = updated
+        return updated
+
+    def _own(self, tenant_id: TenantId) -> None:
+        if tenant_id != self._tenant_id:
+            raise ValueError(f"record for {tenant_id} written in a transaction for another Tenant")
 
 
 class InMemoryUnitOfWork:
-    """A UnitOfWork held in process memory, for tests that don't need Postgres."""
+    """The store held in process memory, for tests that don't need Postgres. A
+    transaction works on a copy of its Tenant's data, kept only if the block succeeds."""
+
+    def __init__(self) -> None:
+        self._tenants: dict[TenantId, _TenantData] = {}
+        self._keys: dict[str, TenantId] = {}
 
     @contextmanager
     def transaction(self, tenant_id: TenantId) -> Iterator[InMemoryTransaction]:
-        yield InMemoryTransaction(tenant_id)
+        working = self._tenants.get(tenant_id, _TenantData()).copy()
+        yield InMemoryTransaction(tenant_id, working)
+        self._tenants[tenant_id] = working
+
+    def create_tenant(
+        self, tenant_id: TenantId, name: str, key_prefix: str, key_hash: str, created_at: datetime
+    ) -> None:
+        self._tenants.setdefault(tenant_id, _TenantData())
+        self._keys[key_hash] = tenant_id
+
+    def tenant_for_key(self, key_hash: str) -> TenantId | None:
+        return self._keys.get(key_hash)
 
 
-_conforms: type[UnitOfWork] = InMemoryUnitOfWork  # mypy checks the fake matches the port
+# mypy checks the fake matches the ports
+_conforms_uow: type[UnitOfWork] = InMemoryUnitOfWork
+_conforms_directory: type[TenantDirectory] = InMemoryUnitOfWork
