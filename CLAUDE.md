@@ -1,0 +1,42 @@
+# AgentPay Guard — rules for Claude Code
+
+## What this is
+A trust layer for agent-initiated payments: mandates, real-time decisions
+(allow / step_up / block), durable consent, and dispute evidence packs.
+Specs (PRDs) and tickets live as GitHub issues (see Agent skills below); "SPEC" below means the PRD issue.
+Read the relevant PRD and ticket before changing code. docs/BUILD-PLAN.md is the overall plan.
+
+## Non-negotiables
+1. The decision path is deterministic. No LLM call inside core/policy.
+   LLM output may only arrive as a signal with a timeout and a fail-closed default (step_up).
+2. Domain code (core/) never imports a vendor SDK. Vendors live in adapters/ behind core/ports.py.
+3. Every table has tenant_id. Every query filters by it.
+4. Every write endpoint and every rail call takes an idempotency key.
+5. Every decision writes an append-only audit record (inputs, pack version + hash, signals, outcome).
+   A decision must replay byte-identical from that record.
+6. Policy packs are immutable once released. Changes = a new version + manifest hash.
+7. Never store card numbers, UPI PINs or raw credentials. Tokens and masked values only.
+8. Money is integer minor units (paise / cents) + ISO currency. Never floats.
+9. All config through core/settings.py. No os.environ elsewhere. No secrets in code or logs.
+10. Every LLM call goes through ModelGateway and logs model, prompt version, tokens in/out, cost, latency.
+
+## How to work
+- One SPEC section per task. Plan first, then code, then tests, then run evals.
+- Small PRs on a feature branch: feat/<spec-id>-<short-name>. Conventional commits.
+- Definition of done: ruff + mypy clean, tests pass, evals not worse than main, SPEC updated if behaviour changed.
+- If a SPEC is ambiguous, stop and ask. Do not invent policy.
+- Keep context small: read only the files the task needs.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs live in GitHub Issues on karthikraoofficial/agentpay-guard (via `gh`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary: needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
