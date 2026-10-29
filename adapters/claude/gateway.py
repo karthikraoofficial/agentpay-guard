@@ -8,6 +8,7 @@ never the prompt or reply text (non-negotiable 10).
 
 import time
 from dataclasses import dataclass
+from typing import Any
 
 import anthropic
 import httpx2
@@ -16,6 +17,7 @@ from pydantic import SecretStr
 from core.ports import (
     AttributeValue,
     Completion,
+    Effort,
     ModelTimeout,
     ModelUnavailable,
     Telemetry,
@@ -79,6 +81,7 @@ class ClaudeGateway:
         user: str,
         max_tokens: int,
         timeout_ms: int,
+        effort: Effort | None = None,
     ) -> Completion:
         if model not in PRICES:
             raise ValueError(f"no price for model {model!r}; add it to PRICES")
@@ -89,6 +92,9 @@ class ClaudeGateway:
             "prompt_version": prompt_version,
             "timeout_ms": timeout_ms,
         }
+        if effort is not None:
+            attributes["effort"] = effort
+        extra: dict[str, Any] = {} if effort is None else {"output_config": {"effort": effort}}
         with self._telemetry.start_span("model_gateway.complete", attributes) as span:
             started = time.monotonic()
             try:
@@ -97,6 +103,7 @@ class ClaudeGateway:
                     max_tokens=max_tokens,
                     system=system,
                     messages=[{"role": "user", "content": user}],
+                    **extra,
                 )
             except anthropic.APITimeoutError as exc:
                 span.set_attribute("outcome", "timeout")

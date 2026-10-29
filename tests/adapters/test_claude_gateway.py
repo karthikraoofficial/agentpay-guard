@@ -164,3 +164,28 @@ def test_long_prompts_are_billed_at_the_long_prompt_rate() -> None:
     assert cost_usd_micros("claude-haiku-5-5", 100_000, 0) == 10_000  # $0.01
     assert cost_usd_micros("claude-haiku-5-5", 100_001, 0) == 50_001  # whole request at $0.50/MTok
     assert cost_usd_micros("claude-haiku-5-5", 1, 0) == 1  # rounds up, never down to free
+
+
+def test_effort_is_sent_only_when_asked_for() -> None:
+    sent: list[dict[str, Any]] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        sent.append(json.loads(request.content))
+        return httpx2.Response(200, json=reply())
+
+    gw = gateway(handler, InMemoryTelemetry())
+    ask(gw)
+    gw.complete(
+        tenant_id=TenantId("ten_1"),
+        purpose="intent_check",
+        model="claude-haiku-5-5",
+        prompt_version="intent_check@1",
+        system=PROMPT,
+        user=PROMPT,
+        max_tokens=1024,
+        timeout_ms=800,
+        effort="low",
+    )
+
+    assert "output_config" not in sent[0]
+    assert sent[1]["output_config"] == {"effort": "low"}

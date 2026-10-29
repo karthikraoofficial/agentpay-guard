@@ -4,7 +4,7 @@ when no model API key is configured. No network, no cost."""
 from collections import deque
 from dataclasses import dataclass
 
-from core.ports import Completion, ModelGatewayError, ModelUnavailable, TenantId
+from core.ports import Completion, Effort, ModelGatewayError, ModelUnavailable, TenantId
 
 
 @dataclass(frozen=True)
@@ -17,6 +17,7 @@ class GatewayCall:
     user: str
     max_tokens: int
     timeout_ms: int
+    effort: str | None
 
 
 class ScriptedGateway:
@@ -39,10 +40,19 @@ class ScriptedGateway:
         user: str,
         max_tokens: int,
         timeout_ms: int,
+        effort: Effort | None = None,
     ) -> Completion:
         self.calls.append(
             GatewayCall(
-                tenant_id, purpose, model, prompt_version, system, user, max_tokens, timeout_ms
+                tenant_id,
+                purpose,
+                model,
+                prompt_version,
+                system,
+                user,
+                max_tokens,
+                timeout_ms,
+                effort,
             )
         )
         reply = self.script.popleft() if self.script else self.default_reply
@@ -74,5 +84,6 @@ class UnconfiguredGateway:
         user: str,
         max_tokens: int,
         timeout_ms: int,
+        effort: Effort | None = None,
     ) -> Completion:
         raise ModelUnavailable("no model API key is configured")
