@@ -116,6 +116,40 @@ _Avoid_: False negative, miss
 A block where the label says the request should have been allowed or stepped up.
 _Avoid_: False positive, false decline
 
+## Signals
+
+**Signal**:
+A fact about an Agent payment request beyond the Mandate's terms, such as Velocity or a New merchant, worked out before the Decision and recorded with it. A Signal can at most send a request to step_up. It never blocks and never turns a step_up into an allow.
+_Avoid_: Risk score, feature, check
+
+**Velocity**:
+The number of Decisions, of any Outcome, made on a Mandate within a recent window before the current request.
+_Avoid_: Rate, frequency
+
+**New merchant**:
+A merchant that the Payer has never had an allowed payment to, under any of their Mandates.
+_Avoid_: Unknown merchant, first-time merchant
+
+**Payer instruction**:
+The Payer's own words for what they asked the Agent to buy, as captured and attested by the Tenant. It is distinct from Agent reasoning.
+_Avoid_: Intent, prompt, goal
+
+**Intent check**:
+A model-assisted comparison of a proposed cart against the Payer instruction, run before the Agent asks for a Decision.
+_Avoid_: Intent match, intent classification
+
+**Intent verdict**:
+The result of an Intent check: match, mismatch or unknown. A check that fails or times out gives unknown. A verdict can be used for a limited time, by Decisions on the same Mandate and Agent at the same merchant.
+_Avoid_: Intent score, intent result
+
+**Quoted total**:
+The cart total submitted with an Intent check: the price the Agent said it would pay.
+_Avoid_: Quote, quoted price, expected amount
+
+**Price drift**:
+How far an Agent payment request's amount is above the Quoted total of the Intent check it cites. A price below the Quoted total is never drift.
+_Avoid_: Price change, variance
+
 ## Policy
 
 **Policy pack**:
