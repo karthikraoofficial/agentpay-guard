@@ -5,7 +5,7 @@ head, runs the pure engine, and writes the Decision, its Audit record and the
 idempotency entry together, or nothing at all (ADR-0003, ADR-0004).
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Request, Response
 from pydantic import AwareDatetime, BaseModel
@@ -26,10 +26,13 @@ from core.domain.decisions import (
     RiskTier,
     month_window,
 )
+from core.domain.mandates import MandateId
 from core.domain.money import Money
 from core.domain.parties import new_id
 from core.domain.signals import Signals
 from core.policy.engine import decide
+from core.policy.pack import PolicyPack
+from core.ports import Telemetry, TenantId, TenantTransaction
 
 router = APIRouter(prefix="/v1/decisions", tags=["decisions"])
 
@@ -73,6 +76,25 @@ def _out(decision: Decision, consent: ConsentRequest | None, now: datetime) -> D
     )
 
 
+def compute_signals(
+    tx: TenantTransaction,
+    mandate_id: MandateId,
+    pack: PolicyPack,
+    now: datetime,
+    tenant: TenantId,
+    telemetry: Telemetry,
+) -> Signals:
+    """Work out the Signals the pack uses, inside the Mandate lock, so parallel requests
+    on one Mandate see consistent values. They are recorded and never recomputed."""
+    with telemetry.start_span("signals.compute", {"tenant_id": tenant}) as span:
+        velocity_count = None
+        if pack.velocity is not None:
+            window = timedelta(seconds=pack.velocity.window_seconds)
+            velocity_count = tx.count_decisions(mandate_id, now - window, now)
+            span.set_attribute("velocity_count", velocity_count)
+        return Signals(velocity_count=velocity_count)
+
+
 def decision_time(now: datetime) -> datetime:
     """The Decision time: one server-read instant, truncated to milliseconds."""
     return now.replace(microsecond=now.microsecond // 1000 * 1000)
@@ -101,7 +123,7 @@ def create_decision(
             currency=mandate.currency,
         )
         agent = tx.get_agent(body.agent_id)
-        signals = Signals()
+        signals = compute_signals(tx, mandate.mandate_id, pack.pack, now, tenant, telemetry)
         output = decide(body, mandate, agent, spent, signals, pack.pack, now)
         seq, prev_hash = tx.lock_chain_head()
 

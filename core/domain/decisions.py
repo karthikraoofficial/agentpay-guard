@@ -35,6 +35,7 @@ ReasonCode = Literal[
     "MONTHLY_CAP_EXCEEDED",
     "AMOUNT_ABOVE_STEP_UP_THRESHOLD",
     "MONTHLY_CAP_NEAR",
+    "VELOCITY_HIGH",
 ]
 
 _Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]

@@ -134,6 +134,13 @@ class InMemoryTransaction:
             if d.mandate_id == mandate_id and d.outcome == "allow" and start <= d.decided_at < end
         )
 
+    def count_decisions(self, mandate_id: MandateId, after: datetime, until: datetime) -> int:
+        return sum(
+            1
+            for d in self._data.decisions.values()
+            if d.mandate_id == mandate_id and after < d.decided_at <= until
+        )
+
     def add_consent_request(self, consent: ConsentRequest) -> None:
         self._own(consent.tenant_id)
         self._data.consents[consent.decision_id] = consent

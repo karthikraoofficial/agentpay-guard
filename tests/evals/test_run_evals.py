@@ -10,15 +10,17 @@ from evals.run_evals import GOLDEN, load_cases, main, run_cases
 from tests.packs import release_test_pack
 
 PACKS = Path(__file__).resolve().parents[2] / "policy_packs"
+# Codes default@1.0.0 can never produce; the Phase 2 golden set covers them.
+SIGNAL_CODES = {"VELOCITY_HIGH"}
 
 
-def test_the_phase1_set_has_at_least_40_cases_covering_every_reason_code() -> None:
+def test_the_phase1_set_has_at_least_40_cases_covering_every_phase_1_reason_code() -> None:
     cases = load_cases(GOLDEN / "phase1.jsonl")
 
     assert len(cases) >= 40
     assert len({c.id for c in cases}) == len(cases)
     covered = {code for c in cases for code in c.expected.reason_codes}
-    assert covered == set(get_args(ReasonCode))
+    assert covered == set(get_args(ReasonCode)) - SIGNAL_CODES
     assert {c.expected.outcome for c in cases} == {"allow", "step_up", "block"}
 
 

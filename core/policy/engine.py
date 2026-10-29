@@ -152,6 +152,18 @@ def monthly_cap_near(rule_id: str, f: Facts) -> RuleResult:
     return _passes(rule_id)
 
 
+def velocity(rule_id: str, f: Facts) -> RuleResult:
+    """A Signal: it can only step up (ADR-0006). A missing count steps up too, so a
+    failure to count is never a way past the rule."""
+    params = f.pack.velocity
+    count = f.signals.velocity_count
+    if params is None:
+        return RuleResult(rule_id=rule_id, result="not_evaluated")
+    if count is None or count >= params.max_decisions:
+        return _steps_up(rule_id, "VELOCITY_HIGH")
+    return _passes(rule_id)
+
+
 RULES: dict[str, Rule] = {
     "mandate_revoked": mandate_revoked,
     "mandate_validity": mandate_validity,
@@ -164,6 +176,7 @@ RULES: dict[str, Rule] = {
     "monthly_cap": monthly_cap,
     "step_up_threshold": step_up_threshold,
     "monthly_cap_near": monthly_cap_near,
+    "velocity": velocity,
 }
 
 _SEVERITY: dict[str, int] = {"block": 2, "step_up": 1, "pass": 0, "not_evaluated": 0}

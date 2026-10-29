@@ -155,6 +155,17 @@ class PostgresTransaction:
         ).scalar_one()
         return int(total)
 
+    def count_decisions(self, mandate_id: MandateId, after: datetime, until: datetime) -> int:
+        total = self._conn.execute(
+            select(func.count()).where(
+                decisions.c.tenant_id == self._tenant_id,
+                decisions.c.mandate_id == mandate_id,
+                decisions.c.decided_at > after,
+                decisions.c.decided_at <= until,
+            )
+        ).scalar_one()
+        return int(total)
+
     def add_consent_request(self, consent: ConsentRequest) -> None:
         self._own(consent.tenant_id)
         self._conn.execute(insert(consent_requests).values(**consent.model_dump()))

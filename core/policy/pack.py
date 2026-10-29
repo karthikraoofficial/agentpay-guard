@@ -33,6 +33,7 @@ RuleId = Literal[
     "monthly_cap",
     "step_up_threshold",
     "monthly_cap_near",
+    "velocity",
 ]
 SemVer = Annotated[str, StringConstraints(pattern=r"^\d+\.\d+\.\d+$", strict=True)]
 
@@ -55,6 +56,14 @@ class CurrencyBands(_Strict):
         return self
 
 
+class VelocityParams(_Strict):
+    """Step up once `max_decisions` earlier Decisions on the Mandate, of any Outcome,
+    were made less than `window_seconds` before the Decision time (or at it)."""
+
+    max_decisions: StrictInt = Field(gt=0)
+    window_seconds: StrictInt = Field(gt=0)
+
+
 class RuleSetting(_Strict):
     rule_id: RuleId
     enabled: StrictBool
@@ -67,12 +76,17 @@ class PolicyPack(_Strict):
     high_risk_mccs: tuple[Mcc, ...]
     monthly_cap_near_ratio_bps: StrictInt = Field(gt=0, le=10_000)
     rules: tuple[RuleSetting, ...] = Field(min_length=1)
+    # Signal parameters (ADR-0006). Optional, so packs released before a Signal existed
+    # still validate, and left out of the Pack hash when unset.
+    velocity: VelocityParams | None = None
 
     @model_validator(mode="after")
     def _unique_rules(self) -> "PolicyPack":
         ids = [r.rule_id for r in self.rules]
         if len(ids) != len(set(ids)):
             raise ValueError("each rule_id may appear only once")
+        if "velocity" in ids and self.velocity is None:
+            raise ValueError("the velocity rule needs a velocity section")
         return self
 
 
@@ -84,4 +98,7 @@ class LoadedPack(BaseModel):
 
 
 def pack_hash(pack: PolicyPack) -> str:
-    return "sha256:" + hashlib.sha256(canonical_json(pack)).hexdigest()
+    """SHA-256 of the pack's canonical JSON. Optional sections a pack doesn't set are
+    left out, so adding one to the model never changes a released pack's hash."""
+    content = pack.model_dump(mode="python", exclude_none=True)
+    return "sha256:" + hashlib.sha256(canonical_json(content)).hexdigest()

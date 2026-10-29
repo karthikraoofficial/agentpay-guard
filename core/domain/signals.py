@@ -6,8 +6,12 @@ can at most send a request to step_up (ADR-0006). Each Signal adds a field here 
 default, so records written before it existed still parse and replay.
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Signals(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+    # Decisions on the Mandate, of any Outcome, in the pack's Velocity window before
+    # this one. None means it wasn't worked out, which the velocity rule treats as high.
+    velocity_count: int | None = Field(default=None, ge=0)

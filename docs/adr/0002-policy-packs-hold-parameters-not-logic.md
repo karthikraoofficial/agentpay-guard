@@ -7,3 +7,5 @@ A pack's hash is the SHA-256 of its parsed content serialised as canonical JSON 
 ## Consequences
 
 A new kind of rule needs a code release as well as a new pack version. Replaying an old Decision needs both the old pack file and engine code that still understands it, so rule implementations must stay backward compatible with every released pack.
+
+_(Updated: #38)_ Optional sections that a pack doesn't set, such as Signal parameters added after a pack was released, are left out of the canonical JSON before hashing. Adding an optional section to the pack model therefore never changes a released pack's hash.
