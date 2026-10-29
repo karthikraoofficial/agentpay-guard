@@ -11,6 +11,25 @@ permissions:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16.6
+        env:
+          POSTGRES_USER: agentpay
+          POSTGRES_PASSWORD: agentpay # CI-only throwaway database
+          POSTGRES_DB: agentpay
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agentpay -d agentpay"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      AGENTPAY_ENV: test
+      AGENTPAY_DATABASE_URL: postgresql+psycopg://agentpay:agentpay@localhost:5432/agentpay
+      AGENTPAY_TEMPORAL_ADDRESS: localhost:7233
+      AGENTPAY_OTEL_EXPORTER_ENDPOINT: http://localhost:4318
     steps:
       - uses: actions/checkout@v4
 
@@ -30,6 +49,9 @@ jobs:
 
       - name: Type check
         run: uv run mypy
+
+      - name: Migrations
+        run: uv run alembic upgrade head
 
       - name: Tests
         run: uv run pytest

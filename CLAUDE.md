@@ -29,7 +29,8 @@ Run from the repo root. These are the same commands CI runs.
 - Run the API: `uv run uvicorn api.main:asgi_app --factory --reload` (health: `/healthz`, docs: `/docs`)
 - Lint and format: `uv run ruff check .` and `uv run ruff format --check .`
 - Types: `uv run mypy`
-- Tests: `uv run pytest`
+- Migrations: `uv run alembic upgrade head`
+- Tests: `uv run pytest` (needs local infra up and `.env`; tests create their own `<database>_test`)
 - Web: `cd web && npm ci && npm run build`
 
 ## How to work

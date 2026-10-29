@@ -30,7 +30,8 @@ The MVP scales smoothly because every external dependency sits behind an interfa
 | `PolicyEngine` | Python rules reading versioned YAML policy packs | Same engine; packs edited through a maker-checker admin UI | 8 — Guardrails |
 | `Workflow` (durable execution) | Temporal dev server in Docker | Temporal Cloud (or self-hosted cluster) | 7 — Durable execution |
 | `ModelGateway` | One wrapper around the Claude API with token and cost logging | Same wrapper + fallback chain, prompt caching, per-tenant budgets | 10, 12 — Architecture, cost |
-| `Store` (Postgres) | Postgres 16 in Docker | Managed Postgres (Neon, RDS) with read replicas | 10 — Architecture |
+| `UnitOfWork` (Postgres store) | Postgres 16 in Docker; in-memory fake for tests | Managed Postgres (Neon, RDS) with read replicas | 10 — Architecture |
+| `Clock` | System time, read once per request at the API edge; fixed fake for tests | Same | 10 — Architecture |
 | `Cache` / rate limits | In-process dict | Redis | 11 — Scaling |
 | `EventBus` | Postgres outbox table polled by a worker | Kafka or a managed queue; same outbox pattern | 7, 11 |
 | `Telemetry` | OpenTelemetry to console + Langfuse free tier | OpenTelemetry collector to Grafana/Datadog + Langfuse | 9 — Observability |
@@ -97,7 +98,7 @@ agentpay-guard/
 │  ├─ domain/                # Pydantic models: Mandate, AgentPaymentRequest, Decision
 │  ├─ policy/                # deterministic engine + reason codes
 │  ├─ signals/               # velocity, new merchant, price drift, intent match
-│  └─ ports.py               # the seams: PaymentRail, ModelGateway, Store, EventBus
+│  └─ ports.py               # the seams: PaymentRail, ModelGateway, UnitOfWork, EventBus, Telemetry, Clock
 ├─ adapters/                 # mock_rail, razorpay_rail, stripe_rail, claude_gateway, pg_store
 ├─ workflows/                # Temporal: step_up_consent, dispute_pack
 ├─ agents/                   # dispute evidence agent: tools + prompts (versioned)

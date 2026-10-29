@@ -1,4 +1,4 @@
-"""The five seams between domain code and the outside world (CLAUDE.md non-negotiable 2).
+"""The seams between domain code and the outside world (CLAUDE.md non-negotiable 2).
 
 Domain code depends only on these Protocols. Each gets an MVP implementation and a
 production implementation later, both in adapters/ (seam table in docs/BUILD-PLAN.md).
@@ -9,7 +9,8 @@ Signatures carry the non-negotiables in their types:
 - every tenant-scoped method takes a `TenantId` (3);
 - every LLM completion returns its usage and cost (10).
 
-No implementation depends on these yet, so later PRDs may refine them.
+Clock and UnitOfWork were added in Phase 1; UnitOfWork replaced the Phase 0 generic
+Store. Later PRDs may refine any of them.
 """
 
 from collections.abc import Mapping
@@ -30,6 +31,18 @@ Attributes = Mapping[str, AttributeValue]
 
 class _Frozen(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+# --- Clock ---------------------------------------------------------------------
+
+
+class Clock(Protocol):
+    """The only source of the current time. Read once per request at the API edge and
+    passed into the policy engine as a value, never read inside it (ADR-0003)."""
+
+    def now(self) -> datetime:
+        """The current instant as an aware UTC datetime."""
+        ...
 
 
 # --- PaymentRail -------------------------------------------------------------
@@ -105,24 +118,24 @@ class ModelGateway(Protocol):
     ) -> Completion: ...
 
 
-# --- Store ---------------------------------------------------------------------
+# --- UnitOfWork ----------------------------------------------------------------
 
 
-class Store(Protocol):
-    """Tenant-scoped persistence. Every read and write is scoped by tenant_id."""
+class TenantTransaction(Protocol):
+    """One atomic piece of work for one Tenant. Every read and write made through it is
+    scoped by its tenant_id (non-negotiable 3). Typed operations, such as locking a
+    Mandate or appending an Audit record, are added here as features need them."""
 
-    def get(
-        self, tenant_id: TenantId, collection: str, key: str
-    ) -> Mapping[str, object] | None: ...
+    @property
+    def tenant_id(self) -> TenantId: ...
 
-    def put(
-        self,
-        tenant_id: TenantId,
-        collection: str,
-        key: str,
-        value: Mapping[str, object],
-        idempotency_key: IdempotencyKey,
-    ) -> None: ...
+
+class UnitOfWork(Protocol):
+    """Opens tenant-scoped transactions. Work done in one commits together when the block
+    exits cleanly and is discarded if it raises, so a Decision, its Audit record and its
+    idempotency entry are stored together or not at all (ADR-0004)."""
+
+    def transaction(self, tenant_id: TenantId) -> AbstractContextManager[TenantTransaction]: ...
 
 
 # --- EventBus ------------------------------------------------------------------
