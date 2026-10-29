@@ -8,7 +8,7 @@ from adapters.postgres.store import PostgresStore
 from adapters.system_clock import SystemClock
 from api import errors
 from api.deps import Store
-from api.routes import mandates, parties
+from api.routes import decisions, mandates, parties
 from core.policy.packs import load_active_pack
 from core.ports import Clock
 from core.settings import Settings, get_settings
@@ -38,6 +38,7 @@ def create_app(
     errors.install(app)
     app.include_router(parties.router)
     app.include_router(mandates.router)
+    app.include_router(decisions.router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> Health:

@@ -8,11 +8,16 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from adapters.postgres.tables import (
     agents,
     api_keys,
+    audit_records,
+    decisions,
     idempotency_keys,
     mandates,
     payers,
+    tenant_chain_heads,
     tenants,
 )
+from core.domain.audit import ZERO_HASH, SealedAuditRecord, unseal
+from core.domain.decisions import AuditRecordId, Decision, DecisionId, PackRef
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.mandates import ConsentEvidence, Mandate, MandateId, RevokedBy
 from core.domain.money import Money
@@ -102,6 +107,117 @@ class PostgresTransaction:
             query = query.where(tuple_(mandates.c.created_at, mandates.c.mandate_id) < before)
         query = query.order_by(mandates.c.created_at.desc(), mandates.c.mandate_id.desc())
         return [_mandate(r) for r in self._conn.execute(query.limit(limit)).mappings()]
+
+    def lock_mandate(self, mandate_id: MandateId) -> Mandate | None:
+        row = (
+            self._conn.execute(
+                select(mandates)
+                .where(mandates.c.tenant_id == self._tenant_id, mandates.c.mandate_id == mandate_id)
+                .with_for_update()
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return None if row is None else _mandate(row)
+
+    def add_decision(self, decision: Decision) -> None:
+        self._own(decision.tenant_id)
+        self._conn.execute(
+            insert(decisions).values(
+                tenant_id=decision.tenant_id,
+                decision_id=decision.decision_id,
+                mandate_id=decision.mandate_id,
+                agent_id=decision.agent_id,
+                amount_minor=decision.amount.minor,
+                currency=decision.amount.currency,
+                outcome=decision.outcome,
+                reason_codes=list(decision.reason_codes),
+                risk_tier=decision.risk_tier,
+                pack_id=decision.policy_pack.id,
+                pack_version=decision.policy_pack.version,
+                pack_hash=decision.policy_pack.hash,
+                audit_record_id=decision.audit_record_id,
+                decided_at=decision.decided_at,
+            )
+        )
+
+    def get_decision(self, decision_id: DecisionId) -> Decision | None:
+        row = (
+            self._conn.execute(
+                select(decisions).where(
+                    decisions.c.tenant_id == self._tenant_id,
+                    decisions.c.decision_id == decision_id,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            return None
+        return Decision(
+            decision_id=row["decision_id"],
+            tenant_id=row["tenant_id"],
+            mandate_id=row["mandate_id"],
+            agent_id=row["agent_id"],
+            amount=Money(minor=row["amount_minor"], currency=row["currency"]),
+            outcome=row["outcome"],
+            reason_codes=tuple(row["reason_codes"]),
+            risk_tier=row["risk_tier"],
+            policy_pack=PackRef(
+                id=row["pack_id"], version=row["pack_version"], hash=row["pack_hash"]
+            ),
+            audit_record_id=row["audit_record_id"],
+            decided_at=row["decided_at"],
+        )
+
+    def lock_chain_head(self) -> tuple[int, str]:
+        self._conn.execute(
+            pg_insert(tenant_chain_heads)
+            .values(tenant_id=self._tenant_id, seq=0, record_hash=ZERO_HASH)
+            .on_conflict_do_nothing(index_elements=["tenant_id"])
+        )
+        row = self._conn.execute(
+            select(tenant_chain_heads.c.seq, tenant_chain_heads.c.record_hash)
+            .where(tenant_chain_heads.c.tenant_id == self._tenant_id)
+            .with_for_update()
+        ).one()
+        return int(row.seq), str(row.record_hash)
+
+    def append_audit_record(self, sealed: SealedAuditRecord) -> None:
+        record = sealed.record
+        self._own(record.tenant_id)
+        self._conn.execute(
+            insert(audit_records).values(
+                tenant_id=record.tenant_id,
+                seq=record.seq,
+                audit_record_id=record.audit_record_id,
+                kind=record.kind,
+                decision_id=record.decision_id,
+                body=sealed.body,
+                prev_hash=record.prev_hash,
+                record_hash=sealed.record_hash,
+            )
+        )
+        moved = self._conn.execute(
+            update(tenant_chain_heads)
+            .where(
+                tenant_chain_heads.c.tenant_id == self._tenant_id,
+                tenant_chain_heads.c.seq == record.seq - 1,
+                tenant_chain_heads.c.record_hash == record.prev_hash,
+            )
+            .values(seq=record.seq, record_hash=sealed.record_hash)
+        )
+        if moved.rowcount != 1:
+            raise ValueError("Audit record does not follow the chain head")
+
+    def get_audit_record(self, audit_record_id: AuditRecordId) -> SealedAuditRecord | None:
+        row = self._conn.execute(
+            select(audit_records.c.body, audit_records.c.record_hash).where(
+                audit_records.c.tenant_id == self._tenant_id,
+                audit_records.c.audit_record_id == audit_record_id,
+            )
+        ).one_or_none()
+        return None if row is None else unseal(bytes(row.body), row.record_hash)
 
     def claim_idempotency_key(self, key: IdempotencyKey) -> bool:
         # A transaction-scoped advisory lock: released at commit or rollback, and a second

@@ -4,6 +4,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from core.domain.audit import ZERO_HASH, SealedAuditRecord
+from core.domain.decisions import AuditRecordId, Decision, DecisionId
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.mandates import Mandate, MandateId, RevokedBy
 from core.domain.parties import Agent, AgentId, AgentStatus, Payer, PayerId
@@ -16,10 +18,19 @@ class _TenantData:
     agents: dict[AgentId, Agent] = field(default_factory=dict)
     idempotency: dict[IdempotencyKey, IdempotencyRecord] = field(default_factory=dict)
     mandates: dict[MandateId, Mandate] = field(default_factory=dict)
+    decisions: dict[DecisionId, Decision] = field(default_factory=dict)
+    audit: dict[AuditRecordId, SealedAuditRecord] = field(default_factory=dict)
+    head: tuple[int, str] = (0, ZERO_HASH)
 
     def copy(self) -> "_TenantData":
         return _TenantData(
-            dict(self.payers), dict(self.agents), dict(self.idempotency), dict(self.mandates)
+            dict(self.payers),
+            dict(self.agents),
+            dict(self.idempotency),
+            dict(self.mandates),
+            dict(self.decisions),
+            dict(self.audit),
+            self.head,
         )
 
 
@@ -103,6 +114,29 @@ class InMemoryTransaction:
             rows = [m for m in rows if (m.created_at, m.mandate_id) < before]
         return rows[:limit]
 
+    def lock_mandate(self, mandate_id: MandateId) -> Mandate | None:
+        return self._data.mandates.get(mandate_id)
+
+    def add_decision(self, decision: Decision) -> None:
+        self._own(decision.tenant_id)
+        self._data.decisions[decision.decision_id] = decision
+
+    def get_decision(self, decision_id: DecisionId) -> Decision | None:
+        return self._data.decisions.get(decision_id)
+
+    def lock_chain_head(self) -> tuple[int, str]:
+        return self._data.head
+
+    def append_audit_record(self, sealed: SealedAuditRecord) -> None:
+        self._own(sealed.record.tenant_id)
+        if (sealed.seq - 1, sealed.prev_hash) != self._data.head:
+            raise ValueError("Audit record does not follow the chain head")
+        self._data.audit[sealed.record.audit_record_id] = sealed
+        self._data.head = (sealed.seq, sealed.record_hash)
+
+    def get_audit_record(self, audit_record_id: AuditRecordId) -> SealedAuditRecord | None:
+        return self._data.audit.get(audit_record_id)
+
     def claim_idempotency_key(self, key: IdempotencyKey) -> bool:
         claim = (self._tenant_id, key)
         if claim in self.held:
@@ -135,6 +169,8 @@ class InMemoryUnitOfWork:
 
     @contextmanager
     def transaction(self, tenant_id: TenantId) -> Iterator[InMemoryTransaction]:
+        # Copy-on-transaction: concurrent transactions for one Tenant would overwrite
+        # each other, so tests that need real concurrency use the Postgres store.
         working = self._tenants.get(tenant_id, _TenantData()).copy()
         tx = InMemoryTransaction(tenant_id, working, self._claims)
         try:

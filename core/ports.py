@@ -20,6 +20,8 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
+from core.domain.audit import SealedAuditRecord
+from core.domain.decisions import AuditRecordId, Decision, DecisionId
 from core.domain.idempotency import IdempotencyKey as IdempotencyKey  # re-exported
 from core.domain.idempotency import IdempotencyRecord
 from core.domain.mandates import Mandate, MandateId, RevokedBy
@@ -158,6 +160,26 @@ class TenantTransaction(Protocol):
         """A Payer's Mandates, newest first by (created_at, mandate_id), strictly older
         than `before` when given."""
         ...
+
+    def lock_mandate(self, mandate_id: MandateId) -> Mandate | None:
+        """Read a Mandate and hold it until this transaction ends, so Decisions on one
+        Mandate run one after another. Always taken before the chain head."""
+        ...
+
+    def add_decision(self, decision: Decision) -> None: ...
+
+    def get_decision(self, decision_id: DecisionId) -> Decision | None: ...
+
+    def lock_chain_head(self) -> tuple[int, str]:
+        """The Tenant's last Audit record (seq, record_hash), held until this transaction
+        ends; (0, ZERO_HASH) before the first record."""
+        ...
+
+    def append_audit_record(self, sealed: SealedAuditRecord) -> None:
+        """Add the next record and move the chain head. Records are never changed."""
+        ...
+
+    def get_audit_record(self, audit_record_id: AuditRecordId) -> SealedAuditRecord | None: ...
 
     def claim_idempotency_key(self, key: IdempotencyKey) -> bool:
         """Hold `key` until this transaction ends. False, without waiting, if another
