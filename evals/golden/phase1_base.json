@@ -1,5 +1,6 @@
 {
   "_about": "Shared starting point for evals/golden/phase1.jsonl. Each case lists only the fields it changes. Amounts are integer minor units: INR 1,250.00 is 125000.",
+  "pack": {"id": "default", "version": "1.0.0"},
   "mandate": {
     "mandate_id": "mnd_eval",
     "tenant_id": "ten_eval",

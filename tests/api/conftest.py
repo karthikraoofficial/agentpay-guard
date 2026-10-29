@@ -45,6 +45,14 @@ class Api:
     store: InMemoryUnitOfWork | PostgresStore
     clock: MovableClock
     tenants: list[TenantId] = field(default_factory=list)
+    packs: Path = PACKS
+
+    def use_packs(self, packs: Path) -> None:
+        """Serve from `packs` (e.g. one made by tests.packs.release_test_pack), with its
+        active pack deciding, and replay against it when the test ends."""
+        app = create_app(make_settings(policy_packs_dir=packs), store=self.store, clock=self.clock)
+        self.client = TestClient(app)
+        self.packs = packs
 
     def client_with(self, clock: object, *, raise_server_exceptions: bool = True) -> TestClient:
         """A client for an app sharing this store but reading time from `clock`."""
@@ -66,7 +74,7 @@ class Api:
                 rows, _ = tx.read_audit_chain()
             for row in rows:
                 code = replay_record(
-                    self.store, tenant_id, row.audit_record_id, PACKS, messages.append
+                    self.store, tenant_id, row.audit_record_id, self.packs, messages.append
                 )
                 assert code == 0, messages
 

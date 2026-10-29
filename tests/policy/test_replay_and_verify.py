@@ -10,10 +10,12 @@ from core.domain.audit import (
     AuditRecord,
     DecisionInputs,
     StoredAuditRow,
+    chain_hash,
     first_broken_seq,
     seal,
 )
 from core.domain.decisions import PackRef
+from core.domain.signals import Signals
 from core.policy.engine import decide
 from core.policy.replay import PackMismatch, replay
 from tests.policy.test_engine import NOW, PACK, ZERO, agent, mandate, request
@@ -36,7 +38,7 @@ def _record(seq: int, prev_hash: str, **request_overrides: Any) -> AuditRecord:
         recorded_at=NOW,
         inputs=inputs,
         pack=PackRef(id="default", version="1.0.0", hash=PACK_HASH),
-        output=decide(req, inputs.mandate, inputs.agent, ZERO, PACK, NOW),
+        output=decide(req, inputs.mandate, inputs.agent, ZERO, Signals(), PACK, NOW),
     )
 
 
@@ -133,3 +135,23 @@ def test_an_edited_last_record_is_caught_by_the_chain_head() -> None:
     rows[1] = StoredAuditRow.from_sealed(seal(_record(2, rows[0].record_hash, quote_id="q")))
 
     assert first_broken_seq(rows, head) == 2
+
+
+def _as_written_in_phase_1(record: AuditRecord) -> bytes:
+    """The bytes a Phase 1 Decision was stored as: no `signals` among its inputs."""
+    from core.domain.canonical_json import canonical_json
+
+    doc = json.loads(canonical_json(record))
+    del doc["inputs"]["signals"]
+    return canonical_json(doc)
+
+
+def test_a_phase_1_record_without_signals_still_replays_and_verifies() -> None:
+    body = _as_written_in_phase_1(_record(1, ZERO_HASH))
+    sealed = seal(AuditRecord.model_validate_json(body))
+    row = StoredAuditRow.from_sealed(sealed).model_copy(
+        update={"body": body, "record_hash": chain_hash(ZERO_HASH, body)}
+    )
+
+    assert replay(body, PACK, PACK_HASH).identical
+    assert first_broken_seq([row], (1, row.record_hash)) is None

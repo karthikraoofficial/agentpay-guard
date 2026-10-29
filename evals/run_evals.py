@@ -1,12 +1,14 @@
 """Score the policy engine against the labelled golden set.
 
-`uv run python -m evals.run_evals` runs every case in evals/golden/phase1.jsonl through
-`decide()` with the active Policy pack and prints the false-allow and false-block
+`uv run python -m evals.run_evals` runs every case in a golden file (default
+evals/golden/phase1.jsonl) through `decide()` and prints the false-allow and false-block
 counts. It exits 1 on any mismatch, including a wrong Reason code, so CI fails.
 
 A false-allow is an allow where the label says step_up or block; a false-block is a block
-where the label says allow or step_up. Each case lists only what it changes from
-evals/golden/phase1_base.json. The schema is provisional until the Evals PRD.
+where the label says allow or step_up. Each case lists only what it changes from the
+file's base (`<name>_base.json` beside `<name>.jsonl`). The base names the Policy pack
+the file is decided with, so a golden file keeps testing the pack it was labelled for
+after a newer version becomes active. The schema is provisional until the Evals PRD.
 """
 
 import argparse
@@ -22,8 +24,9 @@ from core.domain.decisions import AgentPaymentRequest, Outcome, ReasonCode
 from core.domain.mandates import Mandate
 from core.domain.money import Money
 from core.domain.parties import Agent, AgentStatus
+from core.domain.signals import Signals
 from core.policy.engine import decide
-from core.policy.packs import load_active_pack
+from core.policy.packs import load_pack
 
 GOLDEN = Path(__file__).resolve().parent / "golden"
 PACKS = Path(__file__).resolve().parents[1] / "policy_packs"
@@ -36,11 +39,19 @@ class Expected(BaseModel):
     reason_codes: tuple[ReasonCode, ...]
 
 
+class PackPin(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    version: str
+
+
 class Case(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str
     description: str
+    pack: PackPin
     mandate: dict[str, Any]
     request: dict[str, Any]
     agent_status: AgentStatus | None
@@ -74,14 +85,14 @@ def _merge(base: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_cases(path: Path) -> list[Case]:
-    base = json.loads((path.parent / "phase1_base.json").read_text(encoding="utf-8"))
+    base = json.loads((path.parent / f"{path.stem}_base.json").read_text(encoding="utf-8"))
     base.pop("_about", None)
     lines = path.read_text(encoding="utf-8").splitlines()
     return [Case.model_validate(_merge(base, json.loads(line))) for line in lines if line.strip()]
 
 
 def _actual(case: Case, pack_root: Path) -> Expected:
-    pack = load_active_pack(pack_root, "default").pack
+    pack = load_pack(pack_root, case.pack.id, case.pack.version).pack
     mandate = Mandate.model_validate(case.mandate)
     request = AgentPaymentRequest.model_validate(case.request)
     agent = (
@@ -96,7 +107,7 @@ def _actual(case: Case, pack_root: Path) -> Expected:
         )
     )
     spent = Money(minor=case.spent_this_month_minor, currency=mandate.currency)
-    output = decide(request, mandate, agent, spent, pack, case.now)
+    output = decide(request, mandate, agent, spent, Signals(), pack, case.now)
     return Expected(outcome=output.outcome, reason_codes=output.reason_codes)
 
 

@@ -1,13 +1,16 @@
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from core.domain.decisions import AuditRecordId
+from core.domain.signals import Signals
 from core.ports import TenantId
 from tests.api.conftest import Api
 from tests.api.test_mandates import Setup, _iso
 from tests.api.test_tenants_payers_agents import assert_problem
+from tests.packs import release_test_pack
 
 PACK_HASH = "sha256:a9037729f2af9b6ad63761c6a396c9483a3277c7a876e9d119e8b424342551ea"
 
@@ -146,7 +149,7 @@ def test_the_audit_record_holds_the_full_inputs_and_rule_results(pay: Pay) -> No
     assert record.inputs.agent is not None and record.inputs.agent.status == "active"
     assert record.inputs.spent_this_month.minor == 0
     assert record.pack.hash == PACK_HASH
-    assert record.signals == ()
+    assert record.inputs.signals == Signals()
     assert record.output.outcome == "allow"
     assert len(record.output.rule_results) == 11
 
@@ -195,3 +198,20 @@ def test_agent_reasoning_cannot_change_the_outcome(pay: Pay) -> None:
 )
 def test_an_invalid_request_is_refused(pay: Pay, overrides: dict[str, Any]) -> None:
     assert_problem(pay.ask(**overrides), 422, "VALIDATION_FAILED")
+
+
+def test_the_api_can_decide_with_an_unreleased_test_pack(api: Api, tmp_path: Path) -> None:
+    # A test pack whose INR Step-up threshold (INR 1,000) is below the usual request.
+    packs = release_test_pack(
+        tmp_path,
+        "1.0.1",
+        {"currencies": {"INR": {"medium_from": 50000, "step_up_threshold": 100000}}},
+    )
+    api.use_packs(packs)
+    pay = Pay(api)
+
+    body = pay.ask(amount={"minor": 1_250_00, "currency": "INR"}).json()
+
+    assert body["policy_pack"]["version"] == "1.0.1"
+    assert body["outcome"] == "step_up"
+    assert body["reason_codes"] == ["AMOUNT_ABOVE_STEP_UP_THRESHOLD"]

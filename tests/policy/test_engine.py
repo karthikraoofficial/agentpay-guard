@@ -1,4 +1,4 @@
-"""The policy engine at its seam: decide(request, mandate, agent, spent, pack, now)."""
+"""The policy engine at its seam: decide(request, mandate, agent, spent, signals, pack, now)."""
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -11,6 +11,7 @@ from core.domain.decisions import AgentPaymentRequest
 from core.domain.mandates import Mandate
 from core.domain.money import Money
 from core.domain.parties import Agent
+from core.domain.signals import Signals
 from core.policy.engine import decide
 from core.policy.packs import load_active_pack
 
@@ -65,6 +66,7 @@ def run(**kw: Any):  # type: ignore[no-untyped-def]
         "mandate": mandate(),
         "agent": agent(),
         "spent_this_month": ZERO,
+        "signals": Signals(),
         "pack": PACK,
         "now": NOW,
     } | kw
@@ -273,3 +275,10 @@ def test_every_rule_is_now_evaluated_for_a_normal_request() -> None:
     output = run()
 
     assert {r.result for r in output.rule_results} == {"pass"}
+
+
+def test_signals_are_an_input_and_an_empty_set_changes_nothing() -> None:
+    output = decide(request(), mandate(), agent(), ZERO, Signals(), PACK, NOW)
+
+    assert output.outcome == "allow"
+    assert canonical_json(output) == canonical_json(run())

@@ -1,7 +1,7 @@
 """Replay: re-run a recorded Decision and compare bytes (CLAUDE.md non-negotiable 5).
 
 The recorded output is taken from the stored bytes themselves, and the engine is run
-on the recorded inputs, including the recorded Decision time and Spent this month, so
+on the recorded inputs, including the recorded Decision time, Spent this month and Signals, so
 nothing about the present can change the answer.
 """
 
@@ -44,7 +44,7 @@ def replay(body: bytes, pack: PolicyPack, pack_hash: str) -> ReplayResult:
             f"offered {pack.id}@{pack.version} {pack_hash}"
         )
     i = record.inputs
-    output = decide(i.request, i.mandate, i.agent, i.spent_this_month, pack, i.now)
+    output = decide(i.request, i.mandate, i.agent, i.spent_this_month, i.signals, pack, i.now)
     return ReplayResult(
         recorded=canonical_json(json.loads(body)["output"]),
         replayed=canonical_json(output),

@@ -7,6 +7,7 @@ import pytest
 
 from core.domain.decisions import ReasonCode
 from evals.run_evals import GOLDEN, load_cases, main, run_cases
+from tests.packs import release_test_pack
 
 PACKS = Path(__file__).resolve().parents[2] / "policy_packs"
 
@@ -65,3 +66,32 @@ def test_a_wrong_reason_code_alone_still_fails(
     out = capsys.readouterr().out
     assert "per-txn-over" in out
     assert "AMOUNT_ABOVE_STEP_UP_THRESHOLD" in out
+
+
+def test_the_phase1_set_is_pinned_to_default_1_0_0() -> None:
+    cases = load_cases(GOLDEN / "phase1.jsonl")
+
+    assert {(c.pack.id, c.pack.version) for c in cases} == {("default", "1.0.0")}
+
+
+def test_each_golden_file_decides_with_the_pack_its_base_names(tmp_path: Path) -> None:
+    # A pack whose INR Step-up threshold is INR 1,000, below the base request's INR 1,250.
+    packs = release_test_pack(
+        tmp_path / "packs",
+        "1.0.1",
+        {"currencies": {"INR": {"medium_from": 50000, "step_up_threshold": 100000}}},
+        active=True,
+    )
+    golden = tmp_path / "golden"
+    shutil.copytree(GOLDEN, golden)
+    base_path = golden / "phase1_base.json"
+    base = json.loads(base_path.read_text(encoding="utf-8"))
+    base["pack"] = {"id": "default", "version": "1.0.1"}
+    base_path.write_text(json.dumps(base), encoding="utf-8")
+
+    report = run_cases(load_cases(golden / "phase1.jsonl"), packs)
+
+    assert "allow-basic" in {m.case_id for m in report.mismatches}
+    # The real Phase 1 file stays on 1.0.0 even though 1.0.1 is active here.
+    pinned = run_cases(load_cases(GOLDEN / "phase1.jsonl"), packs)
+    assert pinned.mismatches == []
