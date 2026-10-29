@@ -20,7 +20,7 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
-from core.domain.audit import SealedAuditRecord
+from core.domain.audit import SealedAuditRecord, StoredAuditRow
 from core.domain.consent import ConsentRequest
 from core.domain.decisions import AuditRecordId, Decision, DecisionId
 from core.domain.idempotency import IdempotencyKey as IdempotencyKey  # re-exported
@@ -189,6 +189,10 @@ class TenantTransaction(Protocol):
         ...
 
     def get_audit_record(self, audit_record_id: AuditRecordId) -> SealedAuditRecord | None: ...
+
+    def read_audit_chain(self) -> tuple[list[StoredAuditRow], tuple[int, str]]:
+        """Every stored Audit record in seq order, and the chain head, without locking."""
+        ...
 
     def claim_idempotency_key(self, key: IdempotencyKey) -> bool:
         """Hold `key` until this transaction ends. False, without waiting, if another

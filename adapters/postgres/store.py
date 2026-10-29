@@ -17,7 +17,7 @@ from adapters.postgres.tables import (
     tenant_chain_heads,
     tenants,
 )
-from core.domain.audit import ZERO_HASH, SealedAuditRecord, unseal
+from core.domain.audit import ZERO_HASH, SealedAuditRecord, StoredAuditRow, unseal
 from core.domain.consent import ConsentRequest
 from core.domain.decisions import AuditRecordId, Decision, DecisionId, PackRef
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
@@ -249,6 +249,31 @@ class PostgresTransaction:
             )
         ).one_or_none()
         return None if row is None else unseal(bytes(row.body), row.record_hash)
+
+    def read_audit_chain(self) -> tuple[list[StoredAuditRow], tuple[int, str]]:
+        rows = self._conn.execute(
+            select(audit_records)
+            .where(audit_records.c.tenant_id == self._tenant_id)
+            .order_by(audit_records.c.seq)
+        ).mappings()
+        chain = [
+            StoredAuditRow(
+                seq=r["seq"],
+                audit_record_id=r["audit_record_id"],
+                kind=r["kind"],
+                decision_id=r["decision_id"],
+                body=bytes(r["body"]),
+                prev_hash=r["prev_hash"],
+                record_hash=r["record_hash"],
+            )
+            for r in rows
+        ]
+        head = self._conn.execute(
+            select(tenant_chain_heads.c.seq, tenant_chain_heads.c.record_hash).where(
+                tenant_chain_heads.c.tenant_id == self._tenant_id
+            )
+        ).one_or_none()
+        return chain, (0, ZERO_HASH) if head is None else (int(head.seq), str(head.record_hash))
 
     def claim_idempotency_key(self, key: IdempotencyKey) -> bool:
         # A transaction-scoped advisory lock: released at commit or rollback, and a second

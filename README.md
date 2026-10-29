@@ -109,6 +109,20 @@ The evals gate joins CI with the Evals PRD.
 | `infra/` | Docker Compose for local dev; deploy config later |
 | `web/` | Next.js front end; pages arrive from Phase 3 |
 
+## Proving a Decision
+
+Every Decision writes an Audit record into its Tenant's hash chain. Two commands check the evidence:
+
+```bash
+uv run python -m api.admin replay <audit_record_id> --tenant <tenant_id>
+uv run python -m api.admin verify --tenant <tenant_id>
+```
+
+- **`replay`** re-runs the engine on the recorded inputs with the recorded Policy pack and compares bytes. Exit codes: `0` identical, `1` different (prints a diff), `2` the recorded pack is missing or its hash doesn't match, `3` no such record for that Tenant.
+- **`verify`** walks the chain and prints the first broken `seq` if any record was edited, removed or added. Exit codes: `0` clean, `1` broken.
+
+The test suite replays every Decision it makes and verifies every chain it touches.
+
 ## Policy packs
 
 The decision rules read their parameters from a Policy pack, `policy_packs/<id>/<version>.yaml`. `policy_packs/manifest.json` records each released version's hash and which version is active. The API refuses to start if the active pack doesn't match its hash, and CI fails any PR that edits or deletes a released pack file.
