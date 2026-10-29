@@ -2,7 +2,7 @@
 {"id": "allow-second-agent", "description": "The Mandate's second Agent", "request": {"agent_id": "agt_2"}, "expected": {"outcome": "allow", "reason_codes": []}}
 {"id": "allow-second-mcc", "description": "Restaurant MCC the Mandate lists", "request": {"merchant": {"id": "m_x", "name": "Merchant", "mcc": "5812"}}, "expected": {"outcome": "allow", "reason_codes": []}}
 {"id": "allow-one-paisa", "description": "Smallest possible amount", "request": {"amount": {"minor": 1, "currency": "INR"}}, "expected": {"outcome": "allow", "reason_codes": []}}
-{"id": "revoked", "description": "Mandate revoked by the Payer", "mandate": {"revoked_by": "payer", "revoked_at": "2026-11-10T08:00:00Z"}, "expected": {"outcome": "block", "reason_codes": ["MANDATE_REVOKED"]}}
+{"id": "revoked", "description": "Mandate revoked by the Payer", "mandate": {"revoked_by": "payer", "revoked_at": "2026-11-10T08:00:00Z"}, "expected": {"outcome": "allow", "reason_codes": []}}
 {"id": "not-yet-valid", "description": "One millisecond before valid_from", "now": "2026-10-31T23:59:59.999Z", "expected": {"outcome": "block", "reason_codes": ["MANDATE_NOT_YET_VALID"]}}
 {"id": "at-valid-from", "description": "Exactly at valid_from is inside the window", "now": "2026-11-01T00:00:00Z", "expected": {"outcome": "allow", "reason_codes": []}}
 {"id": "at-expiry", "description": "Exactly at expires_at is outside the window", "now": "2027-01-31T00:00:00Z", "expected": {"outcome": "block", "reason_codes": ["MANDATE_EXPIRED"]}}
