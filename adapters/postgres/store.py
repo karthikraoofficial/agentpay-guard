@@ -2,11 +2,20 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
 
-from sqlalchemy import Connection, Engine, func, insert, select, update
+from sqlalchemy import Connection, Engine, RowMapping, func, insert, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from adapters.postgres.tables import agents, api_keys, idempotency_keys, payers, tenants
+from adapters.postgres.tables import (
+    agents,
+    api_keys,
+    idempotency_keys,
+    mandates,
+    payers,
+    tenants,
+)
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
+from core.domain.mandates import ConsentEvidence, Mandate, MandateId, RevokedBy
+from core.domain.money import Money
 from core.domain.parties import Agent, AgentId, AgentStatus, Payer, PayerId
 from core.ports import TenantDirectory, TenantId, UnitOfWork
 
@@ -54,6 +63,45 @@ class PostgresTransaction:
             .returning(*agents.c)
         ).one_or_none()
         return None if row is None else Agent.model_validate(row._asdict())
+
+    def add_mandate(self, mandate: Mandate) -> None:
+        self._own(mandate.tenant_id)
+        self._conn.execute(insert(mandates).values(**_mandate_row(mandate)))
+
+    def get_mandate(self, mandate_id: MandateId) -> Mandate | None:
+        row = (
+            self._conn.execute(
+                select(mandates).where(
+                    mandates.c.tenant_id == self._tenant_id, mandates.c.mandate_id == mandate_id
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return None if row is None else _mandate(row)
+
+    def revoke_mandate(self, mandate_id: MandateId, revoked_by: RevokedBy, at: datetime) -> bool:
+        result = self._conn.execute(
+            update(mandates)
+            .where(
+                mandates.c.tenant_id == self._tenant_id,
+                mandates.c.mandate_id == mandate_id,
+                mandates.c.revoked_at.is_(None),
+            )
+            .values(revoked_by=revoked_by, revoked_at=at)
+        )
+        return result.rowcount == 1
+
+    def list_mandates(
+        self, payer_id: PayerId, limit: int, before: tuple[datetime, MandateId] | None
+    ) -> list[Mandate]:
+        query = select(mandates).where(
+            mandates.c.tenant_id == self._tenant_id, mandates.c.payer_id == payer_id
+        )
+        if before is not None:
+            query = query.where(tuple_(mandates.c.created_at, mandates.c.mandate_id) < before)
+        query = query.order_by(mandates.c.created_at.desc(), mandates.c.mandate_id.desc())
+        return [_mandate(r) for r in self._conn.execute(query.limit(limit)).mappings()]
 
     def claim_idempotency_key(self, key: IdempotencyKey) -> bool:
         # A transaction-scoped advisory lock: released at commit or rollback, and a second
@@ -125,6 +173,53 @@ class PostgresStore:
                 select(api_keys.c.tenant_id).where(api_keys.c.key_hash == key_hash)
             ).scalar_one_or_none()
         return None if tenant_id is None else TenantId(tenant_id)
+
+
+def _mandate_row(m: Mandate) -> dict[str, object]:
+    return {
+        "tenant_id": m.tenant_id,
+        "mandate_id": m.mandate_id,
+        "payer_id": m.payer_id,
+        "allowed_agent_ids": list(m.allowed_agent_ids),
+        "currency": m.currency,
+        "per_txn_cap_minor": m.per_txn_cap.minor,
+        "monthly_cap_minor": m.monthly_cap.minor,
+        "allowed_mccs": list(m.allowed_mccs),
+        "valid_from": m.valid_from,
+        "expires_at": m.expires_at,
+        "supersedes": m.supersedes,
+        "consent_method": m.consent_evidence.method,
+        "consent_reference": m.consent_evidence.reference,
+        "consent_captured_at": m.consent_evidence.captured_at,
+        "created_at": m.created_at,
+        "revoked_by": m.revoked_by,
+        "revoked_at": m.revoked_at,
+    }
+
+
+def _mandate(row: RowMapping) -> Mandate:
+    currency = row["currency"]
+    return Mandate(
+        mandate_id=row["mandate_id"],
+        tenant_id=row["tenant_id"],
+        payer_id=row["payer_id"],
+        allowed_agent_ids=tuple(row["allowed_agent_ids"]),
+        currency=currency,
+        per_txn_cap=Money(minor=row["per_txn_cap_minor"], currency=currency),
+        monthly_cap=Money(minor=row["monthly_cap_minor"], currency=currency),
+        allowed_mccs=tuple(row["allowed_mccs"]),
+        valid_from=row["valid_from"],
+        expires_at=row["expires_at"],
+        supersedes=row["supersedes"],
+        consent_evidence=ConsentEvidence(
+            method=row["consent_method"],
+            reference=row["consent_reference"],
+            captured_at=row["consent_captured_at"],
+        ),
+        created_at=row["created_at"],
+        revoked_by=row["revoked_by"],
+        revoked_at=row["revoked_at"],
+    )
 
 
 _conforms_uow: type[UnitOfWork] = PostgresStore  # mypy checks the adapter matches the ports

@@ -26,6 +26,10 @@ _Avoid_: Revoked agent, suspended agent
 A Payer's standing permission for named Agents to spend within stated limits.
 _Avoid_: Authorisation, consent, policy
 
+**Mandate status**:
+Whether a Mandate can be used at a given moment: active, revoked, expired or not yet valid. Worked out from the time it is read, never stored, except that Revocation is recorded.
+_Avoid_: State, lifecycle
+
 **Consent evidence**:
 The Tenant's record of how and when the Payer agreed to a Mandate. The Tenant attests to it; AgentPay Guard does not verify it.
 _Avoid_: Proof of consent, authorisation
