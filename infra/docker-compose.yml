@@ -20,7 +20,7 @@ services:
       retries: 10
 
   temporal:
-    image: temporalio/temporal:1.1.2
+    image: temporalio/temporal:1.9.1
     command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/data/temporal.db"]
     ports:
       - "7233:7233"
