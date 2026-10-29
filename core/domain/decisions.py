@@ -36,6 +36,7 @@ ReasonCode = Literal[
     "AMOUNT_ABOVE_STEP_UP_THRESHOLD",
     "MONTHLY_CAP_NEAR",
     "VELOCITY_HIGH",
+    "MERCHANT_NEW",
     "INTENT_MISSING",
     "INTENT_MISMATCH",
     "INTENT_UNKNOWN",
@@ -110,6 +111,7 @@ class Decision(_Frozen):
     tenant_id: TenantId
     mandate_id: MandateId
     agent_id: AgentId
+    merchant_id: str
     amount: Money
     outcome: Outcome
     reason_codes: tuple[ReasonCode, ...]

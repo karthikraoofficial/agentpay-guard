@@ -196,6 +196,11 @@ class TenantTransaction(Protocol):
         """Total minor units of allowed Decisions on a Mandate decided in [start, end)."""
         ...
 
+    def has_allowed_payment_to(self, payer_id: PayerId, merchant_id: str) -> bool:
+        """Whether any of the Payer's Mandates has an allowed Decision for this merchant:
+        the New merchant Signal. Read without a lock (a race only adds a step_up)."""
+        ...
+
     def count_decisions(self, mandate_id: MandateId, after: datetime, until: datetime) -> int:
         """Decisions on a Mandate, of any Outcome, decided in (after, until]: Velocity.
         `until` is inclusive so earlier Decisions at the same instant count."""

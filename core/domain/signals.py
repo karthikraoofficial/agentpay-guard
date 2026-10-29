@@ -47,6 +47,9 @@ class Signals(BaseModel):
     # Decisions on the Mandate, of any Outcome, in the pack's Velocity window before
     # this one. None means it wasn't worked out, which the velocity rule treats as high.
     velocity_count: int | None = Field(default=None, ge=0)
+    # Whether the Payer has no earlier allowed payment to this merchant under any of
+    # their Mandates. None means it wasn't worked out, which the rule treats as new.
+    merchant_is_new: bool | None = None
     # The Intent check the request cited, how it was resolved, and its details if used.
     # A missing resolution is treated like no usable verdict.
     cited_intent_id: IntentId | None = None

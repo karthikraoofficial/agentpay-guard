@@ -132,6 +132,7 @@ class PostgresTransaction:
                 decision_id=decision.decision_id,
                 mandate_id=decision.mandate_id,
                 agent_id=decision.agent_id,
+                merchant_id=decision.merchant_id,
                 amount_minor=decision.amount.minor,
                 currency=decision.amount.currency,
                 outcome=decision.outcome,
@@ -156,6 +157,24 @@ class PostgresTransaction:
             )
         ).scalar_one()
         return int(total)
+
+    def has_allowed_payment_to(self, payer_id: PayerId, merchant_id: str) -> bool:
+        query = (
+            select(decisions.c.decision_id)
+            .join(
+                mandates,
+                (mandates.c.tenant_id == decisions.c.tenant_id)
+                & (mandates.c.mandate_id == decisions.c.mandate_id),
+            )
+            .where(
+                decisions.c.tenant_id == self._tenant_id,
+                decisions.c.merchant_id == merchant_id,
+                decisions.c.outcome == "allow",
+                mandates.c.payer_id == payer_id,
+            )
+            .limit(1)
+        )
+        return self._conn.execute(query).first() is not None
 
     def count_decisions(self, mandate_id: MandateId, after: datetime, until: datetime) -> int:
         total = self._conn.execute(
@@ -234,6 +253,7 @@ class PostgresTransaction:
             tenant_id=row["tenant_id"],
             mandate_id=row["mandate_id"],
             agent_id=row["agent_id"],
+            merchant_id=row["merchant_id"],
             amount=Money(minor=row["amount_minor"], currency=row["currency"]),
             outcome=row["outcome"],
             reason_codes=tuple(row["reason_codes"]),

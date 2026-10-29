@@ -27,7 +27,7 @@ from core.domain.decisions import (
     month_window,
 )
 from core.domain.intents import IntentId
-from core.domain.mandates import MandateId
+from core.domain.mandates import Mandate, MandateId
 from core.domain.money import Money
 from core.domain.parties import new_id
 from core.domain.signals import IntentResolution, IntentSignal, Signals
@@ -110,7 +110,7 @@ def resolve_intent(
 def compute_signals(
     tx: TenantTransaction,
     body: AgentPaymentRequest,
-    mandate_id: MandateId,
+    mandate: Mandate,
     pack: PolicyPack,
     now: datetime,
     tenant: TenantId,
@@ -118,7 +118,12 @@ def compute_signals(
 ) -> Signals:
     """Work out the Signals the pack uses, inside the Mandate lock, so parallel requests
     on one Mandate see consistent values. They are recorded and never recomputed."""
+    mandate_id = mandate.mandate_id
     with telemetry.start_span("signals.compute", {"tenant_id": tenant}) as span:
+        merchant_is_new = None
+        if pack.merchant_new is not None:
+            merchant_is_new = not tx.has_allowed_payment_to(mandate.payer_id, body.merchant.id)
+            span.set_attribute("merchant_is_new", merchant_is_new)
         velocity_count = None
         if pack.velocity is not None:
             window = timedelta(seconds=pack.velocity.window_seconds)
@@ -133,6 +138,7 @@ def compute_signals(
                 span.set_attribute("intent_verdict", intent.verdict)
         return Signals(
             velocity_count=velocity_count,
+            merchant_is_new=merchant_is_new,
             cited_intent_id=None if body.intent_id is None else IntentId(body.intent_id),
             intent_resolution=resolution,
             intent=intent,
@@ -167,7 +173,7 @@ def create_decision(
             currency=mandate.currency,
         )
         agent = tx.get_agent(body.agent_id)
-        signals = compute_signals(tx, body, mandate.mandate_id, pack.pack, now, tenant, telemetry)
+        signals = compute_signals(tx, body, mandate, pack.pack, now, tenant, telemetry)
         output = decide(body, mandate, agent, spent, signals, pack.pack, now)
         seq, prev_hash = tx.lock_chain_head()
 
@@ -177,6 +183,7 @@ def create_decision(
             tenant_id=tenant,
             mandate_id=mandate.mandate_id,
             agent_id=body.agent_id,
+            merchant_id=body.merchant.id,
             amount=body.amount,
             outcome=output.outcome,
             reason_codes=output.reason_codes,

@@ -13,6 +13,7 @@ PACKS = Path(__file__).resolve().parents[2] / "policy_packs"
 # Codes default@1.0.0 can never produce; the Phase 2 golden set covers them.
 SIGNAL_CODES = {
     "VELOCITY_HIGH",
+    "MERCHANT_NEW",
     "INTENT_MISSING",
     "INTENT_MISMATCH",
     "INTENT_UNKNOWN",
