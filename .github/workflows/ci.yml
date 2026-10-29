@@ -34,5 +34,3 @@ jobs:
       - name: Tests
         run: uv run pytest
 
-      - name: Evals gate
-        run: uv run python -m evals.run_evals

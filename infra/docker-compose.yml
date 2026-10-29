@@ -4,7 +4,7 @@ name: agentpay-guard
 
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16.6
     environment:
       POSTGRES_USER: agentpay
       POSTGRES_PASSWORD: agentpay # local only; never reuse outside this compose file
@@ -20,7 +20,7 @@ services:
       retries: 10
 
   temporal:
-    image: temporalio/temporal:latest
+    image: temporalio/temporal:1.1.2
     command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/data/temporal.db"]
     ports:
       - "7233:7233"
@@ -29,7 +29,7 @@ services:
       - temporaldata:/data
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: otel/opentelemetry-collector-contrib:0.115.0
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro

@@ -150,6 +150,8 @@ Specs live in docs/specs/. Read the relevant SPEC before changing code.
 
 ## SPEC files to write before code
 
+> **How this is tracked now:** specs are not kept as `docs/specs/` files. Each phase gets one PRD issue on GitHub (label `prd`), written with `/grill-with-docs` and `/to-prd` and broken into tickets with `/to-issues`. The table below lists what those PRDs must decide. Domain terms live in `GLOSSARY.md` and decisions in `docs/adr/`.
+
 Write these in Phase 0, with Claude drafting and you editing. They are the PM artefacts recruiters will read, and the contract Claude Code builds against.
 
 | SPEC | Covers | Key decisions you must make |
