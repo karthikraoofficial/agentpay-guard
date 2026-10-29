@@ -22,6 +22,7 @@ from core.domain.decisions import (
 from core.domain.mandates import Mandate
 from core.domain.money import Money
 from core.domain.parties import Agent, TenantId
+from core.domain.signals import Signals
 
 AuditKind = Literal["decision", "consent_resolution", "void"]
 ZERO_HASH = "sha256:" + "00" * 32
@@ -38,6 +39,8 @@ class DecisionInputs(_Frozen):
     mandate: Mandate
     agent: Agent | None
     spent_this_month: Money
+    # Defaults to empty so records written before Signals existed still parse.
+    signals: Signals = Signals()
     now: AwareDatetime
 
 
@@ -51,6 +54,8 @@ class AuditRecord(_Frozen):
     recorded_at: AwareDatetime
     inputs: DecisionInputs
     pack: PackRef
+    # Phase 1's placeholder, always empty. Kept so Phase 1 records still parse;
+    # Signals are recorded in `inputs.signals`.
     signals: tuple[dict[str, Any], ...] = ()
     output: EngineOutput
 

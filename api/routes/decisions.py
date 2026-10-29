@@ -28,6 +28,7 @@ from core.domain.decisions import (
 )
 from core.domain.money import Money
 from core.domain.parties import new_id
+from core.domain.signals import Signals
 from core.policy.engine import decide
 
 router = APIRouter(prefix="/v1/decisions", tags=["decisions"])
@@ -99,7 +100,8 @@ def create_decision(
             currency=mandate.currency,
         )
         agent = tx.get_agent(body.agent_id)
-        output = decide(body, mandate, agent, spent, pack.pack, now)
+        signals = Signals()
+        output = decide(body, mandate, agent, spent, signals, pack.pack, now)
         seq, prev_hash = tx.lock_chain_head()
 
         ref = PackRef(id=pack.pack.id, version=pack.pack.version, hash=pack.hash)
@@ -126,7 +128,12 @@ def create_decision(
                 decision_id=decision.decision_id,
                 recorded_at=now,
                 inputs=DecisionInputs(
-                    request=body, mandate=mandate, agent=agent, spent_this_month=spent, now=now
+                    request=body,
+                    mandate=mandate,
+                    agent=agent,
+                    spent_this_month=spent,
+                    signals=signals,
+                    now=now,
                 ),
                 pack=ref,
                 output=output,

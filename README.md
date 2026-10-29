@@ -97,7 +97,7 @@ uv run pytest -m perf -s -o addopts=""   # latency budgets
 
 The tests need local Postgres running (the `docker compose` step above) and a `.env`. They create and migrate their own `<database>_test` database on each run, so your dev data is left alone.
 
-The eval gate runs 44 hand-labelled cases (`evals/golden/phase1.jsonl`) through the engine. Each case changes only a few fields of `evals/golden/phase1_base.json`. The gate prints false-allow and false-block counts, and fails on any mismatch, including a wrong Reason code. The full 200+ case set and per-release thresholds come with the Evals PRD.
+The eval gate runs 44 hand-labelled cases (`evals/golden/phase1.jsonl`) through the engine. Each case changes only a few fields of `evals/golden/phase1_base.json`, which also pins the set to Policy pack `default@1.0.0`, so it keeps testing the rules it was labelled for when a newer pack becomes active. The gate prints false-allow and false-block counts, and fails on any mismatch, including a wrong Reason code. The full 200+ case set and per-release thresholds come with the Evals PRD.
 
 ## Layout
 

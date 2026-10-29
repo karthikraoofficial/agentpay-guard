@@ -19,6 +19,7 @@ from core.domain.decisions import (
 from core.domain.mandates import Mandate
 from core.domain.money import Money
 from core.domain.parties import Agent
+from core.domain.signals import Signals
 from core.policy.pack import PolicyPack
 
 
@@ -31,6 +32,7 @@ class Facts:
         mandate: Mandate,
         agent: Agent | None,
         spent_this_month: Money,
+        signals: Signals,
         pack: PolicyPack,
         now: datetime,
     ) -> None:
@@ -38,6 +40,7 @@ class Facts:
         self.mandate = mandate
         self.agent = agent
         self.spent_this_month = spent_this_month
+        self.signals = signals
         self.pack = pack
         self.now = now
 
@@ -182,10 +185,11 @@ def decide(
     mandate: Mandate,
     agent: Agent | None,
     spent_this_month: Money,
+    signals: Signals,
     pack: PolicyPack,
     now: datetime,
 ) -> EngineOutput:
-    facts = Facts(request, mandate, agent, spent_this_month, pack, now)
+    facts = Facts(request, mandate, agent, spent_this_month, signals, pack, now)
     results: list[RuleResult] = []
     for setting in pack.rules:
         rule = RULES.get(setting.rule_id)
