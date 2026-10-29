@@ -36,6 +36,7 @@ Run from the repo root. These are the same commands CI runs.
 - Evals: `uv run python -m evals.run_evals` (fails on any false-allow, false-block or wrong reason code)
 - Latency budgets: `uv run pytest -m perf -s -o addopts=""` (skipped by the default `pytest` run; CI runs them)
 - Tests: `uv run pytest` (needs local infra up and `.env`; tests create their own `<database>_test`)
+- Contract tests against real vendor APIs: `uv run pytest -m contract -o addopts=""` (not in CI; skip without the vendor key)
 - Web: `cd web && npm ci && npm run build`
 
 ## How to work

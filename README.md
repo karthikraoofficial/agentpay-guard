@@ -99,6 +99,8 @@ uv run pytest -m perf -s -o addopts=""   # latency budgets
 
 The tests need local Postgres running (the `docker compose` step above) and a `.env`. They create and migrate their own `<database>_test` database on each run, so your dev data is left alone.
 
+Contract tests call real vendor APIs and are never run by CI. Run them by hand with `uv run pytest -m contract -o addopts=""`. They skip themselves when the vendor key (e.g. `AGENTPAY_ANTHROPIC_API_KEY`) isn't set, and the Claude ones cost a fraction of a cent.
+
 The eval gate runs 44 hand-labelled cases (`evals/golden/phase1.jsonl`) through the engine. Each case changes only a few fields of `evals/golden/phase1_base.json`, which also pins the set to Policy pack `default@1.0.0`, so it keeps testing the rules it was labelled for when a newer pack becomes active. The gate prints false-allow and false-block counts, and fails on any mismatch, including a wrong Reason code. The full 200+ case set and per-release thresholds come with the Evals PRD.
 
 ## Layout
