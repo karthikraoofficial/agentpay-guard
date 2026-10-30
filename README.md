@@ -75,7 +75,7 @@ Send a key as `Authorization: Bearer apg_test_…` on every call, and an `Idempo
 | `POST /v1/payers`, `GET /v1/payers/{id}` | manage / any | Register and fetch a Payer. `contact_ref` must be a token you can resolve, not a raw email or phone number. |
 | `POST /v1/agents`, `GET /v1/agents/{id}` | manage / any | Register and fetch an Agent |
 | `POST /v1/agents/{id}/disable`, `/enable` | manage | Stop an Agent under every Mandate, or let it act again |
-| `POST /v1/mandates`, `GET /v1/mandates/{id}` | manage / any | Record a Payer's Mandate (Agents, caps, MCCs, validity of at most a year, Consent evidence) and read it back with its current status |
+| `POST /v1/mandates`, `GET /v1/mandates/{id}` | manage / any | Record a Payer's Mandate (Agents, caps, MCCs, validity of at most a year, Consent evidence, and optionally the Rail token its Payments will charge: refs and a masked display only, INR for Razorpay) and read it back with its current status |
 | `GET /v1/mandates?payer_id=…` | any | List a Payer's Mandates, newest first. Pass `next_cursor` back as `cursor` |
 | `POST /v1/mandates/{id}/revoke` | any | End a Mandate for good, recording `revoked_by` (`payer` or `tenant`) |
 | `POST /v1/intents`, `GET /v1/intents/{id}` | decide / manage | Before checkout, submit the Payer instruction and the proposed cart for an Intent check by Claude Haiku 5.5. The POST returns only `intent_id` and `expires_at`; the verdict (`match`, `mismatch`, `unknown`) is readable by the Tenant through GET with a `manage` key. A timeout, error or unclear reply is stored as `unknown` |

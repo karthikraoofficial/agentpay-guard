@@ -90,7 +90,16 @@ mandates = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("revoked_by", String, nullable=True),
     Column("revoked_at", DateTime(timezone=True), nullable=True),
+    Column("rail", String, nullable=True),
+    Column("rail_customer_ref", String, nullable=True),
+    Column("rail_token_ref", String, nullable=True),
+    Column("rail_display", String, nullable=True),
     ForeignKeyConstraint(["tenant_id", "payer_id"], ["payers.tenant_id", "payers.payer_id"]),
+    CheckConstraint(
+        "(rail IS NULL) = (rail_customer_ref IS NULL) AND (rail IS NULL) = (rail_token_ref IS NULL)"
+        " AND (rail IS NULL) = (rail_display IS NULL)",
+        name="mandates_rail_token_whole",
+    ),
     CheckConstraint("revoked_by IN ('payer', 'tenant')", name="mandates_revoked_by_valid"),
     CheckConstraint(
         "(revoked_by IS NULL) = (revoked_at IS NULL)", name="mandates_revocation_whole"
