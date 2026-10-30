@@ -1,5 +1,6 @@
 import json
 import shutil
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -144,3 +145,27 @@ def test_a_pack_that_enables_velocity_without_its_parameters_is_refused() -> Non
     assert PolicyPack.model_validate(
         doc | {"velocity": {"max_decisions": 5, "window_seconds": 600}}
     )
+
+
+@pytest.mark.parametrize("version", ["1.0.0", "1.1.0"])
+def test_packs_released_before_the_consent_ttl_existed_give_ten_minutes(version: str) -> None:
+    loaded = load_pack(PACKS, "default", version)  # the Manifest hash check still passes
+
+    assert loaded.pack.consent_ttl_seconds is None
+    assert loaded.pack.consent_ttl == timedelta(minutes=10)
+
+
+def test_a_pack_can_set_its_consent_ttl() -> None:
+    doc = _load(PACKS).pack.model_dump(mode="json", exclude_none=True)
+
+    assert PolicyPack.model_validate(doc | {"consent_ttl_seconds": 120}).consent_ttl == timedelta(
+        seconds=120
+    )
+
+
+@pytest.mark.parametrize("ttl", [0, -1, "600", 1.5])
+def test_a_consent_ttl_that_is_not_a_positive_integer_is_refused(ttl: object) -> None:
+    doc = _load(PACKS).pack.model_dump(mode="json", exclude_none=True)
+
+    with pytest.raises(ValueError):
+        PolicyPack.model_validate(doc | {"consent_ttl_seconds": ttl})

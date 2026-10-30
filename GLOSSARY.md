@@ -16,6 +16,10 @@ _Avoid_: User, customer, end user
 A piece of AI software, registered with a Tenant, that asks to make payments for a Payer.
 _Avoid_: Bot, assistant
 
+**API key scope**:
+What a Tenant's API key may do: decide (Agent traffic) or consent (resolving Consent requests). An Agent is only ever given a decide key.
+_Avoid_: Role, permission
+
 **Disabled agent**:
 An Agent its Tenant has switched off. Its requests are blocked under every Mandate until it is re-enabled.
 _Avoid_: Revoked agent, suspended agent
@@ -47,7 +51,7 @@ The largest single payment a Mandate permits.
 _Avoid_: Limit, max amount
 
 **Monthly cap**:
-The most a Mandate permits in total across one calendar month (UTC), counting only allowed payments.
+The most a Mandate permits in total across one calendar month (UTC), counting only allowed payments and approved step-ups.
 _Avoid_: Budget, rolling limit
 
 **Allowed MCCs**:
@@ -55,7 +59,7 @@ The merchant category codes a Mandate permits. Anything not listed is outside th
 _Avoid_: Categories, whitelist
 
 **Spent this month**:
-The sum of allowed payments under a Mandate in the current calendar month (UTC), checked against the Monthly cap.
+The sum of allowed payments and approved step-ups under a Mandate in the current calendar month (UTC), checked against the Monthly cap. An approved step-up counts in the month it was approved, not the month it was requested.
 _Avoid_: Usage, balance
 
 ## Decisions
@@ -77,8 +81,12 @@ A stable, machine-readable label for why a rule fired. A Decision lists them in 
 _Avoid_: Error code, rule ID
 
 **Consent resolution**:
-The Payer's approval or decline of a Consent request, or its expiry. Recorded as a new Audit record and never by changing the original Decision.
+How a Consent request ended: approved, declined, expired, or blocked (the Payer approved but the Mandate's terms no longer permit the payment). Recorded as a new Audit record and never by changing the original Decision.
 _Avoid_: Consent update, final decision
+
+**Consent link**:
+An expiring link to one Consent request, which the Tenant delivers to the Payer. Whoever opens it is treated as the Payer, and it is used up by the first Consent resolution, not by being opened.
+_Avoid_: Approval link, magic link
 
 **Step-up threshold**:
 The amount, set per currency in the Policy pack, at or above which a payment needs Payer approval even inside the Mandate's caps.

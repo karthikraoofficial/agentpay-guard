@@ -249,6 +249,8 @@ and latency as OpenTelemetry spans. Tests must run without network using a fake 
 
 **Phase 3 — step-up consent workflow** (`/clear` first)
 
+> Superseded in detail by the Phase 3 PRD (#55) and ADR-0008 to ADR-0011: Postgres, not the workflow, owns consent state; the workflow is started from an outbox; approval re-runs the engine and can end `blocked`; consent needs a `consent`-scoped API key; the TTL moves into the Policy pack.
+
 ```text
 Read CLAUDE.md, SPEC-05. Implement a Temporal workflow step_up_consent: on a step_up decision, create a
 consent request, notify (log + web), wait for an approve/decline signal or expire after the SPEC timeout,

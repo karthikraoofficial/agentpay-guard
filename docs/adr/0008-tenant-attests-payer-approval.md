@@ -1,0 +1,5 @@
+# The Tenant attests a Payer's approval of a Consent request; we record it, not verify it
+
+AgentPay Guard holds only a `contact_ref` for a Payer, so it cannot reach or authenticate the Payer itself. A Consent request is resolved in one of two ways. The Tenant authenticates the Payer in its own channel and calls the resolve API, giving how it confirmed them (method and reference). Or the Payer opens a signed, single-use, expiring Consent link that the Tenant delivered, and whoever holds that link is treated as the Payer. Both ways record which one was used and the Tenant's attestation in the Consent resolution.
+
+This extends ADR-0005's liability boundary to step-ups. If the Tenant's attestation is false, or it delivers the Consent link to the wrong person, the loss is the Tenant's. AgentPay Guard is responsible for recording the resolution faithfully and for applying the re-check at approval (ADR-0010). Contacting the Payer directly (SMS, push) would mean storing raw contact details, which the Phase 1 minimisation rule forbids.

@@ -14,7 +14,7 @@ from api.deps import ClockDep, IdemKey, PackDep, StoreDep, TelemetryDep, Tenant
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
 from core.domain.audit import AuditRecord, DecisionInputs, seal
-from core.domain.consent import CONSENT_TTL, ConsentRequest, ConsentRequestId, ConsentStatus
+from core.domain.consent import ConsentRequest, ConsentRequestId, ConsentStatus
 from core.domain.decisions import (
     AgentPaymentRequest,
     AuditRecordId,
@@ -221,7 +221,7 @@ def create_decision(
                 tenant_id=tenant,
                 decision_id=decision.decision_id,
                 created_at=now,
-                expires_at=now + CONSENT_TTL,
+                expires_at=now + pack.pack.consent_ttl,
             )
             tx.add_consent_request(consent)
         tx.append_audit_record(sealed)

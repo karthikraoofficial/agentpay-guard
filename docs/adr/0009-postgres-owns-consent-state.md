@@ -1,0 +1,5 @@
+# Postgres owns consent state; the Temporal workflow only orchestrates
+
+A Consent resolution is written by the resolve endpoint as an Audit record in one Postgres transaction under the Tenant's chain lock, idempotent like every write. Only after it commits does the endpoint signal the `step_up_consent` workflow, on a best-effort basis, so that the workflow stops waiting. The workflow owns the expiry timer, notification retries and writing the expiry record. It is started from a Postgres outbox row inserted in the Decision's transaction, with the Consent request ID as its workflow ID, so a repeated start does nothing.
+
+A reader might expect the workflow to hold the state and the API to only send it signals. We rejected that because an approval would then fail whenever Temporal or the worker was down, and because consent evidence would live outside the hash-chained Audit chain. Starting the workflow directly from `POST /v1/decisions` was also rejected: it adds a network hop to the 150 ms hot path, and the workflow could start for a Decision whose transaction then rolled back.

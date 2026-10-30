@@ -73,7 +73,7 @@ How a Decision is reached:
 - **Blocks:** a revoked or out-of-date Mandate, an Agent that isn't on the Mandate or is disabled, a currency mismatch, a high-risk MCC (gambling, quasi-cash, money transfer) or one the Mandate doesn't list, and an amount over the per-transaction cap or past the monthly cap.
 - **Steps up:** INR 5,000 / USD 100 or more, or reaching 80% of the monthly cap.
 - **Spend:** only allowed Decisions count towards the monthly cap, per UTC calendar month.
-- **On step_up,** the response carries a pending Consent request (`step_up.consent_request_id`, `expires_at`, `status_url`). Its `consent.status` reads `expired` after 10 minutes. Approving it arrives in a later phase.
+- **On step_up,** the response carries a pending Consent request (`step_up.consent_request_id`, `expires_at`, `status_url`). Its `consent.status` reads `expired` once the active Policy pack's consent TTL has passed (`consent_ttl_seconds`; 10 minutes for packs that don't set it). Approving it arrives in a later phase.
 - **No amounts are disclosed:** responses never include thresholds or caps.
 
 Mandates can't be edited. To change terms, create a new Mandate with `supersedes` set to the old one, and revoke the old one.

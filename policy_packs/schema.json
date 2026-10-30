@@ -231,6 +231,19 @@
         }
       ],
       "default": null
+    },
+    "consent_ttl_seconds": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Consent Ttl Seconds"
     }
   },
   "required": [

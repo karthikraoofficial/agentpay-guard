@@ -12,7 +12,7 @@ from api.main import create_app
 from tests.api.conftest import NOW, Api, MovableClock
 from tests.api.test_decisions import Pay
 from tests.conftest import make_settings
-from tests.packs import phase_1_packs
+from tests.packs import phase_1_packs, release_test_pack
 
 
 def inr(minor: int) -> dict[str, Any]:
@@ -92,6 +92,20 @@ def test_a_consent_request_reads_as_expired_after_ten_minutes(pay: Pay) -> None:
     pay.api.clock.advance(timedelta(minutes=9, seconds=59))
     assert pay.api.client.get(url, headers=pay.tenant).json()["consent"]["status"] == "pending"
     pay.api.clock.advance(timedelta(seconds=1))
+    assert pay.api.client.get(url, headers=pay.tenant).json()["consent"]["status"] == "expired"
+
+
+def test_a_consent_request_expires_after_the_active_packs_consent_ttl(
+    api: Api, tmp_path: Path
+) -> None:
+    api.use_packs(release_test_pack(tmp_path, "1.0.1", {"consent_ttl_seconds": 120}))
+    pay = Pay(api)
+
+    body = spend(pay, 6_000_00)
+
+    assert body["step_up"]["expires_at"] == "2026-11-02T09:32:00Z"  # Decision time + 120 s
+    pay.api.clock.advance(timedelta(seconds=120))
+    url = body["step_up"]["status_url"]
     assert pay.api.client.get(url, headers=pay.tenant).json()["consent"]["status"] == "expired"
 
 
