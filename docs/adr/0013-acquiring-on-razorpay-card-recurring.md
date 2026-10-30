@@ -11,5 +11,5 @@ AgentPay Guard decides first, then charges the Payer's Rail token on the Tenant'
 ## Consequences
 
 - The Declared MCC can never be confirmed, because the rail only knows the Merchant of record.
-- No debit is instant. RBI e-mandate rules need a pre-debit notice, so a Payment is scheduled and settles later by webhook.
-- Rail tokens are created by the Payer through Checkout, never by our API. Test-mode tokens expire after 3 days.
+- No debit is instant. RBI e-mandate rules need a pre-debit notice, so a Payment is scheduled and settles later by webhook. The debit itself comes 36 hours and 5 minutes after the notice, as a second step (ADR-0017).
+- Rail tokens are created by the Payer through Checkout, never by our API. Test-mode tokens expire at 23:59:59 IST the day after registration, about 22 hours, not the 3 days Razorpay's docs give (measured in #75).
