@@ -5,7 +5,7 @@ Status is computed from the time it is read, so expiry is never stored.
 """
 
 from datetime import datetime, timedelta
-from typing import Annotated, Literal, NewType, Self
+from typing import Annotated, Any, Literal, NewType, Self
 
 from pydantic import (
     AfterValidator,
@@ -13,12 +13,15 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     StringConstraints,
+    model_serializer,
     model_validator,
 )
 
 from core.domain.money import CurrencyCode, Money
 from core.domain.parties import AgentId, PayerId, TenantId
+from core.domain.payments import RailToken
 
 MandateId = NewType("MandateId", str)
 Mcc = Annotated[str, StringConstraints(pattern=r"^\d{4}$", strict=True)]
@@ -61,6 +64,9 @@ class MandateTerms(_Frozen):
     expires_at: AwareDatetime
     supersedes: MandateId | None = None
     consent_evidence: ConsentEvidence
+    # The instrument Payments under this Mandate charge. Optional: a Mandate without one
+    # can be decided on but never paid (#74).
+    rail_token: RailToken | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
@@ -74,7 +80,18 @@ class MandateTerms(_Frozen):
             raise ValueError("expires_at must be after valid_from")
         if self.expires_at > _one_year_after(self.valid_from):
             raise ValueError("a Mandate can last at most one year")
+        if self.rail_token and not self.rail_token.charges_in(self.currency):
+            raise ValueError(f"the {self.rail_token.rail} rail cannot charge {self.currency}")
         return self
+
+    @model_serializer(mode="wrap")
+    def _omit_missing_rail_token(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Leave `rail_token` out when there is none, so a Mandate snapshot in an Audit record
+        keeps the exact bytes it had before Rail tokens existed."""
+        data: dict[str, Any] = handler(self)
+        if data.get("rail_token", ...) is None:
+            del data["rail_token"]
+        return data
 
 
 class Mandate(MandateTerms):

@@ -57,6 +57,7 @@ from core.domain.parties import (
     Payer,
     PayerId,
 )
+from core.domain.payments import RailToken
 from core.ports import DomainEvent, EventBus, TenantDirectory, TenantId, UnitOfWork
 
 
@@ -681,6 +682,10 @@ def _mandate_row(m: Mandate) -> dict[str, object]:
         "created_at": m.created_at,
         "revoked_by": m.revoked_by,
         "revoked_at": m.revoked_at,
+        "rail": m.rail_token.rail if m.rail_token else None,
+        "rail_customer_ref": m.rail_token.customer_ref if m.rail_token else None,
+        "rail_token_ref": m.rail_token.token_ref if m.rail_token else None,
+        "rail_display": m.rail_token.display if m.rail_token else None,
     }
 
 
@@ -706,6 +711,14 @@ def _mandate(row: RowMapping) -> Mandate:
         created_at=row["created_at"],
         revoked_by=row["revoked_by"],
         revoked_at=row["revoked_at"],
+        rail_token=None
+        if row["rail"] is None
+        else RailToken(
+            rail=row["rail"],
+            customer_ref=row["rail_customer_ref"],
+            token_ref=row["rail_token_ref"],
+            display=row["rail_display"],
+        ),
     )
 
 

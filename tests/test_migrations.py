@@ -88,3 +88,41 @@ def test_0008_gives_keys_from_before_scopes_every_scope() -> None:
         scopes = conn.execute(text("SELECT scopes FROM api_keys")).scalar_one()
     engine.dispose()
     assert sorted(scopes) == ["consent", "decide", "manage"]
+
+
+def test_0013_leaves_existing_mandates_without_a_rail_token() -> None:
+    from alembic import command
+    from fastapi.testclient import TestClient
+    from sqlalchemy import make_url
+
+    from adapters.postgres.store import PostgresStore
+    from api.main import create_app
+    from core.domain.mandates import MandateId
+    from core.settings import get_settings
+    from tests.api.conftest import NOW, Api, MovableClock
+    from tests.api.test_decisions import Pay
+    from tests.conftest import make_settings
+
+    configured = make_url(str(get_settings().database_url))
+    url = configured.set(database=f"{configured.database}_mig13_test")
+    admin = create_engine(configured.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    with admin.connect() as conn:
+        conn.execute(text(f'DROP DATABASE IF EXISTS "{url.database}" WITH (FORCE)'))
+        conn.execute(text(f'CREATE DATABASE "{url.database}"'))
+    admin.dispose()
+    config = Config("alembic.ini")
+    config.attributes["database_url"] = url.render_as_string(hide_password=False)
+    command.upgrade(config, "head")
+    engine = create_engine(url)
+    store, clock = PostgresStore(engine), MovableClock(NOW)
+    pay = Pay(Api(TestClient(create_app(make_settings(), store=store, clock=clock)), store, clock))
+    engine.dispose()
+
+    command.downgrade(config, "0012_consent_links")  # as the Mandate was before Rail tokens
+    command.upgrade(config, "head")
+
+    store = PostgresStore(create_engine(url))
+    with store.transaction(pay.tenant_id()) as tx:
+        mandate = tx.get_mandate(MandateId(pay.mandate_id))
+    assert mandate is not None
+    assert mandate.rail_token is None

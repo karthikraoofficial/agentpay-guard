@@ -23,6 +23,7 @@ from core.domain.mandates import (
 )
 from core.domain.money import Money
 from core.domain.parties import AgentId, PayerId, new_id
+from core.domain.payments import RailToken
 from core.ports import TenantTransaction
 
 router = APIRouter(prefix="/v1/mandates", tags=["mandates"])
@@ -51,6 +52,7 @@ class MandateOut(BaseModel):
     expires_at: AwareDatetime
     supersedes: MandateId | None
     consent_evidence: ConsentEvidence
+    rail_token: RailToken | None = None
     created_at: AwareDatetime
     revoked_by: RevokedBy | None
     revoked_at: AwareDatetime | None

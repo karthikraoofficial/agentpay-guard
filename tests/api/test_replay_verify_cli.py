@@ -74,6 +74,23 @@ def test_a_recorded_decision_replays_identically(pay: Pay, cli) -> None:  # type
     assert "Identical" in out
 
 
+def test_a_decision_on_a_mandate_with_a_rail_token_replays_and_verifies(pay: Pay, cli) -> None:  # type: ignore[no-untyped-def]
+    token = {
+        "rail": "razorpay",
+        "customer_ref": "cust_A1",
+        "token_ref": "token_A1",
+        "display": "visa •••• 1111",
+    }
+    mandate_id = pay.create(rail_token=token)["mandate_id"]
+    audit_id = pay.ask(mandate_id=mandate_id).json()["audit_record_id"]
+
+    replayed = cli("replay", audit_id, "--tenant", pay.tenant_id())
+    verified = cli("verify", "--tenant", pay.tenant_id())
+
+    assert replayed[0] == 0 and "Identical" in replayed[1]
+    assert verified[0] == 0
+
+
 def test_replay_only_reads_the_given_tenants_records(pay: Pay, cli) -> None:  # type: ignore[no-untyped-def]
     audit_id = pay.ask().json()["audit_record_id"]
     other = Pay(pay.api, "other")
