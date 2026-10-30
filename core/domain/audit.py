@@ -36,6 +36,7 @@ from core.domain.parties import Agent, TenantId
 from core.domain.payments import Payment, PaymentId, PaymentStatus
 from core.domain.rails import RailName
 from core.domain.signals import Signals
+from core.domain.voids import VoidVia
 
 AuditKind = Literal["decision", "consent_resolution", "void", "payment"]
 ZERO_HASH = "sha256:" + "00" * 32
@@ -79,6 +80,13 @@ class PaymentEvidence(_Frozen):
         )
 
 
+class VoidEvidence(_Frozen):
+    """Why a Decision was released from Spent this month."""
+
+    via: VoidVia
+    payment_id: PaymentId | None
+
+
 class AuditRecord(_Frozen):
     audit_record_id: AuditRecordId
     tenant_id: TenantId
@@ -98,18 +106,22 @@ class AuditRecord(_Frozen):
     resolution: ResolutionEvidence | None = None
     # Only on a payment record: the Payment's new status.
     payment: PaymentEvidence | None = None
+    # Only on a void record.
+    void: VoidEvidence | None = None
 
     @model_validator(mode="after")
     def _matches_kind(self) -> Self:
         ran = (self.inputs, self.pack, self.output)
         if (self.kind == "payment") != (self.payment is not None):
             raise ValueError("a payment record, and only a payment record, has a payment")
+        if (self.kind == "void") != (self.void is not None):
+            raise ValueError("a void record, and only a void record, has a void")
         if self.kind == "decision":
             if None in ran or self.resolution is not None:
                 raise ValueError("a decision record has inputs, pack and output, no resolution")
-        elif self.kind == "payment":
+        elif self.kind in ("payment", "void"):
             if ran != (None, None, None) or self.resolution is not None:
-                raise ValueError("a payment record has no engine run and no resolution")
+                raise ValueError(f"a {self.kind} record has no engine run and no resolution")
         elif self.kind == "consent_resolution":
             if self.resolution is None:
                 raise ValueError("a consent_resolution record needs a resolution")
@@ -131,7 +143,7 @@ class AuditRecord(_Frozen):
         return {k: v for k, v in data.items() if not (k in _OPTIONAL and v is None)}
 
 
-_OPTIONAL = frozenset({"inputs", "pack", "output", "resolution", "payment"})
+_OPTIONAL = frozenset({"inputs", "pack", "output", "resolution", "payment", "void"})
 
 
 class SealedAuditRecord(_Frozen):

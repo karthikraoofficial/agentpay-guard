@@ -105,6 +105,8 @@ def replay_record(
         record = sealed.record
         if record.payment is not None:
             what = f"{record.payment.status} Payment record"
+        elif record.void is not None:
+            what = "Void record"
         else:
             status = record.resolution.status if record.resolution else record.kind
             what = f"{status} Consent resolution"
