@@ -1,6 +1,6 @@
 [project]
 name = "agentpay-guard"
-version = "0.1.0"
+version = "0.2.0"
 description = "Trust layer for agent-initiated payments: mandates, real-time decisions, durable consent and dispute evidence packs."
 readme = "README.md"
 license = { text = "MIT" }

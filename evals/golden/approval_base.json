@@ -1,8 +1,8 @@
 {
-  "_about": "Shared starting point for evals/golden/approval.jsonl: the re-check when a Payer approves a step_up (ADR-0010), decided with default@1.1.0. The base is an INR 6,000 payment that was stepped up and is being approved; `mandate`, `agent_status`, `spent_this_month_minor` and `now` are as they are at approval, and `signals` are the ones recorded with the original Decision. `expected.resolution` is the Consent resolution: a block gives blocked, anything else approved.",
+  "_about": "Shared starting point for evals/golden/approval.jsonl: the re-check when a Payer approves a step_up (ADR-0010), decided with default@1.2.0, the pack approvals re-check with from Phase 3. The base is an INR 6,000 payment that was stepped up and is being approved; `mandate`, `agent_status`, `spent_this_month_minor` and `now` are as they are at approval, and `signals` are the ones recorded with the original Decision. `expected.resolution` is the Consent resolution: a block gives blocked, anything else approved.",
   "pack": {
     "id": "default",
-    "version": "1.1.0"
+    "version": "1.2.0"
   },
   "mandate": {
     "mandate_id": "mnd_eval",
