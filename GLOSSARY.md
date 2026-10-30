@@ -135,7 +135,7 @@ _Avoid_: False positive, false decline
 ## Payments
 
 **Payment**:
-The money movement for one allowed Decision or approved step-up, for exactly its amount. A Decision has at most one Payment. A Payment is scheduled when the rail accepts it, then captured or failed when the rail reports back.
+The money movement for one allowed Decision or approved step-up, for exactly its amount. A Decision has at most one Payment. A Payment is scheduled from the moment it is made, and becomes captured or failed when the rail reports back, or failed at once if the rail refuses it.
 _Avoid_: Transaction, Agent payment request (that is only the ask)
 
 **Rail charge**:

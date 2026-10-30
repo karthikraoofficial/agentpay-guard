@@ -13,7 +13,8 @@ import pytest
 from adapters.memory.rail import MockRail
 from core.domain.money import Money
 from core.domain.parties import TenantId
-from core.domain.payments import PaymentId, RailToken
+from core.domain.payments import PaymentId
+from core.domain.rails import RailToken
 from core.ports import IdempotencyKey, PaymentRail, RailCharge
 
 TENANT = TenantId("ten_rail_contract")

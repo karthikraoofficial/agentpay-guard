@@ -23,7 +23,7 @@ from core.domain.mandates import (
 )
 from core.domain.money import Money
 from core.domain.parties import AgentId, PayerId, new_id
-from core.domain.payments import RailToken
+from core.domain.rails import RailToken
 from core.ports import TenantTransaction
 
 router = APIRouter(prefix="/v1/mandates", tags=["mandates"])

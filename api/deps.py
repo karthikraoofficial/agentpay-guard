@@ -1,4 +1,4 @@
-"""Request dependencies: the Tenant, store, clock, telemetry and idempotency key."""
+"""Request dependencies: the Tenant, store, clock, telemetry, rail and idempotency key."""
 
 from collections.abc import Callable
 from typing import Annotated, Protocol
@@ -13,6 +13,7 @@ from core.ports import (
     EventBus,
     IdempotencyKey,
     ModelGateway,
+    PaymentRail,
     Telemetry,
     TenantDirectory,
     TenantId,
@@ -50,6 +51,11 @@ def get_telemetry(request: Request) -> Telemetry:
 def get_gateway(request: Request) -> ModelGateway:
     gateway: ModelGateway = request.app.state.gateway
     return gateway
+
+
+def get_rail(request: Request) -> PaymentRail:
+    rail: PaymentRail = request.app.state.rail
+    return rail
 
 
 def get_workflow(request: Request) -> Workflow:
@@ -118,5 +124,6 @@ PackDep = Annotated[LoadedPack, Depends(get_pack)]
 TelemetryDep = Annotated[Telemetry, Depends(get_telemetry)]
 GatewayDep = Annotated[ModelGateway, Depends(get_gateway)]
 SettingsDep = Annotated[Settings, Depends(get_app_settings)]
+RailDep = Annotated[PaymentRail, Depends(get_rail)]
 WorkflowDep = Annotated[Workflow, Depends(get_workflow)]
 IdemKey = Annotated[IdempotencyKey, Depends(idempotency_key)]

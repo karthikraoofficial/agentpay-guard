@@ -102,12 +102,15 @@ def replay_record(
         return NOT_FOUND
     recorded = sealed.record.pack
     if recorded is None:
-        resolution = sealed.record.resolution
-        status = resolution.status if resolution else sealed.record.kind
+        record = sealed.record
+        if record.payment is not None:
+            what = f"{record.payment.status} Payment record"
+        else:
+            status = record.resolution.status if record.resolution else record.kind
+            what = f"{status} Consent resolution"
         out(
-            f"Nothing to re-run: {audit_record_id} (seq {sealed.seq}) is a {status} "
-            "Consent resolution with no engine run. It parses; `verify` checks its place "
-            "in the chain."
+            f"Nothing to re-run: {audit_record_id} (seq {sealed.seq}) is a {what} with no "
+            "engine run. It parses; `verify` checks its place in the chain."
         )
         return IDENTICAL
     try:

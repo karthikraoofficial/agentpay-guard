@@ -26,6 +26,7 @@ from core.domain.parties import (
     Payer,
     PayerId,
 )
+from core.domain.payments import Payment, PaymentId
 from core.ports import DomainEvent, EventBus, TenantDirectory, TenantId, UnitOfWork
 
 
@@ -43,6 +44,7 @@ class _TenantData:
     # event_id -> (event, delivered)
     outbox: dict[str, tuple[DomainEvent, bool]] = field(default_factory=dict)
     links: dict[str, ConsentLink] = field(default_factory=dict)
+    payments: dict[PaymentId, Payment] = field(default_factory=dict)
 
     def copy(self) -> "_TenantData":
         return _TenantData(
@@ -57,6 +59,7 @@ class _TenantData:
             dict(self.intents),
             dict(self.outbox),
             dict(self.links),
+            dict(self.payments),
         )
 
 
@@ -182,6 +185,27 @@ class InMemoryTransaction:
             for d in self._data.decisions.values()
             if d.mandate_id == mandate_id and after < d.decided_at <= until
         )
+
+    def add_payment(self, payment: Payment) -> None:
+        self._own(payment.tenant_id)
+        if self.get_payment_for_decision(payment.decision_id) is not None:
+            raise ValueError(f"Decision {payment.decision_id} already has a Payment")
+        self._data.payments[payment.payment_id] = payment
+
+    def get_payment(self, payment_id: PaymentId) -> Payment | None:
+        return self._data.payments.get(payment_id)
+
+    def get_payment_for_decision(self, decision_id: DecisionId) -> Payment | None:
+        return next((p for p in self._data.payments.values() if p.decision_id == decision_id), None)
+
+    def lock_payment(self, payment_id: PaymentId) -> Payment | None:
+        return self._data.payments.get(payment_id)
+
+    def update_payment(self, payment: Payment) -> None:
+        self._own(payment.tenant_id)
+        if payment.payment_id not in self._data.payments:
+            raise ValueError(f"no Payment {payment.payment_id}")
+        self._data.payments[payment.payment_id] = payment
 
     def add_intent_check(self, check: IntentCheck) -> None:
         self._own(check.tenant_id)
