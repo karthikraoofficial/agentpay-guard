@@ -14,6 +14,7 @@ from core.domain.audit import (
     first_broken_seq,
     seal,
 )
+from core.domain.consent import ResolutionEvidence
 from core.domain.decisions import PackRef
 from core.domain.signals import Signals
 from core.policy.engine import decide
@@ -155,3 +156,62 @@ def test_a_phase_1_record_without_signals_still_replays_and_verifies() -> None:
 
     assert replay(body, PACK, PACK_HASH).identical
     assert first_broken_seq([row], (1, row.record_hash)) is None
+
+
+# --- Consent resolution records -----------------------------------------------------
+
+
+def _declined(seq: int, prev_hash: str) -> AuditRecord:
+    return AuditRecord(
+        audit_record_id=f"aud_{seq}",
+        tenant_id="ten_1",
+        seq=seq,
+        prev_hash=prev_hash,
+        kind="consent_resolution",
+        decision_id="dec_1",
+        recorded_at=NOW,
+        resolution=ResolutionEvidence(
+            consent_request_id="csr_1", status="declined", resolved_via="tenant_api"
+        ),
+    )
+
+
+def test_a_decision_record_keeps_its_byte_format_with_no_resolution_key() -> None:
+    body = json.loads(seal(_record(1, ZERO_HASH)).body)
+
+    assert "resolution" not in body
+    assert {"inputs", "pack", "output"} <= body.keys()
+
+
+def test_a_declined_resolution_has_no_engine_fields_and_chains_with_decisions() -> None:
+    first = seal(_record(1, ZERO_HASH))
+    second = seal(_declined(2, first.record_hash))
+
+    body = json.loads(second.body)
+    assert body["resolution"] == {
+        "consent_request_id": "csr_1",
+        "status": "declined",
+        "resolved_via": "tenant_api",
+        "attestation": None,
+    }
+    assert not {"inputs", "pack", "output"} & body.keys()
+    rows = [StoredAuditRow.from_sealed(s) for s in (first, second)]
+    assert first_broken_seq(rows, (2, second.record_hash)) is None
+
+
+def test_a_record_must_match_its_kind() -> None:
+    decision = _record(1, ZERO_HASH)
+
+    with pytest.raises(ValueError, match="decision record"):
+        AuditRecord.model_validate(decision.model_dump() | {"inputs": None})
+    with pytest.raises(ValueError, match="decision record"):
+        AuditRecord.model_validate(
+            decision.model_dump() | {"resolution": _declined(1, ZERO_HASH).resolution}
+        )
+    with pytest.raises(ValueError, match="consent_resolution record"):
+        AuditRecord.model_validate(_declined(1, ZERO_HASH).model_dump() | {"resolution": None})
+    with pytest.raises(ValueError, match="declined"):
+        AuditRecord.model_validate(
+            _declined(1, ZERO_HASH).model_dump()
+            | {"inputs": decision.inputs, "pack": decision.pack, "output": decision.output}
+        )

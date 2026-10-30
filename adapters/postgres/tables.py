@@ -158,6 +158,31 @@ consent_requests = Table(
     Index("ix_consent_requests_tenant_created", "tenant_id", "created_at", "consent_request_id"),
 )
 
+# One row per resolved Consent request, so the first resolution written wins (ADR-0009).
+# The evidence is its Audit record; this row is for lookup.
+consent_resolutions = Table(
+    "consent_resolutions",
+    metadata,
+    Column("tenant_id", String, primary_key=True),
+    Column("consent_request_id", String, primary_key=True),
+    Column("decision_id", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("resolved_at", DateTime(timezone=True), nullable=False),
+    Column("resolved_via", String, nullable=False),
+    Column("attestation_method", String, nullable=True),
+    Column("attestation_reference", String, nullable=True),
+    Column("attestation_captured_at", DateTime(timezone=True), nullable=True),
+    Column("audit_record_id", String, nullable=False),
+    ForeignKeyConstraint(
+        ["tenant_id", "consent_request_id"],
+        ["consent_requests.tenant_id", "consent_requests.consent_request_id"],
+    ),
+    CheckConstraint(
+        "status IN ('approved', 'declined', 'expired', 'blocked')",
+        name="ck_consent_resolutions_status",
+    ),
+)
+
 # Intent checks (ADR-0007): `content` holds the canonical JSON of the Payer instruction
 # and cart that `content_hash` was taken over. It is nullable so the text can be erased
 # later; the columns Decisions compare (merchant, MCC, Quoted total) stay.

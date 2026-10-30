@@ -3,7 +3,19 @@ from collections.abc import Set as AbstractSet
 from contextlib import contextmanager
 from datetime import datetime
 
-from sqlalchemy import Connection, Engine, RowMapping, func, insert, select, tuple_, update
+from sqlalchemy import (
+    Connection,
+    Engine,
+    RowMapping,
+    Select,
+    and_,
+    func,
+    insert,
+    or_,
+    select,
+    tuple_,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from adapters.postgres.tables import (
@@ -11,6 +23,7 @@ from adapters.postgres.tables import (
     api_keys,
     audit_records,
     consent_requests,
+    consent_resolutions,
     decisions,
     idempotency_keys,
     intent_checks,
@@ -20,7 +33,13 @@ from adapters.postgres.tables import (
     tenants,
 )
 from core.domain.audit import ZERO_HASH, SealedAuditRecord, StoredAuditRow, unseal
-from core.domain.consent import ConsentRequest, ConsentRequestId, ListableConsentStatus
+from core.domain.consent import (
+    Attestation,
+    ConsentRequest,
+    ConsentRequestId,
+    ConsentResolution,
+    ConsentStatus,
+)
 from core.domain.decisions import AuditRecordId, Decision, DecisionId, PackRef
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.intents import IntentCheck, IntentContent, IntentId
@@ -198,53 +217,68 @@ class PostgresTransaction:
 
     def add_consent_request(self, consent: ConsentRequest) -> None:
         self._own(consent.tenant_id)
-        self._conn.execute(insert(consent_requests).values(**consent.model_dump()))
+        row = consent.model_dump(exclude={"resolution"})
+        self._conn.execute(insert(consent_requests).values(**row))
 
     def get_consent_request(self, decision_id: DecisionId) -> ConsentRequest | None:
-        row = (
-            self._conn.execute(
-                select(consent_requests).where(
-                    consent_requests.c.tenant_id == self._tenant_id,
-                    consent_requests.c.decision_id == decision_id,
-                )
-            )
-            .mappings()
-            .one_or_none()
-        )
-        return None if row is None else ConsentRequest.model_validate(dict(row))
+        query = _consents(self._tenant_id).where(consent_requests.c.decision_id == decision_id)
+        row = self._conn.execute(query).mappings().one_or_none()
+        return None if row is None else _consent(row)
 
     def find_consent_request(self, consent_request_id: ConsentRequestId) -> ConsentRequest | None:
-        row = (
-            self._conn.execute(
-                select(consent_requests).where(
-                    consent_requests.c.tenant_id == self._tenant_id,
-                    consent_requests.c.consent_request_id == consent_request_id,
-                )
-            )
-            .mappings()
-            .one_or_none()
+        query = _consents(self._tenant_id).where(
+            consent_requests.c.consent_request_id == consent_request_id
         )
-        return None if row is None else ConsentRequest.model_validate(dict(row))
+        row = self._conn.execute(query).mappings().one_or_none()
+        return None if row is None else _consent(row)
 
     def list_consent_requests(
         self,
-        status: ListableConsentStatus | None,
+        status: ConsentStatus | None,
         now: datetime,
         limit: int,
         before: tuple[datetime, ConsentRequestId] | None,
     ) -> list[ConsentRequest]:
-        c = consent_requests.c
-        query = select(consent_requests).where(c.tenant_id == self._tenant_id)
+        c, r = consent_requests.c, consent_resolutions.c
+        query = _consents(self._tenant_id)
+        unresolved = r.status.is_(None)
         if status == "pending":
-            query = query.where(c.expires_at > now)
+            query = query.where(unresolved, c.expires_at > now)
         elif status == "expired":
-            query = query.where(c.expires_at <= now)
+            query = query.where(or_(and_(unresolved, c.expires_at <= now), r.status == "expired"))
+        elif status is not None:
+            query = query.where(r.status == status)
         if before is not None:
             query = query.where(tuple_(c.created_at, c.consent_request_id) < before)
         query = query.order_by(c.created_at.desc(), c.consent_request_id.desc()).limit(limit)
-        return [
-            ConsentRequest.model_validate(dict(r)) for r in self._conn.execute(query).mappings()
-        ]
+        return [_consent(row) for row in self._conn.execute(query).mappings()]
+
+    def lock_consent_request(self, consent_request_id: ConsentRequestId) -> ConsentRequest | None:
+        query = (
+            _consents(self._tenant_id)
+            .where(consent_requests.c.consent_request_id == consent_request_id)
+            .with_for_update(of=consent_requests)
+        )
+        row = self._conn.execute(query).mappings().one_or_none()
+        return None if row is None else _consent(row)
+
+    def add_consent_resolution(self, resolution: ConsentResolution) -> None:
+        self._own(resolution.tenant_id)
+        a = resolution.attestation
+        self._conn.execute(
+            insert(consent_resolutions).values(
+                tenant_id=resolution.tenant_id,
+                consent_request_id=resolution.consent_request_id,
+                decision_id=resolution.decision_id,
+                status=resolution.status,
+                resolved_at=resolution.resolved_at,
+                resolved_via=resolution.resolved_via,
+                attestation_method=a.method if a else None,
+                attestation_reference=a.reference if a else None,
+                attestation_captured_at=a.captured_at if a else None,
+                audit_record_id=resolution.audit_record_id,
+            )
+        )
 
     def add_intent_check(self, check: IntentCheck) -> None:
         self._own(check.tenant_id)
@@ -470,6 +504,63 @@ class PostgresStore:
         if row is None:
             return None
         return ApiKeyGrant(tenant_id=TenantId(row.tenant_id), scopes=frozenset(row.scopes))
+
+
+def _consents(tenant_id: TenantId) -> Select[tuple[object, ...]]:
+    """A Tenant's Consent requests, each joined to its resolution if it has one."""
+    c, r = consent_requests.c, consent_resolutions.c
+    joined = consent_requests.outerjoin(
+        consent_resolutions,
+        and_(r.tenant_id == c.tenant_id, r.consent_request_id == c.consent_request_id),
+    )
+    return (
+        select(
+            c.consent_request_id,
+            c.tenant_id,
+            c.decision_id,
+            c.created_at,
+            c.expires_at,
+            r.status,
+            r.resolved_at,
+            r.resolved_via,
+            r.attestation_method,
+            r.attestation_reference,
+            r.attestation_captured_at,
+            r.audit_record_id,
+        )
+        .select_from(joined)
+        .where(c.tenant_id == tenant_id)
+    )
+
+
+def _consent(row: RowMapping) -> ConsentRequest:
+    resolution = None
+    if row["status"] is not None:
+        attestation = None
+        if row["attestation_method"] is not None:
+            attestation = Attestation(
+                method=row["attestation_method"],
+                reference=row["attestation_reference"],
+                captured_at=row["attestation_captured_at"],
+            )
+        resolution = ConsentResolution(
+            consent_request_id=row["consent_request_id"],
+            tenant_id=row["tenant_id"],
+            decision_id=row["decision_id"],
+            status=row["status"],
+            resolved_at=row["resolved_at"],
+            resolved_via=row["resolved_via"],
+            attestation=attestation,
+            audit_record_id=row["audit_record_id"],
+        )
+    return ConsentRequest(
+        consent_request_id=row["consent_request_id"],
+        tenant_id=row["tenant_id"],
+        decision_id=row["decision_id"],
+        created_at=row["created_at"],
+        expires_at=row["expires_at"],
+        resolution=resolution,
+    )
 
 
 def _mandate_row(m: Mandate) -> dict[str, object]:

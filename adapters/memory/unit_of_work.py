@@ -6,7 +6,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from core.domain.audit import ZERO_HASH, SealedAuditRecord, StoredAuditRow
-from core.domain.consent import ConsentRequest, ConsentRequestId, ListableConsentStatus
+from core.domain.consent import (
+    ConsentRequest,
+    ConsentRequestId,
+    ConsentResolution,
+    ConsentStatus,
+)
 from core.domain.decisions import AuditRecordId, Decision, DecisionId
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.intents import IntentCheck, IntentId
@@ -184,7 +189,7 @@ class InMemoryTransaction:
 
     def list_consent_requests(
         self,
-        status: ListableConsentStatus | None,
+        status: ConsentStatus | None,
         now: datetime,
         limit: int,
         before: tuple[datetime, ConsentRequestId] | None,
@@ -197,6 +202,20 @@ class InMemoryTransaction:
         if before is not None:
             rows = [c for c in rows if (c.created_at, c.consent_request_id) < before]
         return rows[:limit]
+
+    def lock_consent_request(self, consent_request_id: ConsentRequestId) -> ConsentRequest | None:
+        return self.find_consent_request(consent_request_id)
+
+    def add_consent_resolution(self, resolution: ConsentResolution) -> None:
+        self._own(resolution.tenant_id)
+        consent = self._data.consents.get(resolution.decision_id)
+        if consent is None or consent.consent_request_id != resolution.consent_request_id:
+            raise ValueError(f"no Consent request {resolution.consent_request_id}")
+        if consent.resolution is not None:
+            raise ValueError(f"Consent request {resolution.consent_request_id} is resolved")
+        self._data.consents[resolution.decision_id] = consent.model_copy(
+            update={"resolution": resolution}
+        )
 
     def lock_chain_head(self) -> tuple[int, str]:
         return self._data.head

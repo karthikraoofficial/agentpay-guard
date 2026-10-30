@@ -49,6 +49,7 @@ class StepUpOut(BaseModel):
 
 class ConsentOut(BaseModel):
     status: ConsentStatus
+    resolved_at: AwareDatetime | None
 
 
 class DecisionOut(BaseModel):
@@ -73,7 +74,14 @@ def _out(decision: Decision, consent: ConsentRequest | None, now: datetime) -> D
         status_url=f"/v1/decisions/{decision.decision_id}",
     )
     return DecisionOut.model_validate(
-        {**fields, "step_up": step_up, "consent": ConsentOut(status=consent.status(now))}
+        {**fields, "step_up": step_up, "consent": _consent_out(consent, now)}
+    )
+
+
+def _consent_out(consent: ConsentRequest, now: datetime) -> ConsentOut:
+    resolution = consent.resolution
+    return ConsentOut(
+        status=consent.status(now), resolved_at=resolution.resolved_at if resolution else None
     )
 
 

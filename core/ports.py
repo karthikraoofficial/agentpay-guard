@@ -22,7 +22,12 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from core.domain.audit import SealedAuditRecord, StoredAuditRow
-from core.domain.consent import ConsentRequest, ConsentRequestId, ListableConsentStatus
+from core.domain.consent import (
+    ConsentRequest,
+    ConsentRequestId,
+    ConsentResolution,
+    ConsentStatus,
+)
 from core.domain.decisions import AuditRecordId, Decision, DecisionId
 from core.domain.idempotency import IdempotencyKey as IdempotencyKey  # re-exported
 from core.domain.idempotency import IdempotencyRecord
@@ -221,7 +226,10 @@ class TenantTransaction(Protocol):
 
     def get_intent_check(self, intent_id: IntentId) -> IntentCheck | None: ...
 
-    def get_consent_request(self, decision_id: DecisionId) -> ConsentRequest | None: ...
+    def get_consent_request(self, decision_id: DecisionId) -> ConsentRequest | None:
+        """A Decision's Consent request, with its resolution if any. The same holds for
+        every Consent request read below."""
+        ...
 
     def find_consent_request(
         self, consent_request_id: ConsentRequestId
@@ -229,13 +237,22 @@ class TenantTransaction(Protocol):
 
     def list_consent_requests(
         self,
-        status: ListableConsentStatus | None,
+        status: ConsentStatus | None,
         now: datetime,
         limit: int,
         before: tuple[datetime, ConsentRequestId] | None,
     ) -> list[ConsentRequest]:
         """Consent requests newest first by (created_at, consent_request_id), strictly
         older than `before` when given. `status` is judged against `now`."""
+        ...
+
+    def lock_consent_request(self, consent_request_id: ConsentRequestId) -> ConsentRequest | None:
+        """Read a Consent request, with its resolution if any, and hold it until this
+        transaction ends, so two resolutions can't race. Taken before the chain head."""
+        ...
+
+    def add_consent_resolution(self, resolution: ConsentResolution) -> None:
+        """Record how a Consent request ended. A request has at most one resolution."""
         ...
 
     def get_decision(self, decision_id: DecisionId) -> Decision | None: ...

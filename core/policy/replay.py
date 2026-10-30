@@ -19,6 +19,11 @@ class PackMismatch(Exception):
     """The pack offered for replay is not the one the Decision was made with."""
 
 
+class NothingToReplay(Exception):
+    """The record has no engine run, such as a declined or expired Consent resolution.
+    Its shape is checked when it parses and its chain position by verify."""
+
+
 class ReplayResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -31,9 +36,12 @@ class ReplayResult(BaseModel):
 
 
 def replay(body: bytes, pack: PolicyPack, pack_hash: str) -> ReplayResult:
-    """Re-run the Decision stored in `body` with `pack`, whose hash must be the recorded one."""
+    """Re-run the engine run stored in `body` with `pack`, whose hash must be the
+    recorded one."""
     record = AuditRecord.model_validate_json(body)
-    recorded_pack = record.pack
+    recorded_pack, i = record.pack, record.inputs
+    if recorded_pack is None or i is None:
+        raise NothingToReplay(f"{record.audit_record_id} ({record.kind}) has no engine run")
     if (pack.id, pack.version, pack_hash) != (
         recorded_pack.id,
         recorded_pack.version,
@@ -43,7 +51,6 @@ def replay(body: bytes, pack: PolicyPack, pack_hash: str) -> ReplayResult:
             f"recorded {recorded_pack.id}@{recorded_pack.version} {recorded_pack.hash}, "
             f"offered {pack.id}@{pack.version} {pack_hash}"
         )
-    i = record.inputs
     output = decide(i.request, i.mandate, i.agent, i.spent_this_month, i.signals, pack, i.now)
     return ReplayResult(
         recorded=canonical_json(json.loads(body)["output"]),
