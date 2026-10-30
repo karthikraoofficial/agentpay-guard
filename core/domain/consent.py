@@ -1,6 +1,6 @@
 """Consent requests: a pending ask to the Payer to approve one step_up Decision."""
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Literal, NewType
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict
@@ -9,10 +9,9 @@ from core.domain.decisions import DecisionId
 from core.domain.parties import TenantId
 
 ConsentRequestId = NewType("ConsentRequestId", str)
-ConsentStatus = Literal["pending", "expired"]
-
-# How long the Payer has to answer. A placeholder until the step-up consent PRD sets it.
-CONSENT_TTL = timedelta(minutes=10)
+# Only pending and expired are worked out today; approved, declined and blocked come
+# from a Consent resolution.
+ConsentStatus = Literal["pending", "approved", "declined", "expired", "blocked"]
 
 
 class ConsentRequest(BaseModel):

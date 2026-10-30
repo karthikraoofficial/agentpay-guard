@@ -5,6 +5,7 @@ The policy engine imports only this module, so it never touches files.
 """
 
 import hashlib
+from datetime import timedelta
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -20,6 +21,9 @@ from pydantic import (
 from core.domain.canonical_json import canonical_json
 from core.domain.mandates import Mcc
 from core.domain.money import CurrencyCode
+
+# The consent TTL of packs released before `consent_ttl_seconds` existed.
+LEGACY_CONSENT_TTL_SECONDS = 600
 
 RuleId = Literal[
     "mandate_revoked",
@@ -105,6 +109,13 @@ class PolicyPack(_Strict):
     merchant_new: MerchantNewParams | None = None
     intent: IntentParams | None = None
     price_drift: PriceDriftParams | None = None
+    # How long the Payer has to answer a Consent request. Optional for the same reason;
+    # unset means LEGACY_CONSENT_TTL_SECONDS.
+    consent_ttl_seconds: StrictInt | None = Field(default=None, gt=0)
+
+    @property
+    def consent_ttl(self) -> timedelta:
+        return timedelta(seconds=self.consent_ttl_seconds or LEGACY_CONSENT_TTL_SECONDS)
 
     @model_validator(mode="after")
     def _unique_rules(self) -> "PolicyPack":
