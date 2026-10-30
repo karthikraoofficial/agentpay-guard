@@ -1,7 +1,8 @@
 """The consent worker: `uv run python -m workflows.worker`.
 
-One process hosts the `step_up_consent` workflow, its activities, and the outbox relay
-that starts a workflow for every committed step_up (ADR-0009). Stop it with Ctrl+C;
+One process hosts the `step_up_consent` workflow, its activities, the outbox relay that
+starts a workflow for every committed step_up (ADR-0009), and the reconciliation sweep
+that settles Payments whose rail webhook never came (#82). Stop it with Ctrl+C;
 killing it outright is safe too, since Temporal resumes every waiting workflow on the
 next worker from its history.
 """
@@ -9,6 +10,7 @@ next worker from its history.
 import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 
 from sqlalchemy import create_engine
 from temporalio.client import Client
@@ -16,9 +18,10 @@ from temporalio.worker import Worker
 
 from adapters.postgres.store import PostgresStore
 from adapters.system_clock import SystemClock
-from core.ports import Clock, EventBus, UnitOfWork
+from core.ports import Clock, EventBus, PaymentRail, UnitOfWork
+from core.reconcile import SweepStore, sweep
 from core.relay import relay_once
-from core.settings import get_settings
+from core.settings import Settings, get_settings
 from workflows.activities import ConsentActivities
 from workflows.client import TemporalWorkflow
 from workflows.consent import StepUpConsent
@@ -52,6 +55,32 @@ async def relay_forever(
         await asyncio.sleep(interval_seconds)
 
 
+def sweep_rail(settings: Settings) -> PaymentRail | None:
+    """The rail the sweep asks, or None when there is nothing to ask: MockRail keeps its
+    charges inside the API process, so a worker's own MockRail would know none of them
+    and the sweep would wrongly fail every Payment."""
+    if settings.rail == "mock":
+        return None
+    raise RuntimeError(f"no PaymentRail adapter for {settings.rail} yet (#83)")
+
+
+async def sweep_forever(
+    store: SweepStore, rail: PaymentRail, clock: Clock, settings: Settings
+) -> None:
+    """Reconcile scheduled Payments until cancelled. The sweep is synchronous, so each
+    pass runs in a thread."""
+    older_than = timedelta(seconds=settings.reconcile_after_seconds)
+    while True:
+        result = await asyncio.to_thread(sweep, store, rail, clock, older_than)
+        if result.checked:
+            log.info(
+                "reconciliation sweep checked %d Payment(s), %d error(s)",
+                result.checked,
+                result.errors,
+            )
+        await asyncio.sleep(settings.reconcile_interval_seconds)
+
+
 async def main() -> None:
     settings = get_settings()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -62,13 +91,21 @@ async def main() -> None:
         worker = consent_worker(client, settings.temporal_task_queue, store, clock, pool)
         async with worker:
             log.info("consent worker polling task queue %s", settings.temporal_task_queue)
-            await relay_forever(
-                store,
-                client,
-                settings.temporal_task_queue,
-                clock,
-                settings.outbox_poll_interval_ms / 1000,
-            )
+            loops = [
+                relay_forever(
+                    store,
+                    client,
+                    settings.temporal_task_queue,
+                    clock,
+                    settings.outbox_poll_interval_ms / 1000,
+                )
+            ]
+            rail = sweep_rail(settings)
+            if rail is None:
+                log.info("reconciliation sweep off: the mock rail settles inside the API")
+            else:
+                loops.append(sweep_forever(store, rail, clock, settings))
+            await asyncio.gather(*loops)
 
 
 if __name__ == "__main__":

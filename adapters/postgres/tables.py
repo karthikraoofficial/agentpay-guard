@@ -286,6 +286,8 @@ payments = Table(
     # One Payment per Decision (ADR-0014).
     Index("ux_payments_tenant_decision", "tenant_id", "decision_id", unique=True),
     CheckConstraint("status IN ('scheduled', 'captured', 'failed')", name="payments_status"),
+    # The reconciliation sweep's lookup (#82).
+    Index("ix_payments_status_created", "status", "created_at"),
     CheckConstraint("amount_minor > 0", name="payments_amount_positive"),
 )
 

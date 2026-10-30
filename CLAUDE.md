@@ -27,7 +27,7 @@ Run from the repo root. These are the same commands CI runs.
 - Setup: `uv sync`, then `cp .env.example .env` (set `AGENTPAY_ANTHROPIC_API_KEY`, or `AGENTPAY_INTENT_CHECK_ENABLED=false`; outside `env=test` the app won't start with neither)
 - Local infra: `docker compose -f infra/docker-compose.yml up -d`
 - Run the API: `uv run uvicorn api.main:asgi_app --factory --reload` (health: `/healthz`, docs: `/docs`)
-- Run the consent worker (Temporal workflow, activities and outbox relay; needs local infra): `uv run python -m workflows.worker`
+- Run the consent worker (Temporal workflow, activities, outbox relay and the Payment reconciliation sweep, which is off on the mock rail; needs local infra): `uv run python -m workflows.worker`
 - Lint and format: `uv run ruff check .` and `uv run ruff format --check .`
 - Types: `uv run mypy`
 - Migrations: `uv run alembic upgrade head`
