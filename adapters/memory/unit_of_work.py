@@ -183,6 +183,7 @@ class InMemoryTransaction:
             d.outcome == "allow"
             and d.merchant_id == merchant_id
             and mandates[d.mandate_id].payer_id == payer_id
+            and d.decision_id not in self._data.voids
             for d in self._data.decisions.values()
         )
 
