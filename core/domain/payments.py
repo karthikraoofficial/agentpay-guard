@@ -102,3 +102,36 @@ def payment_refusal(
     if rail_token is None or rail_token.rail != rail:
         return "MANDATE_NOT_PAYABLE"
     return None
+
+
+SettledStatus = Literal["captured", "failed"]
+
+
+class RailReport(BaseModel):
+    """What a rail event says about one of our Payments, read from the rail's own format by
+    its adapter. Only the fields we act on or keep."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: str
+    payment_id: PaymentId
+    rail_payment_id: str
+    status: SettledStatus
+    amount: Money
+    failure_code: str | None = None
+
+
+class RailEvent(BaseModel):
+    """A rail event we acted on, kept so a redelivery is recognised. Never the payload:
+    no card, contact or personal details (non-negotiable 7)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_id: str
+    tenant_id: TenantId
+    event_type: str
+    payment_id: PaymentId
+    rail_payment_id: str
+    status: SettledStatus
+    failure_code: str | None
+    received_at: AwareDatetime

@@ -33,6 +33,7 @@ from adapters.postgres.tables import (
     outbox_events,
     payers,
     payments,
+    rail_events,
     tenant_chain_heads,
     tenants,
     voids,
@@ -60,7 +61,7 @@ from core.domain.parties import (
     Payer,
     PayerId,
 )
-from core.domain.payments import Payment, PaymentId
+from core.domain.payments import Payment, PaymentId, RailEvent
 from core.domain.rails import RailToken
 from core.domain.voids import Void
 from core.ports import DomainEvent, EventBus, TenantDirectory, TenantId, UnitOfWork
@@ -404,6 +405,23 @@ class PostgresTransaction:
     def lock_payment(self, payment_id: PaymentId) -> Payment | None:
         return self._payment(payments.c.payment_id == payment_id, lock=True)
 
+    def add_rail_event(self, event: RailEvent) -> None:
+        self._own(event.tenant_id)
+        self._conn.execute(insert(rail_events).values(**event.model_dump()))
+
+    def get_rail_event(self, event_id: str) -> RailEvent | None:
+        row = (
+            self._conn.execute(
+                select(rail_events).where(
+                    rail_events.c.tenant_id == self._tenant_id,
+                    rail_events.c.event_id == event_id,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return None if row is None else RailEvent.model_validate(dict(row))
+
     def add_void(self, void: Void) -> None:
         self._own(void.tenant_id)
         self._conn.execute(insert(voids).values(**void.model_dump()))
@@ -659,6 +677,13 @@ class PostgresStore:
         with self._engine.connect() as conn:
             row = conn.execute(query).mappings().one_or_none()
         return None if row is None else ConsentLink.model_validate(dict(row))
+
+    def payment_tenant(self, payment_id: PaymentId) -> TenantId | None:
+        query = select(payments.c.tenant_id).where(payments.c.payment_id == payment_id)
+        with self._engine.connect() as conn:
+            found = conn.execute(query).scalars().all()
+        # Payment ids are random, so two Tenants never share one; refuse to guess if they do.
+        return TenantId(found[0]) if len(found) == 1 else None
 
     def undelivered(self, limit: int) -> list[DomainEvent]:
         o = outbox_events.c

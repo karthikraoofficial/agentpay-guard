@@ -304,3 +304,22 @@ voids = Table(
     ),
     CheckConstraint("via IN ('tenant_api', 'payment_failed')", name="voids_via"),
 )
+
+# Rail events acted on (#81), kept so a redelivery is recognised. Ids, status and failure
+# code only: never the payload (non-negotiable 7).
+rail_events = Table(
+    "rail_events",
+    metadata,
+    Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+    Column("event_id", String, primary_key=True),
+    Column("event_type", String, nullable=False),
+    Column("payment_id", String, nullable=False),
+    Column("rail_payment_id", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("failure_code", String, nullable=True),
+    Column("received_at", DateTime(timezone=True), nullable=False),
+    ForeignKeyConstraint(
+        ["tenant_id", "payment_id"], ["payments.tenant_id", "payments.payment_id"]
+    ),
+    CheckConstraint("status IN ('captured', 'failed')", name="rail_events_status"),
+)

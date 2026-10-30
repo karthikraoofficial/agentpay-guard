@@ -36,7 +36,7 @@ from api.deps import (
 from api.errors import ApiError
 from api.idempotency import REPLAYED, request_hash, run_idempotent
 from api.payability import payable_until
-from core.charges import record_charge, record_payment
+from core.charges import record_payment, settle
 from core.domain.decisions import DecisionId, decision_time
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.mandates import MandateId
@@ -184,7 +184,7 @@ def _charge(
         log.warning("rail unavailable for Payment %s, Tenant %s", payment.payment_id, tenant)
         charge = None
     with store.transaction(tenant) as tx:
-        current = record_charge(tx, payment.payment_id, charge, decision_time(clock.now()))
+        current = settle(tx, payment.payment_id, charge, decision_time(clock.now()))
         body = _out(current).model_dump_json().encode("utf-8")
         tx.save_idempotency_record(
             IdempotencyRecord(

@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     # The PaymentRail that Payments go through. "mock" settles in-process and needs no
     # account, so tests, evals and a fresh clone run without Razorpay (ADR-0012, ADR-0013).
     rail: RailName = "mock"
+    # Signs Razorpay's webhooks (#81). Without it every inbound rail webhook is refused.
+    razorpay_webhook_secret: SecretStr | None = None
 
     @model_validator(mode="after")
     def _rail_available(self) -> "Settings":

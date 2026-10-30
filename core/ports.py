@@ -45,7 +45,7 @@ from core.domain.parties import (
     PayerId,
 )
 from core.domain.parties import TenantId as TenantId  # re-exported for adapters
-from core.domain.payments import Payment, PaymentId
+from core.domain.payments import Payment, PaymentId, RailEvent
 from core.domain.rails import RailToken
 from core.domain.voids import Void
 
@@ -265,6 +265,12 @@ class TenantTransaction(Protocol):
         the rail about one Payment apply one after another."""
         ...
 
+    def add_rail_event(self, event: RailEvent) -> None:
+        """Keep a rail event we acted on. An event id is kept at most once."""
+        ...
+
+    def get_rail_event(self, event_id: str) -> RailEvent | None: ...
+
     def add_void(self, void: Void) -> None:
         """Store a Void for lookup. A Decision is Voided at most once."""
         ...
@@ -381,6 +387,11 @@ class TenantDirectory(Protocol):
     def consent_link(self, token_hash: str) -> ConsentLink | None:
         """The link a token hash names, from any Tenant: like an API key, a link is how a
         public request's Tenant is found."""
+        ...
+
+    def payment_tenant(self, payment_id: PaymentId) -> TenantId | None:
+        """The Tenant whose Payment this is: how a rail webhook's Tenant is found. One rail
+        account serves every Tenant (ADR-0012), so events are matched by our own ids."""
         ...
 
 

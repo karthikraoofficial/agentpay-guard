@@ -1,6 +1,7 @@
 """Recording Payments and what the rail says about their Rail charges, in the caller's
-transaction. Each status change is one `payment` Audit record in the Tenant's chain.
-Shared by the payments API, and later by rail webhooks and reconciliation (ADR-0014)."""
+transaction. Each status change is one `payment` Audit record in the Tenant's chain, and
+a failed Payment Voids its Decision. `settle` is the one transition every report goes
+through: the payments API, rail webhooks (#81) and reconciliation (ADR-0014)."""
 
 from datetime import datetime
 
@@ -9,12 +10,30 @@ from core.domain.decisions import AuditRecordId
 from core.domain.parties import new_id
 from core.domain.payments import Payment, PaymentId
 from core.ports import RailCharge, TenantTransaction
+from core.voids import record_void
 
 
 def record_payment(tx: TenantTransaction, payment: Payment, now: datetime) -> None:
     """Store a new Payment with its first Audit record. The caller holds the Mandate."""
     tx.add_payment(payment)
     _audit(tx, payment, now)
+
+
+def settle(
+    tx: TenantTransaction, payment_id: PaymentId, charge: RailCharge | None, now: datetime
+) -> Payment:
+    """Apply a rail report to a Payment: forward only, auditing any change, and Voiding
+    the Decision when the Payment fails so its amount leaves Spent this month. Locks the
+    Mandate first, as Decisions, payments and Voids do, so reports about one Payment
+    apply one after another."""
+    payment = tx.get_payment(payment_id)
+    if payment is None:
+        raise RuntimeError(f"Payment {payment_id} vanished")
+    tx.lock_mandate(payment.mandate_id)
+    current = record_charge(tx, payment_id, charge, now)
+    if current.status == "failed" and tx.get_void(current.decision_id) is None:
+        record_void(tx, current.decision_id, "payment_failed", now, payment_id=payment_id)
+    return current
 
 
 def record_charge(
