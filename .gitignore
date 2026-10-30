@@ -24,3 +24,6 @@ node_modules/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Throwaway prototypes live on their own branches, never on main (#75).
+prototypes/
