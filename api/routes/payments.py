@@ -6,8 +6,12 @@ The only path to the rail. In order (ADR-0014):
    Payment, its `payment` Audit record and the idempotency entry together.
 2. The rail is asked to charge, keyed by the Payment id, so asking again never makes a
    second charge.
-3. A second transaction records what the rail said. If the outcome is unclear (a timeout),
-   the Payment stays scheduled for reconciliation to settle.
+3. A second transaction records what the rail said, and keeps it as the response for
+   replays of the Idempotency-Key.
+
+If the rail's answer never arrived (a timeout, or a crash after step 1), the Payment stays
+scheduled with no rail payment id. A retry with the same key then asks the rail again
+rather than replaying: the rail finds the charge by Payment id, so it is never doubled.
 
 Refusals are 409s, logged and traced but not audited, and never reach the rail.
 """
@@ -32,15 +36,15 @@ from api.deps import (
 from api.errors import ApiError
 from api.idempotency import REPLAYED, request_hash, run_idempotent
 from api.payability import payable_until
-from core.domain.audit import AuditRecord, PaymentEvidence, seal
-from core.domain.decisions import AuditRecordId, DecisionId, decision_time
+from core.charges import record_charge, record_payment
+from core.domain.decisions import DecisionId, decision_time
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.mandates import MandateId
 from core.domain.money import Money
 from core.domain.parties import new_id
 from core.domain.payments import Payment, PaymentId, PaymentStatus, payment_refusal
 from core.domain.rails import RailName, RailToken
-from core.ports import PaymentRail, RailCharge, RailUnavailable, TenantId, TenantTransaction
+from core.ports import PaymentRail, RailUnavailable, TenantId
 
 router = APIRouter(prefix="/v1/payments", tags=["payments"])
 log = logging.getLogger(__name__)
@@ -127,8 +131,7 @@ def create_payment(
             created_at=now,
             updated_at=now,
         )
-        tx.add_payment(payment)
-        _audit(tx, payment, now)
+        record_payment(tx, payment, now)
         made.append((payment, mandate.rail_token))
         span.set_attribute("payment_id", payment.payment_id)
         return 202, _out(payment)
@@ -136,10 +139,30 @@ def create_payment(
     with telemetry.start_span("payment", {"tenant_id": tenant}) as span:
         with store.transaction(tenant) as tx:
             first = run_idempotent(tx, key, fingerprint, clock, write)
-        if first.headers.get(REPLAYED) or not made:
+        if made:
+            payment, rail_token = made[0]
+        elif first.headers.get(REPLAYED) and (unanswered := _unanswered(store, tenant, first)):
+            payment, rail_token = unanswered
+        else:
             return first
-        payment, rail_token = made[0]
         return _charge(store, clock, rail, tenant, payment, rail_token, key, fingerprint)
+
+
+def _unanswered(
+    store: StoreDep, tenant: TenantId, replay: Response
+) -> tuple[Payment, RailToken] | None:
+    """The Payment a replayed response is for, if the rail has not answered for it yet."""
+    shown = PaymentOut.model_validate_json(bytes(replay.body))
+    if shown.status != "scheduled" or shown.rail_payment_id is not None:
+        return None
+    with store.transaction(tenant) as tx:
+        payment = tx.get_payment(shown.payment_id)
+        mandate = tx.get_mandate(shown.mandate_id)
+    if payment is None or mandate is None or mandate.rail_token is None:
+        raise RuntimeError(f"Payment {shown.payment_id} lost its Mandate or Rail token")
+    if payment.status != "scheduled" or payment.rail_payment_id is not None:
+        return None  # answered since the response was kept
+    return payment, mandate.rail_token
 
 
 def _charge(
@@ -156,8 +179,8 @@ def _charge(
     try:
         charge = rail.schedule_charge(tenant, rail_token, payment.amount, payment.payment_id, key)
     except RailUnavailable:
-        # Unclear: the charge may exist. It stays scheduled for reconciliation to look up
-        # by Payment id; never retried here with a new charge.
+        # Unclear: the charge may exist. The Payment stays scheduled; a retry or the
+        # reconciliation sweep asks again by Payment id.
         log.warning("rail unavailable for Payment %s, Tenant %s", payment.payment_id, tenant)
         charge = None
     with store.transaction(tenant) as tx:
@@ -173,43 +196,6 @@ def _charge(
             )
         )
     return Response(content=body, status_code=202, media_type="application/json")
-
-
-def record_charge(
-    tx: TenantTransaction, payment_id: PaymentId, charge: RailCharge | None, now: datetime
-) -> Payment:
-    """Apply what the rail reported to the Payment, forward only, auditing any change of
-    status. Returns the Payment as it now is."""
-    payment = tx.lock_payment(payment_id)
-    if payment is None:
-        raise RuntimeError(f"Payment {payment_id} vanished")
-    if charge is None:
-        return payment
-    moved = payment.charged(charge.status, charge.rail_payment_id, charge.failure_code, now)
-    if moved is None:
-        return payment
-    tx.update_payment(moved)
-    if moved.status != payment.status:
-        _audit(tx, moved, now)
-    return moved
-
-
-def _audit(tx: TenantTransaction, payment: Payment, now: datetime) -> None:
-    seq, prev_hash = tx.lock_chain_head()
-    tx.append_audit_record(
-        seal(
-            AuditRecord(
-                audit_record_id=AuditRecordId(new_id("aud")),
-                tenant_id=payment.tenant_id,
-                seq=seq + 1,
-                prev_hash=prev_hash,
-                kind="payment",
-                decision_id=payment.decision_id,
-                recorded_at=now,
-                payment=PaymentEvidence.of(payment),
-            )
-        )
-    )
 
 
 @router.get("/{payment_id}")

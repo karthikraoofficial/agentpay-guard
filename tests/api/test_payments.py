@@ -17,6 +17,7 @@ from sqlalchemy import create_engine
 from adapters.memory.rail import MockRail
 from adapters.memory.workflow import InMemoryWorkflow
 from adapters.postgres.store import PostgresStore
+from api.admin import replay_record
 from api.main import create_app
 from core.domain.decisions import AuditRecordId
 from core.domain.payments import PaymentId
@@ -222,6 +223,19 @@ def test_a_mandate_without_a_rail_token_is_not_payable(payments: Payments) -> No
     refused(payments, decision["decision_id"], "MANDATE_NOT_PAYABLE")
 
 
+def test_a_rail_token_for_another_rail_is_not_payable(payments: Payments) -> None:
+    razorpay = {
+        "rail": "razorpay",
+        "customer_ref": "cust_Mx1aB2cD3eF4gH",
+        "token_ref": "token_Mx1aB2cD3eF4gI",
+        "display": "visa 1111",
+    }
+    elsewhere = payments.create(rail_token=razorpay)  # the configured rail is mock
+    decision = payments.allow(mandate_id=elsewhere["mandate_id"])
+
+    refused(payments, decision["decision_id"], "MANDATE_NOT_PAYABLE")
+
+
 def test_another_tenants_decision_or_payment_is_not_found(payments: Payments) -> None:
     other = Payments(payments.api, "other")
     theirs = other.allow()
@@ -279,7 +293,7 @@ def test_a_retry_with_the_same_key_returns_the_same_response(payments: Payments)
 # --- Rail outcomes ------------------------------------------------------------------
 
 
-def test_a_rail_timeout_leaves_the_payment_scheduled_and_never_charges_twice(
+def test_a_rail_timeout_leaves_the_payment_scheduled_and_a_retry_finds_the_charge(
     api: Api, tmp_path: Path
 ) -> None:
     api.use_packs(phase_1_packs(tmp_path))
@@ -291,8 +305,43 @@ def test_a_rail_timeout_leaves_the_payment_scheduled_and_never_charges_twice(
     payment = first.json()
     assert first.status_code == 202
     assert (payment["status"], payment["rail_payment_id"]) == ("scheduled", None)
-    assert payments.pay(decision["decision_id"], key="pay-1").content == first.content
+    # The same key asks the rail again, which finds the charge it already made.
+    retried = payments.pay(decision["decision_id"], key="pay-1").json()
+    assert retried["payment_id"] == payment["payment_id"]
+    assert retried["rail_payment_id"].startswith("pay_mock_")
+    assert payments.pay(decision["decision_id"], key="pay-1").json() == retried
     assert_problem(payments.pay(decision["decision_id"]), 409, "DECISION_ALREADY_PAID")
+    assert payments.charges(payment["payment_id"]) == 1
+
+
+class CrashesBeforeCharging(MockRail):
+    """A rail the API dies on before the request reaches it, once."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.crashed = False
+
+    def schedule_charge(self, *args: Any, **kwargs: Any):  # type: ignore[no-untyped-def]
+        if not self.crashed:
+            self.crashed = True
+            raise RuntimeError("process died before calling the rail")
+        return super().schedule_charge(*args, **kwargs)
+
+
+def test_a_retry_after_a_crash_before_the_rail_call_charges_once(api: Api, tmp_path: Path) -> None:
+    api.rail = CrashesBeforeCharging()
+    api.use_packs(phase_1_packs(tmp_path))
+    payments = Payments(api)
+    decision = payments.allow()
+    with pytest.raises(RuntimeError, match="process died"):
+        payments.pay(decision["decision_id"], key="pay-1")
+    assert api.rail.charges_made == 0
+
+    retried = payments.pay(decision["decision_id"], key="pay-1")
+
+    assert retried.status_code == 202
+    payment = retried.json()
+    assert (payment["status"], payment["rail_payment_id"][:9]) == ("scheduled", "pay_mock_")
     assert payments.charges(payment["payment_id"]) == 1
 
 
@@ -329,6 +378,13 @@ def test_a_payment_joins_the_tenants_audit_chain(payments: Payments) -> None:
     assert record.inputs is None and record.output is None
     sealed = payments.audit(AuditRecordId(record.audit_record_id))
     assert b"token_mock" not in sealed.body  # the Payment record names no instrument
+    messages: list[str] = []
+    tenant = payments.tenant_id()
+    code = replay_record(
+        payments.api.store, tenant, record.audit_record_id, payments.api.packs, messages.append
+    )
+    assert code == 0
+    assert "is a scheduled Payment record with no engine run" in messages[0]
 
 
 # --- Concurrency (Postgres: the in-memory store doesn't model parallel writers) ----------
