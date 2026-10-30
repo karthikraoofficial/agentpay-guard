@@ -1,16 +1,25 @@
 import threading
 from collections.abc import Iterator
+from collections.abc import Set as AbstractSet
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from core.domain.audit import ZERO_HASH, SealedAuditRecord, StoredAuditRow
-from core.domain.consent import ConsentRequest
+from core.domain.consent import ConsentRequest, ConsentRequestId, ListableConsentStatus
 from core.domain.decisions import AuditRecordId, Decision, DecisionId
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.intents import IntentCheck, IntentId
 from core.domain.mandates import Mandate, MandateId, RevokedBy
-from core.domain.parties import Agent, AgentId, AgentStatus, Payer, PayerId
+from core.domain.parties import (
+    Agent,
+    AgentId,
+    AgentStatus,
+    ApiKeyGrant,
+    ApiKeyScope,
+    Payer,
+    PayerId,
+)
 from core.ports import TenantDirectory, TenantId, UnitOfWork
 
 
@@ -167,6 +176,28 @@ class InMemoryTransaction:
     def get_consent_request(self, decision_id: DecisionId) -> ConsentRequest | None:
         return self._data.consents.get(decision_id)
 
+    def find_consent_request(self, consent_request_id: ConsentRequestId) -> ConsentRequest | None:
+        return next(
+            (c for c in self._data.consents.values() if c.consent_request_id == consent_request_id),
+            None,
+        )
+
+    def list_consent_requests(
+        self,
+        status: ListableConsentStatus | None,
+        now: datetime,
+        limit: int,
+        before: tuple[datetime, ConsentRequestId] | None,
+    ) -> list[ConsentRequest]:
+        rows = sorted(
+            (c for c in self._data.consents.values() if status in (None, c.status(now))),
+            key=lambda c: (c.created_at, c.consent_request_id),
+            reverse=True,
+        )
+        if before is not None:
+            rows = [c for c in rows if (c.created_at, c.consent_request_id) < before]
+        return rows[:limit]
+
     def lock_chain_head(self) -> tuple[int, str]:
         return self._data.head
 
@@ -213,7 +244,7 @@ class InMemoryUnitOfWork:
 
     def __init__(self) -> None:
         self._tenants: dict[TenantId, _TenantData] = {}
-        self._keys: dict[str, TenantId] = {}
+        self._keys: dict[str, ApiKeyGrant] = {}
         self._claims = _Claims()
         self._commit = threading.Lock()
 
@@ -230,13 +261,23 @@ class InMemoryUnitOfWork:
         finally:
             self._claims.release(tx.held)
 
-    def create_tenant(
-        self, tenant_id: TenantId, name: str, key_prefix: str, key_hash: str, created_at: datetime
-    ) -> None:
+    def create_tenant(self, tenant_id: TenantId, name: str, created_at: datetime) -> None:
         self._tenants.setdefault(tenant_id, _TenantData())
-        self._keys[key_hash] = tenant_id
 
-    def tenant_for_key(self, key_hash: str) -> TenantId | None:
+    def add_api_key(
+        self,
+        tenant_id: TenantId,
+        key_prefix: str,
+        key_hash: str,
+        scopes: AbstractSet[ApiKeyScope],
+        created_at: datetime,
+    ) -> bool:
+        if tenant_id not in self._tenants:
+            return False
+        self._keys[key_hash] = ApiKeyGrant(tenant_id=tenant_id, scopes=frozenset(scopes))
+        return True
+
+    def api_key(self, key_hash: str) -> ApiKeyGrant | None:
         return self._keys.get(key_hash)
 
 

@@ -46,26 +46,35 @@ Every Decision emits a `decision` trace span (Tenant, Outcome, primary Reason co
 
 ## Using the API
 
-Create a Tenant and its API key. The key is printed once and only its hash is stored:
+Create a Tenant. It gets two API keys, each printed once; only their hashes are stored:
 
 ```bash
 uv run alembic upgrade head
 uv run python -m api.admin create-tenant "Acme Wallet"
+uv run python -m api.admin create-key --tenant <id> --scopes decide   # another key, if you need one
 ```
 
-Send the key as `Authorization: Bearer apg_test_…` on every call, and an `Idempotency-Key` header on every write. Available so far:
+Each key has scopes (ADR-0011), so an Agent can never approve its own step_up or grant itself more power:
 
-| Endpoint | Does |
-| --- | --- |
-| `POST /v1/payers`, `GET /v1/payers/{id}` | Register and fetch a Payer. `contact_ref` must be a token you can resolve, not a raw email or phone number. |
-| `POST /v1/agents`, `GET /v1/agents/{id}` | Register and fetch an Agent |
-| `POST /v1/agents/{id}/disable`, `/enable` | Stop an Agent under every Mandate, or let it act again |
-| `POST /v1/mandates`, `GET /v1/mandates/{id}` | Record a Payer's Mandate (Agents, caps, MCCs, validity of at most a year, Consent evidence) and read it back with its current status |
-| `GET /v1/mandates?payer_id=…` | List a Payer's Mandates, newest first. Pass `next_cursor` back as `cursor` |
-| `POST /v1/mandates/{id}/revoke` | End a Mandate for good, recording `revoked_by` (`payer` or `tenant`) |
+- **The agent key (`decide`)** is the only key to give an Agent. It asks for Decisions and Intent checks.
+- **The tenant key (`consent`, `manage`)** stays in your back end. `manage` registers Payers and Agents, grants Mandates, enables and disables Agents, and reads Intent verdicts. `consent` lists Consent requests and, later, resolves them.
+- **Any key** can read Decisions, Mandates, Payers, Agents and Consent requests, and can revoke a Mandate.
 
-| `POST /v1/intents`, `GET /v1/intents/{id}` | Before checkout, submit the Payer instruction and the proposed cart for an Intent check by Claude Haiku 5.5. The POST returns only `intent_id` and `expires_at`; the verdict (`match`, `mismatch`, `unknown`) is readable by the Tenant through GET. A timeout, error or unclear reply is stored as `unknown` |
-| `POST /v1/decisions`, `GET /v1/decisions/{id}` | Ask whether an Agent may pay under a Mandate. Every Outcome (`allow`, `step_up`, `block`) is a 200 with Reason codes, Risk tier, the Policy pack hash and an Audit record ID. Pass the `intent_id` from `POST /v1/intents` to cite an Intent check; packs from `1.1.0` step up a medium or high payment without a usable match |
+A key without the scope an endpoint needs gets `403 INSUFFICIENT_SCOPE`. Keys made before scopes existed have all three.
+
+Send a key as `Authorization: Bearer apg_test_…` on every call, and an `Idempotency-Key` header on every write. Available so far:
+
+| Endpoint | Scope | Does |
+| --- | --- | --- |
+| `POST /v1/payers`, `GET /v1/payers/{id}` | manage / any | Register and fetch a Payer. `contact_ref` must be a token you can resolve, not a raw email or phone number. |
+| `POST /v1/agents`, `GET /v1/agents/{id}` | manage / any | Register and fetch an Agent |
+| `POST /v1/agents/{id}/disable`, `/enable` | manage | Stop an Agent under every Mandate, or let it act again |
+| `POST /v1/mandates`, `GET /v1/mandates/{id}` | manage / any | Record a Payer's Mandate (Agents, caps, MCCs, validity of at most a year, Consent evidence) and read it back with its current status |
+| `GET /v1/mandates?payer_id=…` | any | List a Payer's Mandates, newest first. Pass `next_cursor` back as `cursor` |
+| `POST /v1/mandates/{id}/revoke` | any | End a Mandate for good, recording `revoked_by` (`payer` or `tenant`) |
+| `POST /v1/intents`, `GET /v1/intents/{id}` | decide / manage | Before checkout, submit the Payer instruction and the proposed cart for an Intent check by Claude Haiku 5.5. The POST returns only `intent_id` and `expires_at`; the verdict (`match`, `mismatch`, `unknown`) is readable by the Tenant through GET with a `manage` key. A timeout, error or unclear reply is stored as `unknown` |
+| `POST /v1/decisions`, `GET /v1/decisions/{id}` | decide / any | Ask whether an Agent may pay under a Mandate. Every Outcome (`allow`, `step_up`, `block`) is a 200 with Reason codes, Risk tier, the Policy pack hash and an Audit record ID. Pass the `intent_id` from `POST /v1/intents` to cite an Intent check; packs from `1.1.0` step up a medium or high payment without a usable match |
+| `GET /v1/consent-requests?status=pending`, `GET /v1/consent-requests/{id}` | consent / any | List Consent requests newest first (`status` is `pending` or `expired`, worked out when read; pass `next_cursor` back as `cursor`), or read one |
 
 How a Decision is reached:
 
@@ -87,7 +96,7 @@ Repeating a write with the same `Idempotency-Key` is safe for 24 hours:
 
 Keys are per Tenant.
 
-Errors are `application/problem+json` with a stable `code`, such as `UNAUTHENTICATED`, `IDEMPOTENCY_KEY_MISSING` or `VALIDATION_FAILED`. An ID that belongs to another Tenant returns 404.
+Errors are `application/problem+json` with a stable `code`, such as `UNAUTHENTICATED`, `INSUFFICIENT_SCOPE`, `IDEMPOTENCY_KEY_MISSING` or `VALIDATION_FAILED`. An ID that belongs to another Tenant returns 404.
 
 ## Checks (what CI runs on every PR)
 
@@ -158,7 +167,7 @@ Settings: `AGENTPAY_INTENT_CHECK_ENABLED` (default `true`), `AGENTPAY_INTENT_CHE
 - **Decisions within one Tenant queue briefly on that Tenant's Audit chain lock,** so per-Tenant throughput has a ceiling. Measured with every Signal on (`default@1.1.0`, medium payments citing an Intent check): p50 53 ms and p95 62 ms for one client on local Postgres. A load test against a real server is still to do.
 - **step_up only creates a pending Consent request.** Approval, notification and the durable workflow come in Phase 3.
 - **Only INR and USD,** and one Policy pack for every Tenant.
-- **An Agent that holds its Tenant's API key can read Intent verdicts** through `GET /v1/intents/{id}`, and so could keep rewording a cart until it gets a match. The POST never returns the verdict, but the Tenant is accountable for keeping its key from its own Agents.
+- **Scopes only help if the Agent gets only the agent key.** A Tenant that hands an Agent its tenant key, or a key with every scope, gives it back the power to grant Mandates and read Intent verdicts.
 - **New merchant has a harmless race.** Two parallel first payments to the same merchant under different Mandates can both see it as new. Both just step up.
 - **One Intent check can be cited for 30 minutes,** by any Decision on the same Mandate, Agent and merchant.
 - **Each Intent check holds a database connection while the model answers,** up to 2.5 s, so that a retry never calls the model twice.

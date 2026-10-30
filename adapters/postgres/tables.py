@@ -33,6 +33,7 @@ api_keys = Table(
     Column("key_hash", String, primary_key=True),
     Column("tenant_id", String, ForeignKey("tenants.tenant_id"), nullable=False, index=True),
     Column("key_prefix", String, nullable=False),
+    Column("scopes", ARRAY(String), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
@@ -154,6 +155,7 @@ consent_requests = Table(
         ["tenant_id", "decision_id"], ["decisions.tenant_id", "decisions.decision_id"]
     ),
     Index("ux_consent_requests_decision", "tenant_id", "decision_id", unique=True),
+    Index("ix_consent_requests_tenant_created", "tenant_id", "created_at", "consent_request_id"),
 )
 
 # Intent checks (ADR-0007): `content` holds the canonical JSON of the Payer instruction

@@ -35,17 +35,11 @@ class Pay(Setup):
         return self.api.client.post("/v1/decisions", headers=headers, json=body)
 
     def tenant_id(self) -> TenantId:
-        return TenantId(self.api.store.tenant_for_key(_key_hash(self.tenant)) or "")
+        return self.api.tenant_of(self.tenant)
 
     def audit(self, audit_record_id: str):  # type: ignore[no-untyped-def]
         with self.api.store.transaction(self.tenant_id()) as tx:
             return tx.get_audit_record(AuditRecordId(audit_record_id))
-
-
-def _key_hash(headers: dict[str, str]) -> str:
-    from core.domain.parties import hash_api_key
-
-    return hash_api_key(headers["Authorization"].removeprefix("Bearer "))
 
 
 @pytest.fixture

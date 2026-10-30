@@ -2,7 +2,8 @@
 before asking for a Decision.
 
 The response is only `{intent_id, expires_at}`. The verdict is never shown to the Agent
-here, so it can't reword a cart until it gets a match; the Tenant reads it with GET.
+here, so it can't reword a cart until it gets a match; the Tenant reads it with GET and
+a `manage` key, which an Agent never holds (ADR-0011).
 Mandate status and Agent eligibility are not checked: the Decision enforces those. The
 model call runs inside the write, while the Idempotency-Key is held, so a retry returns
 the stored check without calling the model again.
@@ -13,7 +14,16 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, Response
 from pydantic import AwareDatetime, BaseModel, ConfigDict
 
-from api.deps import ClockDep, GatewayDep, IdemKey, PackDep, SettingsDep, StoreDep, Tenant
+from api.deps import (
+    ClockDep,
+    DecideTenant,
+    GatewayDep,
+    IdemKey,
+    ManageTenant,
+    PackDep,
+    SettingsDep,
+    StoreDep,
+)
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
 from core.domain.decisions import LineItem, Merchant
@@ -79,7 +89,7 @@ class IntentOut(BaseModel):
 def create_intent(
     request: Request,
     body: IntentCreate,
-    tenant: Tenant,
+    tenant: DecideTenant,
     store: StoreDep,
     clock: ClockDep,
     pack: PackDep,
@@ -139,7 +149,7 @@ def create_intent(
 
 
 @router.get("/{intent_id}")
-def get_intent(intent_id: str, tenant: Tenant, store: StoreDep) -> IntentOut:
+def get_intent(intent_id: str, tenant: ManageTenant, store: StoreDep) -> IntentOut:
     with store.transaction(tenant) as tx:
         check = tx.get_intent_check(IntentId(intent_id))
     if check is None:

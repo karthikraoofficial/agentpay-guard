@@ -1,11 +1,12 @@
 """Request dependencies: the Tenant, store, clock, telemetry and idempotency key."""
 
+from collections.abc import Callable
 from typing import Annotated, Protocol
 
 from fastapi import Depends, Header, Request
 
 from api.errors import ApiError
-from core.domain.parties import hash_api_key
+from core.domain.parties import ApiKeyGrant, ApiKeyScope, hash_api_key
 from core.policy.packs import LoadedPack
 from core.ports import (
     Clock,
@@ -53,16 +54,32 @@ def get_app_settings(request: Request) -> Settings:
     return settings
 
 
-def authenticated_tenant(
+def authenticated_key(
     store: Annotated[Store, Depends(get_store)],
     authorization: Annotated[str | None, Header()] = None,
-) -> TenantId:
-    """The Tenant whose API key signed the request. tenant_id never comes from a body."""
+) -> ApiKeyGrant:
+    """The key that signed the request. tenant_id never comes from a body."""
     scheme, _, key = (authorization or "").partition(" ")
-    tenant_id = store.tenant_for_key(hash_api_key(key)) if scheme == "Bearer" and key else None
-    if tenant_id is None:
+    grant = store.api_key(hash_api_key(key)) if scheme == "Bearer" and key else None
+    if grant is None:
         raise ApiError(401, "UNAUTHENTICATED", "Send a valid API key as `Authorization: Bearer`.")
-    return tenant_id
+    return grant
+
+
+def authenticated_tenant(grant: Annotated[ApiKeyGrant, Depends(authenticated_key)]) -> TenantId:
+    """The Tenant of a key with any scope: for reads, and revoking a Mandate."""
+    return grant.tenant_id
+
+
+def _scoped(scope: ApiKeyScope) -> Callable[[ApiKeyGrant], TenantId]:
+    def tenant_with_scope(grant: Annotated[ApiKeyGrant, Depends(authenticated_key)]) -> TenantId:
+        if scope not in grant.scopes:
+            raise ApiError(
+                403, "INSUFFICIENT_SCOPE", f"This API key doesn't have the `{scope}` scope."
+            )
+        return grant.tenant_id
+
+    return tenant_with_scope
 
 
 def idempotency_key(
@@ -78,6 +95,10 @@ def idempotency_key(
 
 
 Tenant = Annotated[TenantId, Depends(authenticated_tenant)]
+# Scoped Tenants (ADR-0011): Agent traffic, consent resolution, and Tenant-side writes.
+DecideTenant = Annotated[TenantId, Depends(_scoped("decide"))]
+ConsentTenant = Annotated[TenantId, Depends(_scoped("consent"))]
+ManageTenant = Annotated[TenantId, Depends(_scoped("manage"))]
 StoreDep = Annotated[Store, Depends(get_store)]
 ClockDep = Annotated[Clock, Depends(get_clock)]
 PackDep = Annotated[LoadedPack, Depends(get_pack)]

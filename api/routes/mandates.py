@@ -10,7 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Request, Response
 from pydantic import AwareDatetime, BaseModel, ConfigDict, ValidationError
 
-from api.deps import ClockDep, IdemKey, PackDep, StoreDep, Tenant
+from api.deps import ClockDep, IdemKey, ManageTenant, PackDep, StoreDep, Tenant
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
 from core.domain.mandates import (
@@ -88,7 +88,7 @@ def _check_references(tx: TenantTransaction, body: MandateCreate) -> None:
 def create_mandate(
     request: Request,
     body: MandateCreate,
-    tenant: Tenant,
+    tenant: ManageTenant,
     store: StoreDep,
     clock: ClockDep,
     pack: PackDep,

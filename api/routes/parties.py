@@ -5,7 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, ConfigDict
 
-from api.deps import ClockDep, IdemKey, StoreDep, Tenant
+from api.deps import ClockDep, IdemKey, ManageTenant, StoreDep, Tenant
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
 from core.domain.parties import (
@@ -61,7 +61,7 @@ def _agent_out(agent: Agent) -> AgentOut:
 def create_payer(
     request: Request,
     body: PayerCreate,
-    tenant: Tenant,
+    tenant: ManageTenant,
     store: StoreDep,
     clock: ClockDep,
     key: IdemKey,
@@ -94,7 +94,7 @@ def get_payer(payer_id: str, tenant: Tenant, store: StoreDep) -> PayerOut:
 def create_agent(
     request: Request,
     body: AgentCreate,
-    tenant: Tenant,
+    tenant: ManageTenant,
     store: StoreDep,
     clock: ClockDep,
     key: IdemKey,
@@ -144,7 +144,12 @@ def _set_status(
 
 @router.post("/agents/{agent_id}/disable", response_model=AgentOut)
 def disable_agent(
-    request: Request, agent_id: str, tenant: Tenant, store: StoreDep, clock: ClockDep, key: IdemKey
+    request: Request,
+    agent_id: str,
+    tenant: ManageTenant,
+    store: StoreDep,
+    clock: ClockDep,
+    key: IdemKey,
 ) -> Response:
     """Stop this Agent under every Mandate until it is re-enabled."""
     return _set_status(request, agent_id, "disabled", tenant, store, clock, key)
@@ -152,6 +157,11 @@ def disable_agent(
 
 @router.post("/agents/{agent_id}/enable", response_model=AgentOut)
 def enable_agent(
-    request: Request, agent_id: str, tenant: Tenant, store: StoreDep, clock: ClockDep, key: IdemKey
+    request: Request,
+    agent_id: str,
+    tenant: ManageTenant,
+    store: StoreDep,
+    clock: ClockDep,
+    key: IdemKey,
 ) -> Response:
     return _set_status(request, agent_id, "active", tenant, store, clock, key)

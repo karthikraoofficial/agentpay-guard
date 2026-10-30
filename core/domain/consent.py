@@ -12,6 +12,8 @@ ConsentRequestId = NewType("ConsentRequestId", str)
 # Only pending and expired are worked out today; approved, declined and blocked come
 # from a Consent resolution.
 ConsentStatus = Literal["pending", "approved", "declined", "expired", "blocked"]
+# The statuses a Consent request list can filter by until resolutions exist.
+ListableConsentStatus = Literal["pending", "expired"]
 
 
 class ConsentRequest(BaseModel):

@@ -1,7 +1,10 @@
 """Operator commands, run as `uv run python -m api.admin <command>`.
 
-- `create-tenant <name>`: creates a Tenant and prints its API key once; only the hash
-  is stored.
+- `create-tenant <name>`: creates a Tenant and prints two API keys once: an agent key
+  (`decide`) for its Agents and a tenant key (`consent`, `manage`) for its own back end
+  (ADR-0011). Only hashes are stored.
+- `create-key --tenant <id> --scopes decide,consent,manage`: issues another key with
+  exactly those scopes. Exit 3 if there is no such Tenant.
 - `replay <audit_record_id> --tenant <id>`: re-runs a recorded Decision and checks the
   output is byte-identical. Exit 0 identical, 1 different (a diff is printed),
   2 pack missing or not the recorded one, 3 no such record for that Tenant.
@@ -21,7 +24,14 @@ from adapters.postgres.store import PostgresStore
 from adapters.system_clock import SystemClock
 from core.domain.audit import first_broken_seq
 from core.domain.decisions import AuditRecordId
-from core.domain.parties import api_key_prefix, hash_api_key, new_api_key, new_id
+from core.domain.parties import (
+    ALL_SCOPES,
+    ApiKeyScope,
+    api_key_prefix,
+    hash_api_key,
+    new_api_key,
+    new_id,
+)
 from core.policy.packs import PackError, load_pack
 from core.policy.replay import PackMismatch, replay
 from core.ports import Clock, TenantDirectory, TenantId, UnitOfWork
@@ -32,15 +42,52 @@ Out = Callable[[str], None]
 IDENTICAL, DIFFERENT, PACK_PROBLEM, NOT_FOUND = 0, 1, 2, 3
 
 
+AGENT_SCOPES: frozenset[ApiKeyScope] = frozenset({"decide"})
+TENANT_SCOPES: frozenset[ApiKeyScope] = frozenset({"consent", "manage"})
+
+
 def create_tenant(
     directory: TenantDirectory, name: str, *, live: bool, clock: Clock
-) -> tuple[TenantId, str]:
-    """Create a Tenant with one API key. Returns the id and the key, which is never
-    retrievable again."""
+) -> tuple[TenantId, str, str]:
+    """Create a Tenant with an agent key and a tenant key. Returns the id and both keys,
+    which are never retrievable again."""
     tenant_id = TenantId(new_id("ten"))
+    directory.create_tenant(tenant_id, name, clock.now())
+    agent_key = create_key(directory, tenant_id, AGENT_SCOPES, live=live, clock=clock)
+    tenant_key = create_key(directory, tenant_id, TENANT_SCOPES, live=live, clock=clock)
+    if agent_key is None or tenant_key is None:  # the Tenant was created just above
+        raise RuntimeError(f"Tenant {tenant_id} vanished while its keys were issued")
+    return tenant_id, agent_key, tenant_key
+
+
+def create_key(
+    directory: TenantDirectory,
+    tenant_id: TenantId,
+    scopes: frozenset[ApiKeyScope],
+    *,
+    live: bool,
+    clock: Clock,
+) -> str | None:
+    """Issue a key with `scopes`. None if there is no such Tenant."""
     key = new_api_key(live=live)
-    directory.create_tenant(tenant_id, name, api_key_prefix(key), hash_api_key(key), clock.now())
-    return tenant_id, key
+    stored = directory.add_api_key(
+        tenant_id, api_key_prefix(key), hash_api_key(key), scopes, clock.now()
+    )
+    return key if stored else None
+
+
+def _scope_list(value: str) -> frozenset[ApiKeyScope]:
+    scopes = {s.strip() for s in value.split(",") if s.strip()}
+    unknown = scopes - ALL_SCOPES
+    if not scopes or unknown:
+        raise argparse.ArgumentTypeError(
+            f"scopes must be a comma-separated subset of {', '.join(sorted(ALL_SCOPES))}"
+        )
+    return frozenset(s for s in ALL_SCOPES if s in scopes)
+
+
+def _label(scopes: frozenset[ApiKeyScope]) -> str:
+    return ", ".join(sorted(scopes))
 
 
 def replay_record(
@@ -90,8 +137,11 @@ def _lines(canonical: bytes) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m api.admin")
     commands = parser.add_subparsers(dest="command", required=True)
-    create = commands.add_parser("create-tenant", help="create a Tenant and print its API key")
+    create = commands.add_parser("create-tenant", help="create a Tenant and print its keys")
     create.add_argument("name")
+    key = commands.add_parser("create-key", help="issue another API key for a Tenant")
+    key.add_argument("--tenant", required=True)
+    key.add_argument("--scopes", required=True, type=_scope_list)
     rep = commands.add_parser("replay", help="re-run a recorded Decision and compare bytes")
     rep.add_argument("audit_record_id")
     rep.add_argument("--tenant", required=True)
@@ -107,12 +157,24 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "verify":
         return verify_chain(store, TenantId(args.tenant), print)
-    tenant_id, key = create_tenant(
-        store, args.name, live=settings.env == "production", clock=SystemClock()
+    live = settings.env == "production"
+    if args.command == "create-key":
+        issued = create_key(
+            store, TenantId(args.tenant), args.scopes, live=live, clock=SystemClock()
+        )
+        if issued is None:
+            print(f"No Tenant {args.tenant}.")
+            return NOT_FOUND
+        print(f"api_key ({_label(args.scopes)}): {issued}")
+        print("Store the key now; it is not shown again.")
+        return 0
+    tenant_id, agent_key, tenant_key = create_tenant(
+        store, args.name, live=live, clock=SystemClock()
     )
     print(f"tenant_id: {tenant_id}")
-    print(f"api_key:   {key}")
-    print("Store the key now; it is not shown again.")
+    print(f"agent_key ({_label(AGENT_SCOPES)}): {agent_key}")
+    print(f"tenant_key ({_label(TENANT_SCOPES)}): {tenant_key}")
+    print("Give Agents only the agent key. Store both now; they are not shown again.")
     return 0
 
 

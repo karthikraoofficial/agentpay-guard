@@ -30,7 +30,8 @@ Run from the repo root. These are the same commands CI runs.
 - Lint and format: `uv run ruff check .` and `uv run ruff format --check .`
 - Types: `uv run mypy`
 - Migrations: `uv run alembic upgrade head`
-- Create a Tenant (prints its API key once): `uv run python -m api.admin create-tenant <name>`
+- Create a Tenant (prints an agent key and a tenant key once): `uv run python -m api.admin create-tenant <name>`
+- Issue another API key: `uv run python -m api.admin create-key --tenant <id> --scopes decide,consent,manage` (any subset; ADR-0011)
 - Replay a Decision / verify a Tenant's Audit chain: `uv run python -m api.admin replay <audit_record_id> --tenant <id>` and `uv run python -m api.admin verify --tenant <id>`
 - Policy pack hash / schema: `uv run python -m core.policy.packs --hash <pack.yaml>` and `--write-schema`
 - Evals: `uv run python -m evals.run_evals` (every golden file in `evals/golden/`, each on its pinned pack; fails on any false-allow, false-block or wrong reason code)
