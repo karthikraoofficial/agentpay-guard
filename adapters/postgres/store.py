@@ -28,6 +28,7 @@ from adapters.postgres.tables import (
     idempotency_keys,
     intent_checks,
     mandates,
+    outbox_events,
     payers,
     tenant_chain_heads,
     tenants,
@@ -54,7 +55,7 @@ from core.domain.parties import (
     Payer,
     PayerId,
 )
-from core.ports import TenantDirectory, TenantId, UnitOfWork
+from core.ports import DomainEvent, EventBus, TenantDirectory, TenantId, UnitOfWork
 
 
 class PostgresTransaction:
@@ -277,6 +278,20 @@ class PostgresTransaction:
         )
         row = self._conn.execute(query).mappings().one_or_none()
         return None if row is None else _consent(row)
+
+    def publish(self, event: DomainEvent) -> None:
+        self._own(event.tenant_id)
+        self._conn.execute(
+            pg_insert(outbox_events)
+            .values(
+                tenant_id=event.tenant_id,
+                event_id=event.event_id,
+                event_type=event.event_type,
+                occurred_at=event.occurred_at,
+                payload=dict(event.payload),
+            )
+            .on_conflict_do_nothing()
+        )
 
     def add_consent_resolution(self, resolution: ConsentResolution) -> None:
         self._own(resolution.tenant_id)
@@ -522,6 +537,36 @@ class PostgresStore:
             return None
         return ApiKeyGrant(tenant_id=TenantId(row.tenant_id), scopes=frozenset(row.scopes))
 
+    def undelivered(self, limit: int) -> list[DomainEvent]:
+        o = outbox_events.c
+        query = (
+            select(outbox_events)
+            .where(o.delivered_at.is_(None))
+            .order_by(o.occurred_at, o.event_id)
+            .limit(limit)
+        )
+        with self._engine.connect() as conn:
+            rows = conn.execute(query).mappings().all()
+        return [
+            DomainEvent(
+                event_id=r["event_id"],
+                tenant_id=TenantId(r["tenant_id"]),
+                event_type=r["event_type"],
+                occurred_at=r["occurred_at"],
+                payload=r["payload"],
+            )
+            for r in rows
+        ]
+
+    def mark_delivered(self, tenant_id: TenantId, event_id: str, at: datetime) -> None:
+        o = outbox_events.c
+        with self._engine.begin() as conn:
+            conn.execute(
+                update(outbox_events)
+                .where(o.tenant_id == tenant_id, o.event_id == event_id)
+                .values(delivered_at=at)
+            )
+
 
 def _consents(tenant_id: TenantId) -> Select[tuple[object, ...]]:
     """A Tenant's Consent requests, each joined to its resolution if it has one."""
@@ -631,3 +676,4 @@ def _mandate(row: RowMapping) -> Mandate:
 
 _conforms_uow: type[UnitOfWork] = PostgresStore  # mypy checks the adapter matches the ports
 _conforms_directory: type[TenantDirectory] = PostgresStore
+_conforms_bus: type[EventBus] = PostgresStore

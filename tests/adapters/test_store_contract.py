@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from adapters.memory.unit_of_work import InMemoryUnitOfWork
 from adapters.postgres.store import PostgresStore
 from core.domain.parties import ALL_SCOPES, ApiKeyGrant, Payer, PayerId, TenantId
+from core.ports import DomainEvent
 
 AT = datetime(2026, 11, 2, tzinfo=UTC)
 
@@ -89,3 +90,43 @@ def test_a_key_for_an_unknown_tenant_is_refused(store: InMemoryUnitOfWork | Post
         is False
     )
     assert store.api_key("sha256:nope") is None
+
+
+def _event(tenant_id: TenantId, event_id: str) -> DomainEvent:
+    return DomainEvent(
+        event_id=event_id,
+        tenant_id=tenant_id,
+        event_type="consent_requested",
+        occurred_at=AT,
+        payload={"consent_request_id": f"csr_{event_id}", "expires_at": "2026-11-02T00:10:00Z"},
+    )
+
+
+def test_published_events_wait_in_the_outbox_until_delivered(
+    store: InMemoryUnitOfWork | PostgresStore,
+) -> None:
+    a, b = _tenant(store, "outbox_a"), _tenant(store, "outbox_b")
+    with store.transaction(a) as tx:
+        tx.publish(_event(a, f"evt_1_{a}"))
+    with store.transaction(b) as tx:
+        tx.publish(_event(b, f"evt_2_{b}"))
+
+    waiting = [e for e in store.undelivered(100_000) if e.tenant_id in (a, b)]
+    assert waiting == [_event(a, f"evt_1_{a}"), _event(b, f"evt_2_{b}")]
+
+    store.mark_delivered(a, f"evt_1_{a}", AT)
+    assert [e for e in store.undelivered(100_000) if e.tenant_id in (a, b)] == [
+        _event(b, f"evt_2_{b}")
+    ]
+
+
+def test_an_event_published_in_a_failed_transaction_is_not_stored(
+    store: InMemoryUnitOfWork | PostgresStore,
+) -> None:
+    tenant = _tenant(store, "outbox_rollback")
+
+    with pytest.raises(RuntimeError), store.transaction(tenant) as tx:
+        tx.publish(_event(tenant, f"evt_rb_{tenant}"))
+        raise RuntimeError("fail after publishing")
+
+    assert [e for e in store.undelivered(100_000) if e.tenant_id == tenant] == []

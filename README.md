@@ -85,6 +85,7 @@ How a Decision is reached:
 - **Steps up:** INR 5,000 / USD 100 or more, or reaching 80% of the monthly cap.
 - **Spend:** allowed Decisions and approved step-ups count towards the monthly cap, per UTC calendar month. An approved step-up counts in the month it was approved.
 - **On step_up,** the response carries a pending Consent request (`step_up.consent_request_id`, `expires_at`, `status_url`). Its `consent.status` reads `expired` once the active Policy pack's consent TTL has passed (`consent_ttl_seconds`; 10 minutes for packs that don't set it). Once the Tenant resolves it, `consent.status` reads `approved`, `declined` or `blocked` with `resolved_at`; the Decision's own `outcome` stays `step_up`. The Agent may pay only on `approved`.
+- **The consent workflow starts from an outbox** (ADR-0009). A step_up writes a `consent_requested` event in the same transaction as the Decision, so the hot path never calls Temporal. A relay starts one workflow per event, with the Consent request ID as its workflow ID, and keeps the event until the start succeeds. Approving or declining signals the workflow after the answer is stored; if that signal fails, the answer still stands.
 - **Approval re-checks the Mandate** (ADR-0010). The engine runs again on the request as it was asked and the Signals recorded then, against the Mandate, Agent and Spent this month as they are at approval. A Payer can lift a step_up but never a block: if the Mandate was revoked or expired, the Agent disabled, or the monthly cap used up while the request waited, the approval is recorded as `blocked` with `consent.reason_codes`.
 - **No amounts are disclosed:** responses never include thresholds or caps.
 
@@ -169,7 +170,8 @@ Settings: `AGENTPAY_INTENT_CHECK_ENABLED` (default `true`), `AGENTPAY_INTENT_CHE
 - **The Declared MCC is trusted.** The merchant category the Agent states isn't yet checked against what the rail reports.
 - **Monthly caps reset at midnight UTC,** which is 05:30 IST on the 1st.
 - **Decisions within one Tenant queue briefly on that Tenant's Audit chain lock,** so per-Tenant throughput has a ceiling. Measured with every Signal on (`default@1.1.0`, medium payments citing an Intent check): p50 53 ms and p95 62 ms for one client on local Postgres. A load test against a real server is still to do.
-- **Consent requests are resolved only through the Tenant API so far.** Consent links, notification and the durable workflow come later in Phase 3.
+- **Consent requests are resolved only through the Tenant API so far.** Consent links come later in Phase 3.
+- **No worker runs the outbox relay or the consent workflow yet.** `consent_requested` events wait in the outbox until the Temporal worker arrives (#61). Expiry is still worked out when read, so nothing is extended in the meantime.
 - **An approved step-up doesn't make its merchant known.** New merchant counts only allowed Decisions, so the next payment to that merchant can step up again.
 - **Only INR and USD,** and one Policy pack for every Tenant.
 - **Scopes only help if the Agent gets only the agent key.** A Tenant that hands an Agent its tenant key, or a key with every scope, gives it back the power to grant Mandates and read Intent verdicts.

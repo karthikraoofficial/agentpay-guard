@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     # Measured ~900 ms round trip from a dev machine; the check is off the decision path.
     intent_check_timeout_ms: int = Field(default=2500, gt=0, le=30_000)
 
+    # The outbox relay: how often it looks for undelivered events (ADR-0009).
+    outbox_poll_interval_ms: int = Field(default=1000, gt=0, le=60_000)
+
     @model_validator(mode="after")
     def _key_when_checking(self) -> "Settings":
         if self.intent_check_enabled and self.env != "test" and self.anthropic_api_key is None:

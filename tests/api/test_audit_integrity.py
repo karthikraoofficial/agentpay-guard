@@ -76,6 +76,27 @@ def test_if_the_audit_write_fails_no_decision_is_stored(pg: Pay, engine: Engine)
     assert _count(engine, failed_key, t=tenant_id) == 0
 
 
+def test_if_a_step_up_rolls_back_no_outbox_event_is_left(pg: Pay, engine: Engine) -> None:
+    tenant_id = pg.tenant_id()
+    failing = create_app(make_settings(), store=_FailingStore(engine), clock=MovableClock(NOW))
+    client = TestClient(failing, raise_server_exceptions=False)
+    body = {
+        "mandate_id": pg.mandate_id,
+        "agent_id": pg.agent_ids[0],
+        "amount": {"minor": 6_000_00, "currency": "INR"},  # above the step-up threshold
+        "merchant": {"id": "m", "name": "M", "mcc": "5411"},
+    }
+
+    response = client.post(
+        "/v1/decisions", headers={**pg.tenant, "Idempotency-Key": "k-fail-2"}, json=body
+    )
+
+    assert response.status_code == 500
+    assert (
+        _count(engine, "SELECT count(*) FROM outbox_events WHERE tenant_id = :t", t=tenant_id) == 0
+    )
+
+
 @pytest.mark.parametrize(
     "statement",
     [

@@ -11,13 +11,14 @@ engine on fresh inputs, so it can lift a step_up but never a block (ADR-0010).""
 import base64
 import binascii
 import json
+import logging
 from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Request, Response
 from pydantic import AwareDatetime, BaseModel, ConfigDict, ValidationError
 
-from api.deps import ClockDep, ConsentTenant, IdemKey, PackDep, StoreDep, Tenant
+from api.deps import ClockDep, ConsentTenant, IdemKey, PackDep, StoreDep, Tenant, WorkflowDep
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
 from api.routes.decisions import decision_time
@@ -45,9 +46,10 @@ from core.domain.money import Money
 from core.domain.parties import new_id
 from core.policy.engine import decide
 from core.policy.packs import LoadedPack
-from core.ports import TenantTransaction
+from core.ports import TenantId, TenantTransaction, Workflow
 
 router = APIRouter(prefix="/v1/consent-requests", tags=["consent"])
+log = logging.getLogger(__name__)
 
 
 class ConsentRequestOut(BaseModel):
@@ -136,6 +138,7 @@ def decline_consent_request(
     tenant: ConsentTenant,
     store: StoreDep,
     clock: ClockDep,
+    workflow: WorkflowDep,
     key: IdemKey,
     body: DeclineBody | None = None,
 ) -> Response:
@@ -148,7 +151,9 @@ def decline_consent_request(
         return 200, _resolution_out(resolution)
 
     with store.transaction(tenant) as tx:
-        return run_idempotent(tx, key, request_hash(request, body), clock, write)
+        response = run_idempotent(tx, key, request_hash(request, body), clock, write)
+    signal_resolved(workflow, tenant, ConsentRequestId(consent_request_id))
+    return response
 
 
 @router.post("/{consent_request_id}/approve", response_model=ConsentResolutionOut)
@@ -160,6 +165,7 @@ def approve_consent_request(
     store: StoreDep,
     clock: ClockDep,
     pack: PackDep,
+    workflow: WorkflowDep,
     key: IdemKey,
 ) -> Response:
     """The Payer said yes. Returns 200 with `approved`, or `blocked` with the Reason
@@ -172,7 +178,25 @@ def approve_consent_request(
         return 200, _resolution_out(resolution)
 
     with store.transaction(tenant) as tx:
-        return run_idempotent(tx, key, request_hash(request, body), clock, write)
+        response = run_idempotent(tx, key, request_hash(request, body), clock, write)
+    signal_resolved(workflow, tenant, ConsentRequestId(consent_request_id))
+    return response
+
+
+def signal_resolved(
+    workflow: Workflow, tenant_id: TenantId, consent_request_id: ConsentRequestId
+) -> None:
+    """Tell the workflow to stop waiting, after the resolution has committed. Best effort:
+    Postgres already holds the answer, and the workflow's timer finds it if this fails."""
+    try:
+        workflow.signal_resolved(tenant_id, consent_request_id)
+    except Exception as exc:  # never fail a stored resolution over a nudge
+        log.warning(
+            "consent workflow %s for Tenant %s not signalled: %s",
+            consent_request_id,
+            tenant_id,
+            type(exc).__name__,
+        )
 
 
 def decline(

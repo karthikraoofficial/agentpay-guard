@@ -163,6 +163,19 @@ class ModelGateway(Protocol):
 # --- UnitOfWork ----------------------------------------------------------------
 
 
+# Events the outbox carries. One for now: a step_up created a Consent request.
+EventType = Literal["consent_requested"]
+
+
+class DomainEvent(_Frozen):
+    event_id: str
+    tenant_id: TenantId
+    event_type: EventType
+    occurred_at: datetime
+    # Identifiers and timestamps only, as strings: never personal data or free text.
+    payload: Mapping[str, str]
+
+
 class TenantTransaction(Protocol):
     """One atomic piece of work for one Tenant. Every read and write made through it is
     scoped by its tenant_id (non-negotiable 3). Typed operations, such as locking a
@@ -256,6 +269,10 @@ class TenantTransaction(Protocol):
         """Record how a Consent request ended. A request has at most one resolution."""
         ...
 
+    def publish(self, event: DomainEvent) -> None:
+        """Write an event to the outbox in this transaction (the transactional outbox)."""
+        ...
+
     def get_decision(self, decision_id: DecisionId) -> Decision | None: ...
 
     def lock_chain_head(self) -> tuple[int, str]:
@@ -316,18 +333,38 @@ class TenantDirectory(Protocol):
 # --- EventBus ------------------------------------------------------------------
 
 
-class DomainEvent(_Frozen):
-    tenant_id: TenantId
-    event_type: str
-    occurred_at: datetime
-    payload: Mapping[str, object]
-
-
 class EventBus(Protocol):
-    """MVP: a Postgres outbox table. Production: a managed queue with the same contract.
-    Publishing twice with the same key delivers the event once."""
+    """The relay's side of the outbox. MVP: a Postgres table; production: a managed queue
+    with the same contract. Events are written with `TenantTransaction.publish`, so they
+    commit or roll back with the work that raised them.
 
-    def publish(self, event: DomainEvent, idempotency_key: IdempotencyKey) -> None: ...
+    `undelivered` is the one read here not scoped to a Tenant, like TenantDirectory's key
+    lookup, because the relay finds work for every Tenant. Every write is scoped."""
+
+    def undelivered(self, limit: int) -> list[DomainEvent]:
+        """Events not yet delivered, oldest first."""
+        ...
+
+    def mark_delivered(self, tenant_id: TenantId, event_id: str, at: datetime) -> None: ...
+
+
+# --- Workflow ------------------------------------------------------------------
+
+
+class Workflow(Protocol):
+    """Durable consent workflows (ADR-0009). MVP and production: Temporal.
+
+    The workflow ID is the Consent request ID, so starting one twice does nothing.
+    Postgres owns consent state; the workflow only waits, notifies and writes the expiry
+    record, so a signal is a best-effort nudge to stop waiting."""
+
+    def start_consent(
+        self, tenant_id: TenantId, consent_request_id: ConsentRequestId, expires_at: datetime
+    ) -> None: ...
+
+    def signal_resolved(
+        self, tenant_id: TenantId, consent_request_id: ConsentRequestId
+    ) -> None: ...
 
 
 # --- Telemetry -----------------------------------------------------------------

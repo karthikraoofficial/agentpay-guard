@@ -10,18 +10,21 @@ from core.domain.parties import ApiKeyGrant, ApiKeyScope, hash_api_key
 from core.policy.packs import LoadedPack
 from core.ports import (
     Clock,
+    EventBus,
     IdempotencyKey,
     ModelGateway,
     Telemetry,
     TenantDirectory,
     TenantId,
     UnitOfWork,
+    Workflow,
 )
 from core.settings import Settings
 
 
-class Store(UnitOfWork, TenantDirectory, Protocol):
-    """What the API needs from storage: tenant-scoped transactions and key lookup."""
+class Store(UnitOfWork, TenantDirectory, EventBus, Protocol):
+    """What the API needs from storage: tenant-scoped transactions, key lookup, and the
+    outbox the relay reads."""
 
 
 def get_store(request: Request) -> Store:
@@ -47,6 +50,11 @@ def get_telemetry(request: Request) -> Telemetry:
 def get_gateway(request: Request) -> ModelGateway:
     gateway: ModelGateway = request.app.state.gateway
     return gateway
+
+
+def get_workflow(request: Request) -> Workflow:
+    workflow: Workflow = request.app.state.workflow
+    return workflow
 
 
 def get_app_settings(request: Request) -> Settings:
@@ -105,4 +113,5 @@ PackDep = Annotated[LoadedPack, Depends(get_pack)]
 TelemetryDep = Annotated[Telemetry, Depends(get_telemetry)]
 GatewayDep = Annotated[ModelGateway, Depends(get_gateway)]
 SettingsDep = Annotated[Settings, Depends(get_app_settings)]
+WorkflowDep = Annotated[Workflow, Depends(get_workflow)]
 IdemKey = Annotated[IdempotencyKey, Depends(idempotency_key)]

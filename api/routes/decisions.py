@@ -5,7 +5,7 @@ head, runs the pure engine, and writes the Decision, its Audit record and the
 idempotency entry together, or nothing at all (ADR-0003, ADR-0004).
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Request, Response
 from pydantic import AwareDatetime, BaseModel
@@ -33,7 +33,7 @@ from core.domain.parties import new_id
 from core.domain.signals import IntentResolution, IntentSignal, Signals
 from core.policy.engine import decide
 from core.policy.pack import PolicyPack
-from core.ports import Telemetry, TenantId, TenantTransaction
+from core.ports import DomainEvent, Telemetry, TenantId, TenantTransaction
 
 router = APIRouter(prefix="/v1/decisions", tags=["decisions"])
 
@@ -157,6 +157,10 @@ def compute_signals(
         )
 
 
+def _iso(at: datetime) -> str:
+    return at.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
 def decision_time(now: datetime) -> datetime:
     """The Decision time: one server-read instant, truncated to milliseconds."""
     return now.replace(microsecond=now.microsecond // 1000 * 1000)
@@ -236,6 +240,19 @@ def create_decision(
                 expires_at=now + pack.pack.consent_ttl,
             )
             tx.add_consent_request(consent)
+            # The workflow is started from the outbox, never from this hot path (ADR-0009).
+            tx.publish(
+                DomainEvent(
+                    event_id=new_id("evt"),
+                    tenant_id=tenant,
+                    event_type="consent_requested",
+                    occurred_at=now,
+                    payload={
+                        "consent_request_id": consent.consent_request_id,
+                        "expires_at": _iso(consent.expires_at),
+                    },
+                )
+            )
         tx.append_audit_record(sealed)
         # Identifiers and codes only: no merchant name, line items or Agent reasoning.
         span.set_attribute("decision_id", decision.decision_id)
