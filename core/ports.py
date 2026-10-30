@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict
 
 from core.domain.audit import SealedAuditRecord, StoredAuditRow
 from core.domain.consent import (
+    ConsentLink,
     ConsentRequest,
     ConsentRequestId,
     ConsentResolution,
@@ -273,6 +274,13 @@ class TenantTransaction(Protocol):
         """Write an event to the outbox in this transaction (the transactional outbox)."""
         ...
 
+    def add_consent_link(self, link: ConsentLink) -> None:
+        """Store a new link and revoke every earlier one for the same Consent request, so
+        at most one works."""
+        ...
+
+    def get_consent_link(self, token_hash: str) -> ConsentLink | None: ...
+
     def get_decision(self, decision_id: DecisionId) -> Decision | None: ...
 
     def lock_chain_head(self) -> tuple[int, str]:
@@ -311,8 +319,9 @@ class UnitOfWork(Protocol):
 
 
 class TenantDirectory(Protocol):
-    """Tenants and their API keys. The only lookup that isn't tenant-scoped, because it
-    is how a request's Tenant is found. Keys are stored as hashes only."""
+    """Tenants, their API keys and Consent links. The only lookups that aren't
+    tenant-scoped, because they are how a request's Tenant is found. Keys and link tokens
+    are stored as hashes only."""
 
     def create_tenant(self, tenant_id: TenantId, name: str, created_at: datetime) -> None: ...
 
@@ -328,6 +337,11 @@ class TenantDirectory(Protocol):
         ...
 
     def api_key(self, key_hash: str) -> ApiKeyGrant | None: ...
+
+    def consent_link(self, token_hash: str) -> ConsentLink | None:
+        """The link a token hash names, from any Tenant: like an API key, a link is how a
+        public request's Tenant is found."""
+        ...
 
 
 # --- EventBus ------------------------------------------------------------------

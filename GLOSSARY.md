@@ -89,7 +89,7 @@ The Tenant's record of how it confirmed that the Payer was the one answering a C
 _Avoid_: Proof, verification, Consent evidence (that is for Mandates)
 
 **Consent link**:
-An expiring link to one Consent request, which the Tenant delivers to the Payer. Whoever opens it is treated as the Payer, and it is used up by the first Consent resolution, not by being opened.
+An expiring link to one Consent request, which the Tenant delivers to the Payer. Whoever opens it is treated as the Payer, and it is used up by the first Consent resolution, not by being opened. A newer link for the same request replaces it.
 _Avoid_: Approval link, magic link
 
 **Step-up threshold**:

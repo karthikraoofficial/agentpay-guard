@@ -186,6 +186,22 @@ consent_resolutions = Table(
     Index("ix_consent_resolutions_status_resolved", "tenant_id", "status", "resolved_at"),
 )
 
+# Consent links (ADR-0008): only the token's hash. A newer link revokes older ones.
+consent_links = Table(
+    "consent_links",
+    metadata,
+    Column("token_hash", String, primary_key=True),
+    Column("tenant_id", String, nullable=False),
+    Column("consent_request_id", String, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("revoked_at", DateTime(timezone=True), nullable=True),
+    ForeignKeyConstraint(
+        ["tenant_id", "consent_request_id"],
+        ["consent_requests.tenant_id", "consent_requests.consent_request_id"],
+    ),
+    Index("ix_consent_links_request", "tenant_id", "consent_request_id"),
+)
+
 # The transactional outbox (ADR-0009): events written in the same transaction as the
 # work that raised them, and delivered by the relay. `delivered_at` is null until then.
 outbox_events = Table(

@@ -38,8 +38,14 @@ def run_idempotent(
     fingerprint: str,
     clock: Clock,
     write: Callable[[datetime], tuple[int, BaseModel]],
+    *,
+    kept_as: Callable[[BaseModel], BaseModel] | None = None,
 ) -> Response:
-    """`write` gets the request time and returns (status code, response model)."""
+    """`write` gets the request time and returns (status code, response model).
+
+    `kept_as` turns the response into what is kept for replays, for a response that holds
+    a secret shown only once (a Consent link token): a replay then returns the redacted
+    copy, and the secret is never at rest."""
     if not tx.claim_idempotency_key(key):
         raise ApiError(
             409,
@@ -60,9 +66,10 @@ def run_idempotent(
 
     status_code, model = write(now)
     body = model.model_dump_json().encode("utf-8")
+    kept = body if kept_as is None else kept_as(model).model_dump_json().encode("utf-8")
     tx.save_idempotency_record(
         IdempotencyRecord(
-            key=key, request_hash=fingerprint, status_code=status_code, body=body, created_at=now
+            key=key, request_hash=fingerprint, status_code=status_code, body=kept, created_at=now
         )
     )
     return _response(status_code, body, {})

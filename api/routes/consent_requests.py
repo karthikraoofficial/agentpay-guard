@@ -18,12 +18,22 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Request, Response
 from pydantic import AwareDatetime, BaseModel, ConfigDict, ValidationError
 
-from api.deps import ClockDep, ConsentTenant, IdemKey, PackDep, StoreDep, Tenant, WorkflowDep
+from api.deps import (
+    ClockDep,
+    ConsentTenant,
+    IdemKey,
+    PackDep,
+    SettingsDep,
+    StoreDep,
+    Tenant,
+    WorkflowDep,
+)
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
 from core.domain.audit import DecisionInputs
 from core.domain.consent import (
     Attestation,
+    ConsentLink,
     ConsentRequest,
     ConsentRequestId,
     ConsentResolution,
@@ -31,6 +41,8 @@ from core.domain.consent import (
     ResolutionStatus,
     ResolvedVia,
     approval_result,
+    hash_link_token,
+    new_link_token,
 )
 from core.domain.decisions import (
     AuditRecordId,
@@ -84,6 +96,13 @@ class ConsentResolutionOut(BaseModel):
     audit_record_id: AuditRecordId
     # Only when an approval was blocked: the re-check's Reason codes.
     reason_codes: tuple[ReasonCode, ...] | None
+
+
+class ConsentLinkOut(BaseModel):
+    consent_request_id: ConsentRequestId
+    # Shown once. An idempotent replay of the mint returns null: the token is never stored.
+    url: str | None
+    expires_at: AwareDatetime
 
 
 def _out(consent: ConsentRequest, now: datetime) -> ConsentRequestOut:
@@ -146,7 +165,7 @@ def decline_consent_request(
     def write(read_at: datetime) -> tuple[int, ConsentResolutionOut]:
         csr = ConsentRequestId(consent_request_id)
         resolution = decline(tx, csr, "tenant_api", attestation, decision_time(read_at))
-        return 200, _resolution_out(resolution)
+        return 200, resolution_out(resolution)
 
     with store.transaction(tenant) as tx:
         response = run_idempotent(tx, key, request_hash(request, body), clock, write)
@@ -173,12 +192,51 @@ def approve_consent_request(
         csr = ConsentRequestId(consent_request_id)
         now = decision_time(read_at)
         resolution = approve(tx, csr, "tenant_api", body.attestation, now, pack)
-        return 200, _resolution_out(resolution)
+        return 200, resolution_out(resolution)
 
     with store.transaction(tenant) as tx:
         response = run_idempotent(tx, key, request_hash(request, body), clock, write)
     signal_resolved(workflow, tenant, ConsentRequestId(consent_request_id))
     return response
+
+
+@router.post("/{consent_request_id}/link", status_code=201, response_model=ConsentLinkOut)
+def mint_consent_link(
+    request: Request,
+    consent_request_id: str,
+    tenant: ConsentTenant,
+    store: StoreDep,
+    clock: ClockDep,
+    settings: SettingsDep,
+    key: IdemKey,
+) -> Response:
+    """A link to the hosted consent screen, for the Tenant to deliver to its Payer
+    (ADR-0008). Minting again revokes the previous link. The token is in the URL's
+    fragment, which browsers never send to a server."""
+
+    def write(read_at: datetime) -> tuple[int, ConsentLinkOut]:
+        now = decision_time(read_at)
+        csr = ConsentRequestId(consent_request_id)
+        consent = _open_for_resolution(tx, csr, now)
+        token = new_link_token()
+        tx.add_consent_link(
+            ConsentLink(
+                token_hash=hash_link_token(token),
+                tenant_id=tenant,
+                consent_request_id=csr,
+                created_at=now,
+            )
+        )
+        url = f"{settings.web_origin}/consent#{token}"
+        return 201, ConsentLinkOut(consent_request_id=csr, url=url, expires_at=consent.expires_at)
+
+    def without_url(model: BaseModel) -> BaseModel:
+        return model.model_copy(update={"url": None})
+
+    with store.transaction(tenant) as tx:
+        return run_idempotent(
+            tx, key, request_hash(request, None), clock, write, kept_as=without_url
+        )
 
 
 def signal_resolved(
@@ -212,7 +270,7 @@ def approve(
     tx: TenantTransaction,
     consent_request_id: ConsentRequestId,
     via: ResolvedVia,
-    attestation: Attestation,
+    attestation: Attestation | None,
     now: datetime,
     pack: LoadedPack,
 ) -> ConsentResolution:
@@ -272,7 +330,7 @@ def _open_for_resolution(
     return consent
 
 
-def _resolution_out(resolution: ConsentResolution) -> ConsentResolutionOut:
+def resolution_out(resolution: ConsentResolution) -> ConsentResolutionOut:
     return ConsentResolutionOut.model_validate(
         resolution.model_dump(include=set(ConsentResolutionOut.model_fields))
     )

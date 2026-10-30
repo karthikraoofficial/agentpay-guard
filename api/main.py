@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from pydantic import BaseModel
 from sqlalchemy import create_engine
+from starlette.middleware.cors import CORSMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from adapters.claude.gateway import ClaudeGateway
 from adapters.memory.model_gateway import UnconfiguredGateway
@@ -14,7 +16,7 @@ from adapters.postgres.store import PostgresStore
 from adapters.system_clock import SystemClock
 from api import errors
 from api.deps import Store
-from api.routes import consent_requests, decisions, intents, mandates, parties
+from api.routes import consent_links, consent_requests, decisions, intents, mandates, parties
 from core.policy.packs import load_active_pack
 from core.ports import Clock, ModelGateway, Telemetry, Workflow
 from core.settings import Settings, get_settings
@@ -67,6 +69,8 @@ def create_app(
     app.include_router(decisions.router)
     app.include_router(intents.router)
     app.include_router(consent_requests.router)
+    app.include_router(consent_links.router)
+    app.add_middleware(_LinkCors, origin=settings.web_origin)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> Health:
@@ -75,6 +79,29 @@ def create_app(
         return Health(status="ok", service=settings.app_name, version=settings.app_version)
 
     return app
+
+
+class _LinkCors:
+    """CORS for the consent screen, on the Consent link endpoints only and for the web
+    origin only. Every other endpoint is for servers, so browsers get no CORS there."""
+
+    PREFIX = "/v1/consent-link"
+
+    def __init__(self, app: ASGIApp, origin: str) -> None:
+        self._app = app
+        self._cors = CORSMiddleware(
+            app,
+            allow_origins=[origin],
+            allow_methods=["GET", "POST"],
+            allow_headers=["Consent-Link", "Idempotency-Key", "Content-Type"],
+        )
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        path = scope.get("path", "")
+        if scope["type"] == "http" and (path == self.PREFIX or path.startswith(self.PREFIX + "/")):
+            await self._cors(scope, receive, send)
+        else:
+            await self._app(scope, receive, send)
 
 
 def _default_gateway(settings: Settings, telemetry: Telemetry) -> ModelGateway:

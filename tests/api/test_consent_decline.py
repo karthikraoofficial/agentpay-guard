@@ -64,6 +64,7 @@ def test_a_decline_is_recorded_and_the_decision_reads_declined(declines: Decline
         "status": "declined",
         "resolved_at": "2026-11-02T09:32:00Z",
         "reason_codes": None,
+        "mandate_inactive": False,
     }
 
 
