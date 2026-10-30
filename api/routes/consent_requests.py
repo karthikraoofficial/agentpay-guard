@@ -12,7 +12,7 @@ import base64
 import binascii
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Request, Response
@@ -96,6 +96,8 @@ class ConsentResolutionOut(BaseModel):
     audit_record_id: AuditRecordId
     # Only when an approval was blocked: the re-check's Reason codes.
     reason_codes: tuple[ReasonCode, ...] | None
+    # Only when approved: the end of the Payment window, counted from `resolved_at`.
+    payable_until: AwareDatetime | None
 
 
 class ConsentLinkOut(BaseModel):
@@ -192,7 +194,7 @@ def approve_consent_request(
         csr = ConsentRequestId(consent_request_id)
         now = decision_time(read_at)
         resolution = approve(tx, csr, "tenant_api", body.attestation, now, pack)
-        return 200, resolution_out(resolution)
+        return 200, resolution_out(resolution, pack.pack.payment_window)
 
     with store.transaction(tenant) as tx:
         response = run_idempotent(tx, key, request_hash(request, body), clock, write)
@@ -330,9 +332,19 @@ def _open_for_resolution(
     return consent
 
 
-def resolution_out(resolution: ConsentResolution) -> ConsentResolutionOut:
+def resolution_out(
+    resolution: ConsentResolution, payment_window: timedelta | None = None
+) -> ConsentResolutionOut:
+    """The resolution as returned. An approval needs the Payment window of the pack it was
+    re-checked with."""
+    until = None
+    if resolution.status == "approved":
+        if payment_window is None:
+            raise ValueError("an approved resolution needs its pack's Payment window")
+        until = resolution.resolved_at + payment_window
     return ConsentResolutionOut.model_validate(
         resolution.model_dump(include=set(ConsentResolutionOut.model_fields))
+        | {"payable_until": until}
     )
 
 

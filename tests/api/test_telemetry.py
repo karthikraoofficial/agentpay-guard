@@ -16,7 +16,7 @@ def test_every_decision_emits_a_decision_span(api: Api) -> None:
         "outcome": "step_up",
         "primary_reason_code": "AMOUNT_ABOVE_STEP_UP_THRESHOLD",
         "pack_id": "default",
-        "pack_version": "1.2.0",
+        "pack_version": "1.3.0",
         "decision_id": body["decision_id"],
     }
 

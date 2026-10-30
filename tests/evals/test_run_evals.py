@@ -6,7 +6,7 @@ from typing import get_args
 import pytest
 
 from core.domain.decisions import ReasonCode
-from evals.run_evals import GOLDEN, load_cases, main, run_cases
+from evals.run_evals import GOLDEN, PackPin, load_cases, main, run_cases
 from tests.packs import release_test_pack
 
 PACKS = Path(__file__).resolve().parents[2] / "policy_packs"
@@ -151,3 +151,22 @@ def test_an_approval_labelled_blocked_that_goes_through_is_a_false_allow(tmp_pat
 
     assert (report.false_allow, report.false_block) == (1, 0)
     assert [m.case_id for m in report.mismatches] == ["approve-unchanged"]
+
+
+def test_the_approval_set_is_pinned_to_the_active_pack_1_3_0() -> None:
+    cases = load_cases(GOLDEN / "approval.jsonl")
+
+    assert {(c.pack.id, c.pack.version) for c in cases} == {("default", "1.3.0")}
+
+
+@pytest.mark.parametrize("name", ["phase2", "approval"])
+def test_default_1_3_0_decides_every_signal_era_case_as_its_own_pack_does(name: str) -> None:
+    # 1.3.0 only adds the Payment window, which no rule reads. phase1 is left out: it is
+    # labelled for 1.0.0, before the Signals, so 1.3.0 is meant to decide some of it apart.
+    cases = load_cases(GOLDEN / f"{name}.jsonl")
+    on_1_3_0 = [
+        c.model_copy(update={"pack": PackPin(id="default", version="1.3.0")}) for c in cases
+    ]
+
+    assert run_cases(cases, PACKS).mismatches == []
+    assert run_cases(on_1_3_0, PACKS) == run_cases(cases, PACKS)

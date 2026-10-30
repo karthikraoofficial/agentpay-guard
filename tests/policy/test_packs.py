@@ -10,8 +10,59 @@ from core.policy.packs import PackError, PolicyPack, load_active_pack, load_pack
 PACKS = Path(__file__).resolve().parents[2] / "policy_packs"
 
 
-def test_the_active_default_pack_is_1_2_0_which_only_adds_the_consent_ttl() -> None:
+RELEASED = {
+    "1.0.0": "sha256:a9037729f2af9b6ad63761c6a396c9483a3277c7a876e9d119e8b424342551ea",
+    "1.1.0": "sha256:37c381ead1c8d187ad9efaa7c0a995efac879dbdfc122dfec8fa853065383891",
+    "1.2.0": "sha256:a206362fed2d9e3172d350da3668ce173422254922457921caa84aae40d8b5e7",
+}
+
+
+def test_the_active_default_pack_is_1_3_0_which_only_adds_the_payment_window() -> None:
     loaded = load_active_pack(PACKS, "default")
+    phase_3 = load_pack(PACKS, "default", "1.2.0").pack
+
+    assert (loaded.pack.id, loaded.pack.version) == ("default", "1.3.0")
+    assert loaded.pack.payment_window_seconds == 900
+    assert loaded.pack.payment_window == timedelta(minutes=15)
+    assert loaded.pack.model_dump(exclude={"version", "payment_window_seconds"}) == (
+        phase_3.model_dump(exclude={"version", "payment_window_seconds"})
+    )
+    assert loaded.hash.startswith("sha256:") and len(loaded.hash) == len("sha256:") + 64
+
+
+@pytest.mark.parametrize(("version", "released_hash"), RELEASED.items())
+def test_released_packs_keep_their_hash(version: str, released_hash: str) -> None:
+    assert load_pack(PACKS, "default", version).hash == released_hash
+
+
+@pytest.mark.parametrize("version", RELEASED)
+def test_packs_released_before_the_payment_window_existed_give_fifteen_minutes(
+    version: str,
+) -> None:
+    pack = load_pack(PACKS, "default", version).pack
+
+    assert pack.payment_window_seconds is None
+    assert pack.payment_window == timedelta(minutes=15)
+
+
+def test_a_pack_can_set_its_payment_window() -> None:
+    doc = _load(PACKS).pack.model_dump(mode="json", exclude_none=True)
+
+    pack = PolicyPack.model_validate(doc | {"payment_window_seconds": 120})
+
+    assert pack.payment_window == timedelta(seconds=120)
+
+
+@pytest.mark.parametrize("window", [0, -1, "900", 1.5])
+def test_a_payment_window_that_is_not_a_positive_integer_is_refused(window: object) -> None:
+    doc = _load(PACKS).pack.model_dump(mode="json", exclude_none=True)
+
+    with pytest.raises(ValueError):
+        PolicyPack.model_validate(doc | {"payment_window_seconds": window})
+
+
+def test_default_1_2_0_only_adds_the_consent_ttl() -> None:
+    loaded = load_pack(PACKS, "default", "1.2.0")
     phase_2 = load_pack(PACKS, "default", "1.1.0").pack
 
     assert (loaded.pack.id, loaded.pack.version) == ("default", "1.2.0")
@@ -19,7 +70,6 @@ def test_the_active_default_pack_is_1_2_0_which_only_adds_the_consent_ttl() -> N
     assert loaded.pack.model_dump(exclude={"version", "consent_ttl_seconds"}) == (
         phase_2.model_dump(exclude={"version", "consent_ttl_seconds"})
     )
-    assert loaded.hash.startswith("sha256:") and len(loaded.hash) == len("sha256:") + 64
 
 
 def test_default_1_1_0_keeps_the_agreed_signal_values() -> None:
