@@ -1,6 +1,6 @@
 """Writing a Void: one `void` Audit record in the Tenant's chain plus one row for lookup,
-in the caller's transaction. Shared by the API (a Tenant voids an unpaid allow) and the
-handling of a failed Payment, which voids its Decision."""
+in the caller's transaction. Used by the API (a Tenant voids an unpaid allow), and meant
+for the inbound rail webhooks (#81) to void the Decision of a failed Payment."""
 
 from datetime import datetime
 

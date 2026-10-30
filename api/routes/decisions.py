@@ -24,7 +24,7 @@ from api.deps import (
 )
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
-from api.payability import payable_until, window_end
+from api.payability import payable_until, was_granted, window_end
 from core.domain.audit import AuditRecord, DecisionInputs, seal
 from core.domain.consent import ConsentRequest, ConsentRequestId, ConsentStatus
 from core.domain.decisions import (
@@ -350,14 +350,13 @@ def void_decision(
         if decision is None:
             raise ApiError(404, "DECISION_NOT_FOUND", f"No Decision {decision_id}.")
         # Mandate first, as Decisions do, so none counts this spend while the Void commits.
-        tx.lock_mandate(decision.mandate_id)
+        if tx.lock_mandate(decision.mandate_id) is None:
+            raise RuntimeError(f"Mandate {decision.mandate_id} vanished")
         consent = tx.get_consent_request(decision.decision_id)
-        resolution = consent.resolution if consent else None
         refusal = void_refusal(
             already_voided=tx.get_void(decision.decision_id) is not None,
             has_payment=tx.get_payment_for_decision(decision.decision_id) is not None,
-            was_payable=decision.outcome == "allow"
-            or (resolution is not None and resolution.status == "approved"),
+            was_payable=was_granted(decision, consent),
         )
         if refusal is not None:
             raise ApiError(409, refusal, _VOID_REFUSAL_TEXT[refusal])

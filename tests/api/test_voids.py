@@ -80,6 +80,23 @@ def test_voiding_an_approved_step_up_releases_it(voids: Voids) -> None:
     )
 
 
+def test_a_step_up_approved_next_month_is_released_from_that_month(voids: Voids) -> None:
+    mandate_id = voids.tight(10_000)
+    voids.api.clock.advance(timedelta(days=28, hours=14, minutes=25))  # 2026-11-30 23:55Z
+    step_up = voids.ask(mandate_id=mandate_id, amount=inr(6_000_00)).json()
+    voids.api.clock.advance(timedelta(minutes=7))  # approved 2026-12-01 00:02Z
+    voids.approve(step_up["step_up"]["consent_request_id"])
+    december = voids.allow(mandate_id=mandate_id, amount=inr(1_000_00))
+    spent = voids.audit(december["audit_record_id"]).record.inputs.spent_this_month
+    assert spent.minor == 6_000_00  # counted in December, the month it was approved
+
+    voids.void(step_up["decision_id"])
+
+    later = voids.allow(mandate_id=mandate_id, amount=inr(1_000_00))
+    spent = voids.audit(later["audit_record_id"]).record.inputs.spent_this_month
+    assert spent.minor == 1_000_00  # only the December allow is left
+
+
 def test_an_allow_whose_window_closed_can_still_be_voided(voids: Voids) -> None:
     decision = voids.allow()
     voids.api.clock.advance(timedelta(hours=2))
