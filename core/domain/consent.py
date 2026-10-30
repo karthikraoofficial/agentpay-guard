@@ -10,7 +10,7 @@ from typing import Annotated, Literal, NewType
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, StringConstraints
 
-from core.domain.decisions import AuditRecordId, DecisionId
+from core.domain.decisions import AuditRecordId, DecisionId, EngineOutput, ReasonCode
 from core.domain.mandates import ConsentMethod
 from core.domain.parties import TenantId
 
@@ -19,6 +19,12 @@ ResolutionStatus = Literal["approved", "declined", "expired", "blocked"]
 ConsentStatus = Literal["pending", "approved", "declined", "expired", "blocked"]
 # How a resolution arrived: the Tenant's API, a Consent link, or the expiry timer.
 ResolvedVia = Literal["tenant_api", "consent_link", "timer"]
+
+
+def approval_result(output: EngineOutput) -> ResolutionStatus:
+    """What an approval resolves to once the engine has re-run (ADR-0010): the Payer can
+    lift step_up reasons but never a block."""
+    return "blocked" if output.outcome == "block" else "approved"
 
 
 class _Frozen(BaseModel):
@@ -57,6 +63,8 @@ class ConsentResolution(_Frozen):
     resolved_via: ResolvedVia
     attestation: Attestation | None
     audit_record_id: AuditRecordId
+    # The re-check's Reason codes, kept only when an approval was blocked.
+    reason_codes: tuple[ReasonCode, ...] | None = None
 
 
 class ConsentRequest(_Frozen):

@@ -175,16 +175,32 @@ class PostgresTransaction:
         )
 
     def allowed_spend(self, mandate_id: MandateId, start: datetime, end: datetime) -> int:
-        total = self._conn.execute(
-            select(func.coalesce(func.sum(decisions.c.amount_minor), 0)).where(
-                decisions.c.tenant_id == self._tenant_id,
-                decisions.c.mandate_id == mandate_id,
-                decisions.c.outcome == "allow",
-                decisions.c.decided_at >= start,
-                decisions.c.decided_at < end,
+        d, r = decisions.c, consent_resolutions.c
+        allowed = self._conn.execute(
+            select(func.coalesce(func.sum(d.amount_minor), 0)).where(
+                d.tenant_id == self._tenant_id,
+                d.mandate_id == mandate_id,
+                d.outcome == "allow",
+                d.decided_at >= start,
+                d.decided_at < end,
             )
         ).scalar_one()
-        return int(total)
+        approved = self._conn.execute(
+            select(func.coalesce(func.sum(d.amount_minor), 0))
+            .select_from(
+                consent_resolutions.join(
+                    decisions, and_(d.tenant_id == r.tenant_id, d.decision_id == r.decision_id)
+                )
+            )
+            .where(
+                r.tenant_id == self._tenant_id,
+                d.mandate_id == mandate_id,
+                r.status == "approved",
+                r.resolved_at >= start,
+                r.resolved_at < end,
+            )
+        ).scalar_one()
+        return int(allowed) + int(approved)
 
     def has_allowed_payment_to(self, payer_id: PayerId, merchant_id: str) -> bool:
         query = (
@@ -277,6 +293,7 @@ class PostgresTransaction:
                 attestation_reference=a.reference if a else None,
                 attestation_captured_at=a.captured_at if a else None,
                 audit_record_id=resolution.audit_record_id,
+                reason_codes=resolution.reason_codes,
             )
         )
 
@@ -527,6 +544,7 @@ def _consents(tenant_id: TenantId) -> Select[tuple[object, ...]]:
             r.attestation_reference,
             r.attestation_captured_at,
             r.audit_record_id,
+            r.reason_codes,
         )
         .select_from(joined)
         .where(c.tenant_id == tenant_id)
@@ -552,6 +570,7 @@ def _consent(row: RowMapping) -> ConsentRequest:
             resolved_via=row["resolved_via"],
             attestation=attestation,
             audit_record_id=row["audit_record_id"],
+            reason_codes=None if row["reason_codes"] is None else tuple(row["reason_codes"]),
         )
     return ConsentRequest(
         consent_request_id=row["consent_request_id"],
