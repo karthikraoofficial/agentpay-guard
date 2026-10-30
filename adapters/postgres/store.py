@@ -22,6 +22,7 @@ from adapters.postgres.tables import (
     agents,
     api_keys,
     audit_records,
+    consent_links,
     consent_requests,
     consent_resolutions,
     decisions,
@@ -36,6 +37,7 @@ from adapters.postgres.tables import (
 from core.domain.audit import ZERO_HASH, SealedAuditRecord, StoredAuditRow, unseal
 from core.domain.consent import (
     Attestation,
+    ConsentLink,
     ConsentRequest,
     ConsentRequestId,
     ConsentResolution,
@@ -278,6 +280,33 @@ class PostgresTransaction:
         )
         row = self._conn.execute(query).mappings().one_or_none()
         return None if row is None else _consent(row)
+
+    def add_consent_link(self, link: ConsentLink) -> None:
+        self._own(link.tenant_id)
+        cl = consent_links.c
+        self._conn.execute(
+            update(consent_links)
+            .where(
+                cl.tenant_id == self._tenant_id,
+                cl.consent_request_id == link.consent_request_id,
+                cl.revoked_at.is_(None),
+            )
+            .values(revoked_at=link.created_at)
+        )
+        self._conn.execute(insert(consent_links).values(**link.model_dump()))
+
+    def get_consent_link(self, token_hash: str) -> ConsentLink | None:
+        cl = consent_links.c
+        row = (
+            self._conn.execute(
+                select(consent_links).where(
+                    cl.tenant_id == self._tenant_id, cl.token_hash == token_hash
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return None if row is None else ConsentLink.model_validate(dict(row))
 
     def publish(self, event: DomainEvent) -> None:
         self._own(event.tenant_id)
@@ -536,6 +565,12 @@ class PostgresStore:
         if row is None:
             return None
         return ApiKeyGrant(tenant_id=TenantId(row.tenant_id), scopes=frozenset(row.scopes))
+
+    def consent_link(self, token_hash: str) -> ConsentLink | None:
+        query = select(consent_links).where(consent_links.c.token_hash == token_hash)
+        with self._engine.connect() as conn:
+            row = conn.execute(query).mappings().one_or_none()
+        return None if row is None else ConsentLink.model_validate(dict(row))
 
     def undelivered(self, limit: int) -> list[DomainEvent]:
         o = outbox_events.c

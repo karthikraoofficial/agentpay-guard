@@ -5,6 +5,8 @@ in at most one Consent resolution, recorded as a new Audit record and never by c
 the Decision. Until then its status is worked out from the time it is read.
 """
 
+import hashlib
+import secrets
 from datetime import datetime
 from typing import Annotated, Literal, NewType
 
@@ -65,6 +67,26 @@ class ConsentResolution(_Frozen):
     audit_record_id: AuditRecordId
     # The re-check's Reason codes, kept only when an approval was blocked.
     reason_codes: tuple[ReasonCode, ...] | None = None
+
+
+class ConsentLink(_Frozen):
+    """A hosted link to one Consent request (ADR-0008). Only the token's hash is kept. It
+    works until revoked by a newer link, or until its request is resolved or expires."""
+
+    token_hash: str
+    tenant_id: TenantId
+    consent_request_id: ConsentRequestId
+    created_at: AwareDatetime
+    revoked_at: AwareDatetime | None = None
+
+
+def new_link_token() -> str:
+    """256 random bits, URL-safe. Shown once, in the minted link; never stored."""
+    return secrets.token_urlsafe(32)
+
+
+def hash_link_token(token: str) -> str:
+    return "sha256:" + hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 class ConsentRequest(_Frozen):

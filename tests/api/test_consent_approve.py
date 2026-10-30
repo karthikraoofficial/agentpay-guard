@@ -68,6 +68,7 @@ def test_an_approval_on_an_unchanged_mandate_is_approved(approvals: Approvals) -
         "status": "approved",
         "resolved_at": "2026-11-02T09:33:00Z",
         "reason_codes": None,
+        "mandate_inactive": False,
     }
 
 

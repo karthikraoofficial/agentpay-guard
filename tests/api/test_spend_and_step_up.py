@@ -81,7 +81,12 @@ def test_a_step_up_creates_a_pending_consent_request(pay: Pay) -> None:
     assert step_up["consent_request_id"].startswith("csr_")
     assert step_up["expires_at"] == "2026-11-02T09:40:00Z"
     assert step_up["status_url"] == f"/v1/decisions/{body['decision_id']}"
-    assert body["consent"] == {"status": "pending", "resolved_at": None, "reason_codes": None}
+    assert body["consent"] == {
+        "status": "pending",
+        "resolved_at": None,
+        "reason_codes": None,
+        "mandate_inactive": False,
+    }
     fetched = pay.api.client.get(step_up["status_url"], headers=pay.tenant).json()
     assert fetched == body
 

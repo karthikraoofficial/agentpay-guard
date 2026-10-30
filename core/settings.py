@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     # Measured ~900 ms round trip from a dev machine; the check is off the decision path.
     intent_check_timeout_ms: int = Field(default=2500, gt=0, le=30_000)
 
+    # The consent screen's origin: Consent links point here, and only this origin may
+    # call the Consent link endpoints from a browser (CORS).
+    web_origin: str = Field(default="http://localhost:3000", pattern=r"^https?://[^/\s]+$")
+
     # The outbox relay: how often it looks for undelivered events (ADR-0009).
     outbox_poll_interval_ms: int = Field(default=1000, gt=0, le=60_000)
 

@@ -90,16 +90,21 @@ def _scoped(scope: ApiKeyScope) -> Callable[[ApiKeyGrant], TenantId]:
     return tenant_with_scope
 
 
-def idempotency_key(
-    _tenant: Annotated[TenantId, Depends(authenticated_tenant)],
-    key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-) -> IdempotencyKey:
-    """Every write needs an Idempotency-Key (non-negotiable 4). Checked after auth."""
+def require_idempotency_key(key: str | None) -> IdempotencyKey:
+    """Every write needs an Idempotency-Key (non-negotiable 4)."""
     if not key or len(key) > 255:
         raise ApiError(
             400, "IDEMPOTENCY_KEY_MISSING", "Send an Idempotency-Key header (1-255 chars)."
         )
     return IdempotencyKey(key)
+
+
+def idempotency_key(
+    _tenant: Annotated[TenantId, Depends(authenticated_tenant)],
+    key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> IdempotencyKey:
+    """Checked after auth, so an unauthenticated write is a 401, not a 400."""
+    return require_idempotency_key(key)
 
 
 Tenant = Annotated[TenantId, Depends(authenticated_tenant)]

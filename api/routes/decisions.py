@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Request, Response
 from pydantic import AwareDatetime, BaseModel
 
+from api.consent_view import mandate_inactive
 from api.deps import ClockDep, DecideTenant, IdemKey, PackDep, StoreDep, TelemetryDep, Tenant
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
@@ -53,6 +54,9 @@ class ConsentOut(BaseModel):
     resolved_at: AwareDatetime | None
     # Only when an approval was blocked: why the Mandate no longer permits the payment.
     reason_codes: tuple[ReasonCode, ...] | None
+    # Worked out when read: the Mandate is no longer active or the Agent was disabled,
+    # so an approval now would be blocked.
+    mandate_inactive: bool
 
 
 class DecisionOut(BaseModel):
@@ -67,7 +71,9 @@ class DecisionOut(BaseModel):
     consent: ConsentOut | None
 
 
-def _out(decision: Decision, consent: ConsentRequest | None, now: datetime) -> DecisionOut:
+def _out(
+    decision: Decision, consent: ConsentRequest | None, now: datetime, inactive: bool = False
+) -> DecisionOut:
     fields = decision.model_dump(include=set(DecisionOut.model_fields) - {"step_up", "consent"})
     if consent is None:
         return DecisionOut.model_validate({**fields, "step_up": None, "consent": None})
@@ -77,16 +83,17 @@ def _out(decision: Decision, consent: ConsentRequest | None, now: datetime) -> D
         status_url=f"/v1/decisions/{decision.decision_id}",
     )
     return DecisionOut.model_validate(
-        {**fields, "step_up": step_up, "consent": _consent_out(consent, now)}
+        {**fields, "step_up": step_up, "consent": _consent_out(consent, now, inactive)}
     )
 
 
-def _consent_out(consent: ConsentRequest, now: datetime) -> ConsentOut:
+def _consent_out(consent: ConsentRequest, now: datetime, inactive: bool) -> ConsentOut:
     resolution = consent.resolution
     return ConsentOut(
         status=consent.status(now),
         resolved_at=resolution.resolved_at if resolution else None,
         reason_codes=resolution.reason_codes if resolution else None,
+        mandate_inactive=inactive,
     )
 
 
@@ -268,9 +275,13 @@ def create_decision(
 @router.get("/{decision_id}")
 def get_decision(decision_id: str, tenant: Tenant, store: StoreDep, clock: ClockDep) -> DecisionOut:
     """The Decision, with its Consent request's status if it was a step_up."""
+    now = clock.now()
     with store.transaction(tenant) as tx:
         decision = tx.get_decision(DecisionId(decision_id))
         consent = tx.get_consent_request(DecisionId(decision_id))
-    if decision is None:
-        raise ApiError(404, "DECISION_NOT_FOUND", f"No Decision {decision_id}.")
-    return _out(decision, consent, clock.now())
+        if decision is None:
+            raise ApiError(404, "DECISION_NOT_FOUND", f"No Decision {decision_id}.")
+        inactive = consent is not None and mandate_inactive(
+            tx.get_mandate(decision.mandate_id), tx.get_agent(decision.agent_id), now
+        )
+    return _out(decision, consent, now, inactive)

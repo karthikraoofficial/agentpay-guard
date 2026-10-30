@@ -7,6 +7,7 @@ from datetime import datetime
 
 from core.domain.audit import ZERO_HASH, SealedAuditRecord, StoredAuditRow
 from core.domain.consent import (
+    ConsentLink,
     ConsentRequest,
     ConsentRequestId,
     ConsentResolution,
@@ -41,6 +42,7 @@ class _TenantData:
     intents: dict[IntentId, IntentCheck] = field(default_factory=dict)
     # event_id -> (event, delivered)
     outbox: dict[str, tuple[DomainEvent, bool]] = field(default_factory=dict)
+    links: dict[str, ConsentLink] = field(default_factory=dict)
 
     def copy(self) -> "_TenantData":
         return _TenantData(
@@ -54,6 +56,7 @@ class _TenantData:
             dict(self.consents),
             dict(self.intents),
             dict(self.outbox),
+            dict(self.links),
         )
 
 
@@ -219,6 +222,17 @@ class InMemoryTransaction:
     def lock_consent_request(self, consent_request_id: ConsentRequestId) -> ConsentRequest | None:
         return self.find_consent_request(consent_request_id)
 
+    def add_consent_link(self, link: ConsentLink) -> None:
+        self._own(link.tenant_id)
+        links = self._data.links
+        for token_hash, old in list(links.items()):
+            if old.consent_request_id == link.consent_request_id and old.revoked_at is None:
+                links[token_hash] = old.model_copy(update={"revoked_at": link.created_at})
+        links[link.token_hash] = link
+
+    def get_consent_link(self, token_hash: str) -> ConsentLink | None:
+        return self._data.links.get(token_hash)
+
     def publish(self, event: DomainEvent) -> None:
         self._own(event.tenant_id)
         self._data.outbox.setdefault(event.event_id, (event, False))
@@ -315,6 +329,12 @@ class InMemoryUnitOfWork:
 
     def api_key(self, key_hash: str) -> ApiKeyGrant | None:
         return self._keys.get(key_hash)
+
+    def consent_link(self, token_hash: str) -> ConsentLink | None:
+        for data in list(self._tenants.values()):
+            if token_hash in data.links:
+                return data.links[token_hash]
+        return None
 
     def undelivered(self, limit: int) -> list[DomainEvent]:
         waiting = [
