@@ -26,7 +26,7 @@ from core.domain.parties import (
     Payer,
     PayerId,
 )
-from core.domain.payments import Payment, PaymentId
+from core.domain.payments import Payment, PaymentId, RailEvent
 from core.domain.voids import Void
 from core.ports import DomainEvent, EventBus, TenantDirectory, TenantId, UnitOfWork
 
@@ -47,6 +47,7 @@ class _TenantData:
     links: dict[str, ConsentLink] = field(default_factory=dict)
     payments: dict[PaymentId, Payment] = field(default_factory=dict)
     voids: dict[DecisionId, Void] = field(default_factory=dict)
+    rail_events: dict[str, RailEvent] = field(default_factory=dict)
 
     def copy(self) -> "_TenantData":
         return _TenantData(
@@ -63,6 +64,7 @@ class _TenantData:
             dict(self.links),
             dict(self.payments),
             dict(self.voids),
+            dict(self.rail_events),
         )
 
 
@@ -208,6 +210,15 @@ class InMemoryTransaction:
 
     def lock_payment(self, payment_id: PaymentId) -> Payment | None:
         return self._data.payments.get(payment_id)
+
+    def add_rail_event(self, event: RailEvent) -> None:
+        self._own(event.tenant_id)
+        if event.event_id in self._data.rail_events:
+            raise ValueError(f"rail event {event.event_id} is already kept")
+        self._data.rail_events[event.event_id] = event
+
+    def get_rail_event(self, event_id: str) -> RailEvent | None:
+        return self._data.rail_events.get(event_id)
 
     def add_void(self, void: Void) -> None:
         self._own(void.tenant_id)
@@ -375,6 +386,12 @@ class InMemoryUnitOfWork:
         for data in list(self._tenants.values()):
             if token_hash in data.links:
                 return data.links[token_hash]
+        return None
+
+    def payment_tenant(self, payment_id: PaymentId) -> TenantId | None:
+        for tenant_id, data in list(self._tenants.items()):
+            if payment_id in data.payments:
+                return tenant_id
         return None
 
     def undelivered(self, limit: int) -> list[DomainEvent]:

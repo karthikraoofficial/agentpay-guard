@@ -25,6 +25,7 @@ from api.routes import (
     mandates,
     parties,
     payments,
+    rail_webhooks,
 )
 from core.policy.packs import load_active_pack
 from core.ports import Clock, ModelGateway, PaymentRail, Telemetry, Workflow
@@ -83,6 +84,7 @@ def create_app(
     app.include_router(consent_requests.router)
     app.include_router(consent_links.router)
     app.include_router(payments.router)
+    app.include_router(rail_webhooks.router)
     app.add_middleware(_LinkCors, origin=settings.web_origin)
 
     @app.get("/healthz", tags=["ops"])

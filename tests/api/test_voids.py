@@ -12,8 +12,6 @@ from typing import Any
 import pytest
 
 from adapters.memory.rail import MockRail
-from core.domain.decisions import DecisionId, decision_time
-from core.voids import record_void
 from tests.api.conftest import Api
 from tests.api.test_consent_approve import inr
 from tests.api.test_payments import Payments, token
@@ -191,26 +189,25 @@ def test_the_void_joins_the_audit_chain_and_later_decisions_replay(voids: Voids)
     assert later_record.inputs.spent_this_month.minor == 0  # the Voided allow is left out
 
 
-# --- The internal path, for failed Payments (#81) -----------------------------------
+# --- A failed Payment Voids its Decision (#81) --------------------------------------
 
 
-def test_a_failed_payment_can_be_voided_through_the_internal_path(api: Api, tmp_path: Path) -> None:
+def test_a_failed_payment_voids_its_decision_and_a_tenant_void_is_then_refused(
+    api: Api, tmp_path: Path
+) -> None:
     api.use_packs(phase_1_packs(tmp_path))
     voids = Voids(api, rail_token=MockRail.token_that_is_refused())
     decision = voids.allow()
+
     payment: dict[str, Any] = voids.pay(decision["decision_id"]).json()
+
     assert payment["status"] == "failed"
-
-    with api.store.transaction(voids.tenant_id()) as tx:
-        void = record_void(
-            tx,
-            DecisionId(decision["decision_id"]),
-            "payment_failed",
-            decision_time(api.clock.now()),
-            payment_id=payment["payment_id"],
-        )
-
-    record = voids.audit(void.audit_record_id).record
-    assert (record.void.via, record.void.payment_id) == ("payment_failed", payment["payment_id"])
+    record = voids.chain()[-1]
+    assert (record.kind, record.void.via, record.void.payment_id) == (
+        "void",
+        "payment_failed",
+        payment["payment_id"],
+    )
+    assert_problem(voids.void(decision["decision_id"]), 409, "DECISION_ALREADY_VOIDED")
     later = voids.allow()
     assert voids.audit(later["audit_record_id"]).record.inputs.spent_this_month.minor == 0
