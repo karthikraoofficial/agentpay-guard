@@ -138,6 +138,10 @@ _Avoid_: False positive, false decline
 The money movement for one allowed Decision or approved step-up, for exactly its amount. A Decision has at most one Payment. A Payment is scheduled from the moment it is made, and becomes captured or failed when the rail reports back, or failed at once if the rail refuses it.
 _Avoid_: Transaction, Agent payment request (that is only the ask)
 
+**Pre-debit notice**:
+The rail's message to the Payer before a recurring debit, saying how much will be taken and when. On card recurring payments the debit can only follow 36 hours after it, so a Payment stays scheduled across that time.
+_Avoid_: Notification (too general), reminder
+
 **Rail charge**:
 The rail's own record of the debit for one Payment: what the rail says happened, which a Payment follows.
 _Avoid_: Payment (that is our record), transaction
