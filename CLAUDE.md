@@ -27,6 +27,7 @@ Run from the repo root. These are the same commands CI runs.
 - Setup: `uv sync`, then `cp .env.example .env` (set `AGENTPAY_ANTHROPIC_API_KEY`, or `AGENTPAY_INTENT_CHECK_ENABLED=false`; outside `env=test` the app won't start with neither)
 - Local infra: `docker compose -f infra/docker-compose.yml up -d`
 - Run the API: `uv run uvicorn api.main:asgi_app --factory --reload` (health: `/healthz`, docs: `/docs`)
+- Run the consent worker (Temporal workflow, activities and outbox relay; needs local infra): `uv run python -m workflows.worker`
 - Lint and format: `uv run ruff check .` and `uv run ruff format --check .`
 - Types: `uv run mypy`
 - Migrations: `uv run alembic upgrade head`
@@ -37,6 +38,7 @@ Run from the repo root. These are the same commands CI runs.
 - Evals: `uv run python -m evals.run_evals` (every golden file in `evals/golden/`, each on its pinned pack; fails on any false-allow, false-block or wrong reason code)
 - Live Intent eval (real model, ~$0.002 a run, by hand and before each release, not CI): `uv run python -m evals.run_intent_evals` (exit 1 on any injection false-match)
 - Latency budgets: `uv run pytest -m perf -s -o addopts=""` (skipped by the default `pytest` run; CI runs them)
+- Consent workflow on Temporal: `uv run pytest -m workflow -o addopts=""` (downloads Temporal's test and dev servers on first use; skipped by the default `pytest` run; CI runs it)
 - Tests: `uv run pytest` (needs local infra up and `.env`; tests create their own `<database>_test`)
 - Contract tests against real vendor APIs: `uv run pytest -m contract -o addopts=""` (not in CI; skip without the vendor key)
 - Web: `cd web && npm ci && npm run build`

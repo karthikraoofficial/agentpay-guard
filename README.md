@@ -37,10 +37,13 @@ uv sync                                           # Python 3.12 + locked depende
 cp .env.example .env                              # the app refuses to start without required values
 docker compose -f infra/docker-compose.yml up -d  # Postgres 16, Temporal dev server, OTel collector
 uv run uvicorn api.main:asgi_app --factory --reload
+uv run python -m workflows.worker                 # in a second terminal: the consent worker
 ```
 
 Then open http://localhost:8000/healthz (liveness) and http://localhost:8000/docs (OpenAPI).
-The Temporal UI is at http://localhost:8233.
+The Temporal UI is at http://localhost:8233, where each step_up shows up as a `step_up_consent` workflow named after its Consent request ID.
+
+The consent worker hosts three things: the `step_up_consent` workflow, its two activities (notify and expire), and the outbox relay that starts a workflow for every committed step_up. The API never calls Temporal on the hot path. It only nudges a waiting workflow after an approval or decline is stored. Both processes are safe to kill: Temporal resumes every waiting workflow on the next worker, and the relay keeps undelivered events until a start succeeds.
 
 Every Decision emits a `decision` trace span (Tenant, Outcome, primary Reason code, Policy pack version) over OTLP to the collector, which prints it (`docker compose -f infra/docker-compose.yml logs otel-collector`). Spans carry identifiers and codes only, never merchant names, line items or Agent reasoning. Set `AGENTPAY_TELEMETRY_EXPORTER=none` to build spans without exporting them.
 
@@ -117,6 +120,8 @@ The tests need local Postgres running (the `docker compose` step above) and a `.
 
 The Intent check has its own eval set: 30 labelled Payer-instruction and cart pairs in `evals/intent/cases.jsonl`, 6 of them prompt-injection attempts. `uv run python -m evals.run_intent_evals` runs them against the real model with the production prompt and settings. It reports false-match and false-mismatch rates and costs about $0.002 a run. Run it by hand and before each release; it exits 1 if any injection attempt gets a match. The first run of `intent_check@1` on Claude Haiku 5.5 scored 30/30, with no false matches.
 
+The consent workflow tests run on Temporal's own servers, which `temporalio` downloads on first use, so the default `pytest` run skips them and CI runs them as a separate step: `uv run pytest -m workflow -o addopts=""`. The exit-criterion test kills a real `python -m workflows.worker` process while the workflow waits. A fresh worker then finishes the workflow from Temporal's history, once by an approval signal and once by the expiry timer.
+
 Contract tests call real vendor APIs and are never run by CI. Run them by hand with `uv run pytest -m contract -o addopts=""`. They skip themselves when the vendor key (e.g. `AGENTPAY_ANTHROPIC_API_KEY`) isn't set, and the Claude ones cost a fraction of a cent.
 
 The eval gate runs every hand-labelled golden file in `evals/golden/` through the engine, each against the Policy pack its base file names:
@@ -134,7 +139,7 @@ Each case changes only a few fields of its base file. The gate prints false-allo
 | `api/` | FastAPI app and `/v1` routers |
 | `core/` | Domain models, policy engine, signals, ports, settings. No vendor SDKs. |
 | `adapters/` | Implementations of the ports: rails, model gateway, Postgres, telemetry |
-| `workflows/` | Temporal workflows: step-up consent, dispute pack |
+| `workflows/` | Temporal: the `step_up_consent` workflow, its activities, the Workflow port adapter and the worker (the only code that imports `temporalio`) |
 | `agents/` | The dispute evidence agent: tools and versioned prompts |
 | `policy_packs/` | Released policy packs and their hash manifest |
 | `evals/` | Labelled golden cases and the eval gate; the live Intent check eval set |
@@ -171,7 +176,8 @@ Settings: `AGENTPAY_INTENT_CHECK_ENABLED` (default `true`), `AGENTPAY_INTENT_CHE
 - **Monthly caps reset at midnight UTC,** which is 05:30 IST on the 1st.
 - **Decisions within one Tenant queue briefly on that Tenant's Audit chain lock,** so per-Tenant throughput has a ceiling. Measured with every Signal on (`default@1.1.0`, medium payments citing an Intent check): p50 53 ms and p95 62 ms for one client on local Postgres. A load test against a real server is still to do.
 - **Consent requests are resolved only through the Tenant API so far.** Consent links come later in Phase 3.
-- **No worker runs the outbox relay or the consent workflow yet.** `consent_requested` events wait in the outbox until the Temporal worker arrives (#61). Expiry is still worked out when read, so nothing is extended in the meantime.
+- **Notify is a log line.** The workflow's notify activity writes one structured `consent_request.created` line (identifiers and times only); signed Tenant webhooks come with Phase 4. Tenants can also list `GET /v1/consent-requests?status=pending`.
+- **The expiry record lands after the timer fires,** which can be later than `expires_at` if no worker is running. Status reads `expired` from `expires_at` regardless, and a late approve or decline is refused.
 - **An approved step-up doesn't make its merchant known.** New merchant counts only allowed Decisions, so the next payment to that merchant can step up again.
 - **Only INR and USD,** and one Policy pack for every Tenant.
 - **Scopes only help if the Agent gets only the agent key.** A Tenant that hands an Agent its tenant key, or a key with every scope, gives it back the power to grant Mandates and read Intent verdicts.

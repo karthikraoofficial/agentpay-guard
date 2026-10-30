@@ -21,15 +21,13 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, ValidationError
 from api.deps import ClockDep, ConsentTenant, IdemKey, PackDep, StoreDep, Tenant, WorkflowDep
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
-from api.routes.decisions import decision_time
-from core.domain.audit import AuditRecord, DecisionInputs, seal
+from core.domain.audit import DecisionInputs
 from core.domain.consent import (
     Attestation,
     ConsentRequest,
     ConsentRequestId,
     ConsentResolution,
     ConsentStatus,
-    ResolutionEvidence,
     ResolutionStatus,
     ResolvedVia,
     approval_result,
@@ -37,16 +35,16 @@ from core.domain.consent import (
 from core.domain.decisions import (
     AuditRecordId,
     DecisionId,
-    EngineOutput,
     PackRef,
     ReasonCode,
+    decision_time,
     month_window,
 )
 from core.domain.money import Money
-from core.domain.parties import new_id
 from core.policy.engine import decide
 from core.policy.packs import LoadedPack
 from core.ports import TenantId, TenantTransaction, Workflow
+from core.resolutions import record_resolution
 
 router = APIRouter(prefix="/v1/consent-requests", tags=["consent"])
 log = logging.getLogger(__name__)
@@ -272,57 +270,6 @@ def _open_for_resolution(
     if now >= consent.expires_at:
         raise ApiError(409, "CONSENT_EXPIRED", f"Consent request {consent_request_id} expired.")
     return consent
-
-
-def record_resolution(
-    tx: TenantTransaction,
-    consent: ConsentRequest,
-    status: ResolutionStatus,
-    via: ResolvedVia,
-    attestation: Attestation | None,
-    now: datetime,
-    *,
-    run: tuple[DecisionInputs, PackRef, EngineOutput] | None = None,
-) -> ConsentResolution:
-    """Append the resolution's Audit record and store it for lookup. The caller holds
-    the Consent request's lock; this takes the chain head. `run` is an approval's engine
-    re-run, recorded so the resolution replays like a Decision."""
-    inputs, ref, output = run if run else (None, None, None)
-    seq, prev_hash = tx.lock_chain_head()
-    resolution = ConsentResolution(
-        consent_request_id=consent.consent_request_id,
-        tenant_id=consent.tenant_id,
-        decision_id=consent.decision_id,
-        status=status,
-        resolved_at=now,
-        resolved_via=via,
-        attestation=attestation,
-        audit_record_id=AuditRecordId(new_id("aud")),
-        reason_codes=output.reason_codes if output and status == "blocked" else None,
-    )
-    sealed = seal(
-        AuditRecord(
-            audit_record_id=resolution.audit_record_id,
-            tenant_id=consent.tenant_id,
-            seq=seq + 1,
-            prev_hash=prev_hash,
-            kind="consent_resolution",
-            decision_id=consent.decision_id,
-            recorded_at=now,
-            inputs=inputs,
-            pack=ref,
-            output=output,
-            resolution=ResolutionEvidence(
-                consent_request_id=consent.consent_request_id,
-                status=status,
-                resolved_via=via,
-                attestation=attestation,
-            ),
-        )
-    )
-    tx.add_consent_resolution(resolution)
-    tx.append_audit_record(sealed)
-    return resolution
 
 
 def _resolution_out(resolution: ConsentResolution) -> ConsentResolutionOut:

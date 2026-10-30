@@ -132,3 +132,8 @@ def month_window(now: datetime) -> tuple[datetime, datetime]:
         else start.replace(month=start.month + 1)
     )
     return start, end
+
+
+def decision_time(now: datetime) -> datetime:
+    """The Decision time: one server-read instant, truncated to milliseconds."""
+    return now.replace(microsecond=now.microsecond // 1000 * 1000)

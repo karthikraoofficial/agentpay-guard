@@ -83,7 +83,13 @@ class Api:
 
     def client_with(self, clock: object, *, raise_server_exceptions: bool = True) -> TestClient:
         """A client for an app sharing this store but reading time from `clock`."""
-        app = create_app(make_settings(), store=self.store, clock=clock, telemetry=self.telemetry)  # type: ignore[arg-type]
+        app = create_app(
+            make_settings(),
+            store=self.store,
+            clock=clock,  # type: ignore[arg-type]
+            telemetry=self.telemetry,
+            workflow=self.workflow,
+        )
         return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
     def new_tenant(self, name: str = "acme") -> dict[str, str]:
