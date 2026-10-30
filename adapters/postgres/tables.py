@@ -288,3 +288,19 @@ payments = Table(
     CheckConstraint("status IN ('scheduled', 'captured', 'failed')", name="payments_status"),
     CheckConstraint("amount_minor > 0", name="payments_amount_positive"),
 )
+
+# Voids (#80): looked up by Decision; the Audit record of kind `void` is the evidence.
+voids = Table(
+    "voids",
+    metadata,
+    Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+    Column("decision_id", String, primary_key=True),
+    Column("via", String, nullable=False),
+    Column("payment_id", String, nullable=True),
+    Column("voided_at", DateTime(timezone=True), nullable=False),
+    Column("audit_record_id", String, nullable=False),
+    ForeignKeyConstraint(
+        ["tenant_id", "decision_id"], ["decisions.tenant_id", "decisions.decision_id"]
+    ),
+    CheckConstraint("via IN ('tenant_api', 'payment_failed')", name="voids_via"),
+)

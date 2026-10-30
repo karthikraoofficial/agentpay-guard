@@ -47,6 +47,7 @@ from core.domain.parties import (
 from core.domain.parties import TenantId as TenantId  # re-exported for adapters
 from core.domain.payments import Payment, PaymentId
 from core.domain.rails import RailToken
+from core.domain.voids import Void
 
 AttributeValue = str | int | float | bool
 Attributes = Mapping[str, AttributeValue]
@@ -235,7 +236,8 @@ class TenantTransaction(Protocol):
 
     def allowed_spend(self, mandate_id: MandateId, start: datetime, end: datetime) -> int:
         """Spent this month: the minor units of allowed Decisions on a Mandate decided in
-        [start, end), plus approved step_ups resolved in [start, end)."""
+        [start, end), plus approved step_ups resolved in [start, end), leaving out any
+        that were Voided."""
         ...
 
     def has_allowed_payment_to(self, payer_id: PayerId, merchant_id: str) -> bool:
@@ -261,6 +263,12 @@ class TenantTransaction(Protocol):
         """Read a Payment and hold it until this transaction ends, so two reports from
         the rail about one Payment apply one after another."""
         ...
+
+    def add_void(self, void: Void) -> None:
+        """Store a Void for lookup. A Decision is Voided at most once."""
+        ...
+
+    def get_void(self, decision_id: DecisionId) -> Void | None: ...
 
     def update_payment(self, payment: Payment) -> None:
         """Store a Payment's new status (see Payment.charged)."""

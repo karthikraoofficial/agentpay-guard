@@ -27,6 +27,7 @@ from core.domain.parties import (
     PayerId,
 )
 from core.domain.payments import Payment, PaymentId
+from core.domain.voids import Void
 from core.ports import DomainEvent, EventBus, TenantDirectory, TenantId, UnitOfWork
 
 
@@ -45,6 +46,7 @@ class _TenantData:
     outbox: dict[str, tuple[DomainEvent, bool]] = field(default_factory=dict)
     links: dict[str, ConsentLink] = field(default_factory=dict)
     payments: dict[PaymentId, Payment] = field(default_factory=dict)
+    voids: dict[DecisionId, Void] = field(default_factory=dict)
 
     def copy(self) -> "_TenantData":
         return _TenantData(
@@ -60,6 +62,7 @@ class _TenantData:
             dict(self.outbox),
             dict(self.links),
             dict(self.payments),
+            dict(self.voids),
         )
 
 
@@ -154,17 +157,21 @@ class InMemoryTransaction:
         return self._data.decisions.get(decision_id)
 
     def allowed_spend(self, mandate_id: MandateId, start: datetime, end: datetime) -> int:
-        decisions = self._data.decisions
+        decisions, voided = self._data.decisions, self._data.voids
         allowed = sum(
             d.amount.minor
             for d in decisions.values()
-            if d.mandate_id == mandate_id and d.outcome == "allow" and start <= d.decided_at < end
+            if d.mandate_id == mandate_id
+            and d.outcome == "allow"
+            and start <= d.decided_at < end
+            and d.decision_id not in voided
         )
         approved = sum(
             decisions[c.decision_id].amount.minor
             for c in self._data.consents.values()
             if c.resolution is not None
             and c.resolution.status == "approved"
+            and c.decision_id not in voided
             and decisions[c.decision_id].mandate_id == mandate_id
             and start <= c.resolution.resolved_at < end
         )
@@ -200,6 +207,15 @@ class InMemoryTransaction:
 
     def lock_payment(self, payment_id: PaymentId) -> Payment | None:
         return self._data.payments.get(payment_id)
+
+    def add_void(self, void: Void) -> None:
+        self._own(void.tenant_id)
+        if void.decision_id in self._data.voids:
+            raise ValueError(f"Decision {void.decision_id} is already Voided")
+        self._data.voids[void.decision_id] = void
+
+    def get_void(self, decision_id: DecisionId) -> Void | None:
+        return self._data.voids.get(decision_id)
 
     def update_payment(self, payment: Payment) -> None:
         self._own(payment.tenant_id)

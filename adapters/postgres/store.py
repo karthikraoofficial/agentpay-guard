@@ -35,6 +35,7 @@ from adapters.postgres.tables import (
     payments,
     tenant_chain_heads,
     tenants,
+    voids,
 )
 from core.domain.audit import ZERO_HASH, SealedAuditRecord, StoredAuditRow, unseal
 from core.domain.consent import (
@@ -61,6 +62,7 @@ from core.domain.parties import (
 )
 from core.domain.payments import Payment, PaymentId
 from core.domain.rails import RailToken
+from core.domain.voids import Void
 from core.ports import DomainEvent, EventBus, TenantDirectory, TenantId, UnitOfWork
 
 
@@ -182,7 +184,12 @@ class PostgresTransaction:
         )
 
     def allowed_spend(self, mandate_id: MandateId, start: datetime, end: datetime) -> int:
-        d, r = decisions.c, consent_resolutions.c
+        d, r, v = decisions.c, consent_resolutions.c, voids.c
+        not_voided = ~(
+            select(v.decision_id)
+            .where(v.tenant_id == d.tenant_id, v.decision_id == d.decision_id)
+            .exists()
+        )
         allowed = self._conn.execute(
             select(func.coalesce(func.sum(d.amount_minor), 0)).where(
                 d.tenant_id == self._tenant_id,
@@ -190,6 +197,7 @@ class PostgresTransaction:
                 d.outcome == "allow",
                 d.decided_at >= start,
                 d.decided_at < end,
+                not_voided,
             )
         ).scalar_one()
         approved = self._conn.execute(
@@ -205,6 +213,7 @@ class PostgresTransaction:
                 r.status == "approved",
                 r.resolved_at >= start,
                 r.resolved_at < end,
+                not_voided,
             )
         ).scalar_one()
         return int(allowed) + int(approved)
@@ -388,6 +397,22 @@ class PostgresTransaction:
 
     def lock_payment(self, payment_id: PaymentId) -> Payment | None:
         return self._payment(payments.c.payment_id == payment_id, lock=True)
+
+    def add_void(self, void: Void) -> None:
+        self._own(void.tenant_id)
+        self._conn.execute(insert(voids).values(**void.model_dump()))
+
+    def get_void(self, decision_id: DecisionId) -> Void | None:
+        row = (
+            self._conn.execute(
+                select(voids).where(
+                    voids.c.tenant_id == self._tenant_id, voids.c.decision_id == decision_id
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return None if row is None else Void.model_validate(dict(row))
 
     def update_payment(self, payment: Payment) -> None:
         self._own(payment.tenant_id)

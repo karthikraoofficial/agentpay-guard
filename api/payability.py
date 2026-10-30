@@ -2,7 +2,8 @@
 
 An allow can be paid until its Decision time plus the window of the pack it was decided
 with. An approved step-up can be paid until its Consent resolution time plus the window
-of the pack the approval was re-checked with (ADR-0010). Anything else has no window.
+of the pack the approval was re-checked with (ADR-0010). A Voided Decision, and anything
+else, has no window.
 The engine never sees this, and no Audit record carries it."""
 
 from datetime import datetime
@@ -34,6 +35,8 @@ def payable_until(
     active: LoadedPack,
     packs_dir: Path,
 ) -> datetime | None:
+    if tx.get_void(decision.decision_id) is not None:
+        return None
     if decision.outcome == "allow":
         return window_end(decision.decided_at, _pack(decision.policy_pack, active, packs_dir))
     resolution = consent.resolution if consent else None

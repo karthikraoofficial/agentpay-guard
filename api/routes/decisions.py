@@ -15,6 +15,7 @@ from api.deps import (
     ClockDep,
     DecideTenant,
     IdemKey,
+    ManageTenant,
     PackDep,
     SettingsDep,
     StoreDep,
@@ -43,9 +44,11 @@ from core.domain.mandates import Mandate, MandateId
 from core.domain.money import Money
 from core.domain.parties import new_id
 from core.domain.signals import IntentResolution, IntentSignal, Signals
+from core.domain.voids import VoidVia, void_refusal
 from core.policy.engine import decide
 from core.policy.pack import PolicyPack
 from core.ports import DomainEvent, Telemetry, TenantId, TenantTransaction
+from core.voids import record_void
 
 router = APIRouter(prefix="/v1/decisions", tags=["decisions"])
 
@@ -313,3 +316,53 @@ def get_decision(
         )
         until = payable_until(tx, decision, consent, pack, settings.policy_packs_dir)
     return _out(decision, consent, now, until, inactive)
+
+
+class VoidOut(BaseModel):
+    decision_id: DecisionId
+    via: VoidVia
+    voided_at: AwareDatetime
+    audit_record_id: AuditRecordId
+
+
+_VOID_REFUSAL_TEXT = {
+    "DECISION_ALREADY_VOIDED": "This Decision is already Voided.",
+    "DECISION_HAS_PAYMENT": "This Decision has a Payment, so it can't be Voided.",
+    "DECISION_NOT_PAYABLE": "Only an allow, or an approved step-up, can be Voided.",
+}
+
+
+@router.post("/{decision_id}/void", response_model=VoidOut)
+def void_decision(
+    request: Request,
+    decision_id: str,
+    tenant: ManageTenant,
+    store: StoreDep,
+    clock: ClockDep,
+    key: IdemKey,
+) -> Response:
+    """Release an unpaid allow, or approved step-up, from Spent this month, even after its
+    Payment window closed. The Decision itself never changes, and it can't be paid after."""
+
+    def write(read_at: datetime) -> tuple[int, VoidOut]:
+        now = decision_time(read_at)
+        decision = tx.get_decision(DecisionId(decision_id))
+        if decision is None:
+            raise ApiError(404, "DECISION_NOT_FOUND", f"No Decision {decision_id}.")
+        # Mandate first, as Decisions do, so none counts this spend while the Void commits.
+        tx.lock_mandate(decision.mandate_id)
+        consent = tx.get_consent_request(decision.decision_id)
+        resolution = consent.resolution if consent else None
+        refusal = void_refusal(
+            already_voided=tx.get_void(decision.decision_id) is not None,
+            has_payment=tx.get_payment_for_decision(decision.decision_id) is not None,
+            was_payable=decision.outcome == "allow"
+            or (resolution is not None and resolution.status == "approved"),
+        )
+        if refusal is not None:
+            raise ApiError(409, refusal, _VOID_REFUSAL_TEXT[refusal])
+        void = record_void(tx, decision.decision_id, "tenant_api", now)
+        return 200, VoidOut.model_validate(void.model_dump(include=set(VoidOut.model_fields)))
+
+    with store.transaction(tenant) as tx:
+        return run_idempotent(tx, key, request_hash(request, None), clock, write)
