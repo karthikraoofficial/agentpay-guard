@@ -1,8 +1,8 @@
 """Score the policy engine against the labelled golden set.
 
-`uv run python -m evals.run_evals` runs every case in a golden file (default
-evals/golden/phase1.jsonl) through `decide()` and prints the false-allow and false-block
-counts. It exits 1 on any mismatch, including a wrong Reason code, so CI fails.
+`uv run python -m evals.run_evals` runs every golden file in evals/golden/ (or one, with
+`--cases`) through `decide()` and prints the false-allow and false-block counts per
+file. It exits 1 on any mismatch, including a wrong Reason code, so CI fails.
 
 A false-allow is an allow where the label says step_up or block; a false-block is a block
 where the label says allow or step_up. Each case lists only what it changes from the
@@ -57,6 +57,8 @@ class Case(BaseModel):
     agent_status: AgentStatus | None
     spent_this_month_minor: int
     now: datetime
+    # The Signals the API would have worked out, as a value (ADR-0003). Empty for Phase 1.
+    signals: dict[str, Any] = {}
     expected: Expected
 
 
@@ -107,7 +109,8 @@ def _actual(case: Case, pack_root: Path) -> Expected:
         )
     )
     spent = Money(minor=case.spent_this_month_minor, currency=mandate.currency)
-    output = decide(request, mandate, agent, spent, Signals(), pack, case.now)
+    signals = Signals.model_validate(case.signals)
+    output = decide(request, mandate, agent, spent, signals, pack, case.now)
     return Expected(outcome=output.outcome, reason_codes=output.reason_codes)
 
 
@@ -132,21 +135,29 @@ def run_cases(cases: Sequence[Case], pack_root: Path = PACKS) -> Report:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m evals.run_evals")
-    parser.add_argument("--cases", type=Path, default=GOLDEN / "phase1.jsonl")
+    parser.add_argument("--cases", type=Path, help="one golden file (default: all of them)")
     parser.add_argument("--packs", type=Path, default=PACKS)
     args = parser.parse_args(argv)
 
-    report = run_cases(load_cases(args.cases), args.packs)
-    print(f"cases: {report.total}")
-    print(f"false-allow: {report.false_allow}")
-    print(f"false-block: {report.false_block}")
-    print(f"mismatches: {len(report.mismatches)}")
-    for m in report.mismatches:
-        print(
-            f"  {m.case_id} ({m.description}): expected {m.expected.outcome} "
-            f"{list(m.expected.reason_codes)}, got {m.actual.outcome} {list(m.actual.reason_codes)}"
-        )
-    return 1 if report.mismatches else 0
+    files = [args.cases] if args.cases else sorted(GOLDEN.glob("*.jsonl"))
+    failed = False
+    for path in files:
+        cases = load_cases(path)
+        report = run_cases(cases, args.packs)
+        pack = f"{cases[0].pack.id}@{cases[0].pack.version}" if cases else "-"
+        print(f"{path.name} ({pack})")
+        print(f"  cases: {report.total}")
+        print(f"  false-allow: {report.false_allow}")
+        print(f"  false-block: {report.false_block}")
+        print(f"  mismatches: {len(report.mismatches)}")
+        for m in report.mismatches:
+            print(
+                f"    {m.case_id} ({m.description}): expected {m.expected.outcome} "
+                f"{list(m.expected.reason_codes)}, got {m.actual.outcome} "
+                f"{list(m.actual.reason_codes)}"
+            )
+        failed |= bool(report.mismatches)
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

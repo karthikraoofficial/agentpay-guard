@@ -16,6 +16,7 @@ from tests.api.test_decisions import Pay
 from tests.conftest import make_settings
 
 PACKS = Path(__file__).resolve().parents[2] / "policy_packs"
+ACTIVE_FILE = "1.1.0.yaml"  # the pack new Decisions are made with
 
 
 @pytest.fixture
@@ -90,12 +91,12 @@ def test_replay_with_a_pack_whose_hash_differs_is_a_pack_error_not_a_diff(
 ) -> None:
     audit_id = pay.ask().json()["audit_record_id"]
     shutil.copytree(PACKS, tmp_path, dirs_exist_ok=True)
-    pack_file = tmp_path / "default" / "1.0.0.yaml"
+    pack_file = tmp_path / "default" / ACTIVE_FILE
     pack_file.write_text(
         pack_file.read_text(encoding="utf-8").replace("500000", "400000"), encoding="utf-8"
     )
     manifest = tmp_path / "manifest.json"
-    original = hash_file(PACKS / "default" / "1.0.0.yaml")
+    original = hash_file(PACKS / "default" / ACTIVE_FILE)
     manifest.write_text(
         manifest.read_text(encoding="utf-8").replace(original, hash_file(pack_file)),
         encoding="utf-8",
@@ -111,7 +112,7 @@ def test_replay_with_a_pack_whose_hash_differs_is_a_pack_error_not_a_diff(
 def test_replay_with_an_edited_pack_file_is_a_pack_error(pay: Pay, cli, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     audit_id = pay.ask().json()["audit_record_id"]
     shutil.copytree(PACKS, tmp_path, dirs_exist_ok=True)
-    pack_file = tmp_path / "default" / "1.0.0.yaml"
+    pack_file = tmp_path / "default" / ACTIVE_FILE
     pack_file.write_text(
         pack_file.read_text(encoding="utf-8").replace("500000", "400000"), encoding="utf-8"
     )

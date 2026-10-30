@@ -12,7 +12,7 @@ from tests.api.test_mandates import Setup, _iso
 from tests.api.test_tenants_payers_agents import assert_problem
 from tests.packs import release_test_pack
 
-PACK_HASH = "sha256:a9037729f2af9b6ad63761c6a396c9483a3277c7a876e9d119e8b424342551ea"
+PACK_HASH = "sha256:37c381ead1c8d187ad9efaa7c0a995efac879dbdfc122dfec8fa853065383891"  # 1.1.0
 
 
 class Pay(Setup):
@@ -63,7 +63,7 @@ def test_an_allowed_decision_returns_the_full_envelope(pay: Pay) -> None:
     assert body["outcome"] == "allow"
     assert body["reason_codes"] == []
     assert body["risk_tier"] == "low"
-    assert body["policy_pack"] == {"id": "default", "version": "1.0.0", "hash": PACK_HASH}
+    assert body["policy_pack"] == {"id": "default", "version": "1.1.0", "hash": PACK_HASH}
     assert body["decided_at"] == "2026-11-02T09:30:00Z"
     assert body["step_up"] is None
     fetched = pay.api.client.get(f"/v1/decisions/{body['decision_id']}", headers=pay.tenant)
@@ -149,9 +149,11 @@ def test_the_audit_record_holds_the_full_inputs_and_rule_results(pay: Pay) -> No
     assert record.inputs.agent is not None and record.inputs.agent.status == "active"
     assert record.inputs.spent_this_month.minor == 0
     assert record.pack.hash == PACK_HASH
-    assert record.inputs.signals == Signals()
+    assert record.inputs.signals == Signals(
+        velocity_count=0, merchant_is_new=True, intent_resolution="none_cited"
+    )
     assert record.output.outcome == "allow"
-    assert len(record.output.rule_results) == 11
+    assert len(record.output.rule_results) == 15
 
 
 def test_a_repeated_decision_request_is_replayed_without_a_new_record(pay: Pay) -> None:

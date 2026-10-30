@@ -87,3 +87,14 @@ def merchant_new_pack(root: Path, version: str = "1.0.1") -> Path:
     return release_test_pack(
         root, version, {"merchant_new": MERCHANT_NEW, "rules": rules_plus("merchant_new")}
     )
+
+
+def phase_1_packs(root: Path) -> Path:
+    """A copy of policy_packs/ with default@1.0.0 active, for tests of Phase 1 rules
+    (caps, Spent this month) that shouldn't also have to satisfy the Signals."""
+    shutil.copytree(PACKS, root, dirs_exist_ok=True)
+    manifest_path = root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["packs"]["default"]["active"] = "1.0.0"
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return root
