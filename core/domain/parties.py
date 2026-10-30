@@ -14,6 +14,11 @@ AgentId = NewType("AgentId", str)
 
 AgentStatus = Literal["active", "disabled"]
 
+# What an API key may do (ADR-0011): `decide` is Agent traffic, `consent` resolves
+# Consent requests, `manage` grants or restores an Agent's power.
+ApiKeyScope = Literal["decide", "consent", "manage"]
+ALL_SCOPES: frozenset[ApiKeyScope] = frozenset(("decide", "consent", "manage"))
+
 _EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 _PHONE = re.compile(r"\+?[\d\s().-]{7,}")
 
@@ -52,6 +57,13 @@ class Agent(_Frozen):
     name: Name
     status: AgentStatus
     created_at: datetime
+
+
+class ApiKeyGrant(_Frozen):
+    """Who a key authenticates as, and what it may do."""
+
+    tenant_id: TenantId
+    scopes: frozenset[ApiKeyScope]
 
 
 def new_id(prefix: str) -> str:

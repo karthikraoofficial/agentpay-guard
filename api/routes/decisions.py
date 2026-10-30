@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, Response
 from pydantic import AwareDatetime, BaseModel
 
-from api.deps import ClockDep, IdemKey, PackDep, StoreDep, TelemetryDep, Tenant
+from api.deps import ClockDep, DecideTenant, IdemKey, PackDep, StoreDep, TelemetryDep, Tenant
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
 from core.domain.audit import AuditRecord, DecisionInputs, seal
@@ -154,7 +154,7 @@ def decision_time(now: datetime) -> datetime:
 def create_decision(
     request: Request,
     body: AgentPaymentRequest,
-    tenant: Tenant,
+    tenant: DecideTenant,
     store: StoreDep,
     clock: ClockDep,
     pack: PackDep,

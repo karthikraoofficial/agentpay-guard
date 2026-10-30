@@ -14,6 +14,7 @@ Store. Later PRDs may refine any of them.
 """
 
 from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from contextlib import AbstractContextManager
 from datetime import datetime
 from typing import Literal, Protocol
@@ -21,14 +22,22 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from core.domain.audit import SealedAuditRecord, StoredAuditRow
-from core.domain.consent import ConsentRequest
+from core.domain.consent import ConsentRequest, ConsentRequestId, ListableConsentStatus
 from core.domain.decisions import AuditRecordId, Decision, DecisionId
 from core.domain.idempotency import IdempotencyKey as IdempotencyKey  # re-exported
 from core.domain.idempotency import IdempotencyRecord
 from core.domain.intents import IntentCheck, IntentId
 from core.domain.mandates import Mandate, MandateId, RevokedBy
 from core.domain.money import Money
-from core.domain.parties import Agent, AgentId, AgentStatus, Payer, PayerId
+from core.domain.parties import (
+    Agent,
+    AgentId,
+    AgentStatus,
+    ApiKeyGrant,
+    ApiKeyScope,
+    Payer,
+    PayerId,
+)
 from core.domain.parties import TenantId as TenantId  # re-exported for adapters
 
 AttributeValue = str | int | float | bool
@@ -214,6 +223,21 @@ class TenantTransaction(Protocol):
 
     def get_consent_request(self, decision_id: DecisionId) -> ConsentRequest | None: ...
 
+    def find_consent_request(
+        self, consent_request_id: ConsentRequestId
+    ) -> ConsentRequest | None: ...
+
+    def list_consent_requests(
+        self,
+        status: ListableConsentStatus | None,
+        now: datetime,
+        limit: int,
+        before: tuple[datetime, ConsentRequestId] | None,
+    ) -> list[ConsentRequest]:
+        """Consent requests newest first by (created_at, consent_request_id), strictly
+        older than `before` when given. `status` is judged against `now`."""
+        ...
+
     def get_decision(self, decision_id: DecisionId) -> Decision | None: ...
 
     def lock_chain_head(self) -> tuple[int, str]:
@@ -255,11 +279,20 @@ class TenantDirectory(Protocol):
     """Tenants and their API keys. The only lookup that isn't tenant-scoped, because it
     is how a request's Tenant is found. Keys are stored as hashes only."""
 
-    def create_tenant(
-        self, tenant_id: TenantId, name: str, key_prefix: str, key_hash: str, created_at: datetime
-    ) -> None: ...
+    def create_tenant(self, tenant_id: TenantId, name: str, created_at: datetime) -> None: ...
 
-    def tenant_for_key(self, key_hash: str) -> TenantId | None: ...
+    def add_api_key(
+        self,
+        tenant_id: TenantId,
+        key_prefix: str,
+        key_hash: str,
+        scopes: AbstractSet[ApiKeyScope],
+        created_at: datetime,
+    ) -> bool:
+        """Store a key's hash with its scopes. False if there is no such Tenant."""
+        ...
+
+    def api_key(self, key_hash: str) -> ApiKeyGrant | None: ...
 
 
 # --- EventBus ------------------------------------------------------------------

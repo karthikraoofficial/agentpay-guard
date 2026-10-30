@@ -17,7 +17,7 @@ A piece of AI software, registered with a Tenant, that asks to make payments for
 _Avoid_: Bot, assistant
 
 **API key scope**:
-What a Tenant's API key may do: decide (Agent traffic) or consent (resolving Consent requests). An Agent is only ever given a decide key.
+What a Tenant's API key may do: decide (Agent traffic), consent (resolving Consent requests) or manage (granting Mandates and registering or switching Agents and Payers). An Agent is only ever given a decide key.
 _Avoid_: Role, permission
 
 **Disabled agent**:

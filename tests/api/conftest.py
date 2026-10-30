@@ -17,8 +17,9 @@ from adapters.memory.model_gateway import ScriptedGateway
 from adapters.memory.telemetry import InMemoryTelemetry
 from adapters.memory.unit_of_work import InMemoryUnitOfWork
 from adapters.postgres.store import PostgresStore
-from api.admin import create_tenant, replay_record, verify_chain
+from api.admin import create_key, create_tenant, replay_record, verify_chain
 from api.main import create_app
+from core.domain.parties import ALL_SCOPES, ApiKeyScope, hash_api_key
 from core.ports import TenantId
 from core.settings import Settings
 from tests.conftest import make_settings
@@ -82,10 +83,25 @@ class Api:
         return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
     def new_tenant(self, name: str = "acme") -> dict[str, str]:
-        """Create a Tenant and return headers that authenticate as it."""
-        tenant_id, key = create_tenant(self.store, name, live=False, clock=FixedClock(NOW))
+        """Create a Tenant and return headers for a key with every scope, like a key from
+        before scopes existed. Scope tests make narrower keys with `new_key`."""
+        tenant_id, _, _ = create_tenant(self.store, name, live=False, clock=FixedClock(NOW))
         self.tenants.append(tenant_id)
+        return self.new_key(tenant_id, ALL_SCOPES)
+
+    def new_key(
+        self, tenant_id: TenantId, scopes: set[ApiKeyScope] | frozenset[ApiKeyScope]
+    ) -> dict[str, str]:
+        key = create_key(
+            self.store, tenant_id, frozenset(scopes), live=False, clock=FixedClock(NOW)
+        )
+        assert key is not None
         return {"Authorization": f"Bearer {key}"}
+
+    def tenant_of(self, headers: dict[str, str]) -> TenantId:
+        grant = self.store.api_key(hash_api_key(headers["Authorization"].removeprefix("Bearer ")))
+        assert grant is not None
+        return grant.tenant_id
 
     def assert_evidence_holds(self) -> None:
         """Every chain verifies and every recorded Decision replays byte-identical."""

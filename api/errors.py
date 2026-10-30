@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 _TITLES = {
     400: "Bad request",
     401: "Unauthenticated",
+    403: "Forbidden",
     404: "Not found",
     405: "Method not allowed",
     409: "Conflict",

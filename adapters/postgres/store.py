@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from collections.abc import Set as AbstractSet
 from contextlib import contextmanager
 from datetime import datetime
 
@@ -19,13 +20,21 @@ from adapters.postgres.tables import (
     tenants,
 )
 from core.domain.audit import ZERO_HASH, SealedAuditRecord, StoredAuditRow, unseal
-from core.domain.consent import ConsentRequest
+from core.domain.consent import ConsentRequest, ConsentRequestId, ListableConsentStatus
 from core.domain.decisions import AuditRecordId, Decision, DecisionId, PackRef
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.intents import IntentCheck, IntentContent, IntentId
 from core.domain.mandates import ConsentEvidence, Mandate, MandateId, RevokedBy
 from core.domain.money import Money
-from core.domain.parties import Agent, AgentId, AgentStatus, Payer, PayerId
+from core.domain.parties import (
+    Agent,
+    AgentId,
+    AgentStatus,
+    ApiKeyGrant,
+    ApiKeyScope,
+    Payer,
+    PayerId,
+)
 from core.ports import TenantDirectory, TenantId, UnitOfWork
 
 
@@ -203,6 +212,39 @@ class PostgresTransaction:
             .one_or_none()
         )
         return None if row is None else ConsentRequest.model_validate(dict(row))
+
+    def find_consent_request(self, consent_request_id: ConsentRequestId) -> ConsentRequest | None:
+        row = (
+            self._conn.execute(
+                select(consent_requests).where(
+                    consent_requests.c.tenant_id == self._tenant_id,
+                    consent_requests.c.consent_request_id == consent_request_id,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return None if row is None else ConsentRequest.model_validate(dict(row))
+
+    def list_consent_requests(
+        self,
+        status: ListableConsentStatus | None,
+        now: datetime,
+        limit: int,
+        before: tuple[datetime, ConsentRequestId] | None,
+    ) -> list[ConsentRequest]:
+        c = consent_requests.c
+        query = select(consent_requests).where(c.tenant_id == self._tenant_id)
+        if status == "pending":
+            query = query.where(c.expires_at > now)
+        elif status == "expired":
+            query = query.where(c.expires_at <= now)
+        if before is not None:
+            query = query.where(tuple_(c.created_at, c.consent_request_id) < before)
+        query = query.order_by(c.created_at.desc(), c.consent_request_id.desc()).limit(limit)
+        return [
+            ConsentRequest.model_validate(dict(r)) for r in self._conn.execute(query).mappings()
+        ]
 
     def add_intent_check(self, check: IntentCheck) -> None:
         self._own(check.tenant_id)
@@ -387,28 +429,47 @@ class PostgresStore:
         with self._engine.begin() as conn:
             yield PostgresTransaction(conn, tenant_id)
 
-    def create_tenant(
-        self, tenant_id: TenantId, name: str, key_prefix: str, key_hash: str, created_at: datetime
-    ) -> None:
+    def create_tenant(self, tenant_id: TenantId, name: str, created_at: datetime) -> None:
         with self._engine.begin() as conn:
             conn.execute(
                 insert(tenants).values(tenant_id=tenant_id, name=name, created_at=created_at)
             )
+
+    def add_api_key(
+        self,
+        tenant_id: TenantId,
+        key_prefix: str,
+        key_hash: str,
+        scopes: AbstractSet[ApiKeyScope],
+        created_at: datetime,
+    ) -> bool:
+        with self._engine.begin() as conn:
+            exists = conn.execute(
+                select(tenants.c.tenant_id).where(tenants.c.tenant_id == tenant_id)
+            ).scalar_one_or_none()
+            if exists is None:
+                return False
             conn.execute(
                 insert(api_keys).values(
                     key_hash=key_hash,
                     tenant_id=tenant_id,
                     key_prefix=key_prefix,
+                    scopes=sorted(scopes),
                     created_at=created_at,
                 )
             )
+        return True
 
-    def tenant_for_key(self, key_hash: str) -> TenantId | None:
+    def api_key(self, key_hash: str) -> ApiKeyGrant | None:
         with self._engine.connect() as conn:
-            tenant_id = conn.execute(
-                select(api_keys.c.tenant_id).where(api_keys.c.key_hash == key_hash)
-            ).scalar_one_or_none()
-        return None if tenant_id is None else TenantId(tenant_id)
+            row = conn.execute(
+                select(api_keys.c.tenant_id, api_keys.c.scopes).where(
+                    api_keys.c.key_hash == key_hash
+                )
+            ).one_or_none()
+        if row is None:
+            return None
+        return ApiKeyGrant(tenant_id=TenantId(row.tenant_id), scopes=frozenset(row.scopes))
 
 
 def _mandate_row(m: Mandate) -> dict[str, object]:

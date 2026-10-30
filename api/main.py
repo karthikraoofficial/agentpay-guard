@@ -14,7 +14,7 @@ from adapters.postgres.store import PostgresStore
 from adapters.system_clock import SystemClock
 from api import errors
 from api.deps import Store
-from api.routes import decisions, intents, mandates, parties
+from api.routes import consent_requests, decisions, intents, mandates, parties
 from core.policy.packs import load_active_pack
 from core.ports import Clock, ModelGateway, Telemetry
 from core.settings import Settings, get_settings
@@ -62,6 +62,7 @@ def create_app(
     app.include_router(mandates.router)
     app.include_router(decisions.router)
     app.include_router(intents.router)
+    app.include_router(consent_requests.router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> Health:
