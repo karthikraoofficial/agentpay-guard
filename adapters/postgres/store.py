@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import datetime
 
 from sqlalchemy import (
+    ColumnElement,
     Connection,
     Engine,
     RowMapping,
@@ -31,6 +32,7 @@ from adapters.postgres.tables import (
     mandates,
     outbox_events,
     payers,
+    payments,
     tenant_chain_heads,
     tenants,
 )
@@ -57,7 +59,8 @@ from core.domain.parties import (
     Payer,
     PayerId,
 )
-from core.domain.payments import RailToken
+from core.domain.payments import Payment, PaymentId
+from core.domain.rails import RailToken
 from core.ports import DomainEvent, EventBus, TenantDirectory, TenantId, UnitOfWork
 
 
@@ -372,6 +375,59 @@ class PostgresTransaction:
         fields = {k: v for k, v in row.items() if k in IntentCheck.model_fields}
         content = IntentContent.model_validate_json(row["content"])
         return IntentCheck.model_validate({**fields, "content": content})
+
+    def add_payment(self, payment: Payment) -> None:
+        self._own(payment.tenant_id)
+        self._conn.execute(insert(payments).values(**_payment_row(payment)))
+
+    def get_payment(self, payment_id: PaymentId) -> Payment | None:
+        return self._payment(payments.c.payment_id == payment_id, lock=False)
+
+    def get_payment_for_decision(self, decision_id: DecisionId) -> Payment | None:
+        return self._payment(payments.c.decision_id == decision_id, lock=False)
+
+    def lock_payment(self, payment_id: PaymentId) -> Payment | None:
+        return self._payment(payments.c.payment_id == payment_id, lock=True)
+
+    def update_payment(self, payment: Payment) -> None:
+        self._own(payment.tenant_id)
+        row = _payment_row(payment)
+        changed = self._conn.execute(
+            update(payments)
+            .where(
+                payments.c.tenant_id == self._tenant_id,
+                payments.c.payment_id == payment.payment_id,
+            )
+            .values(
+                status=row["status"],
+                rail_payment_id=row["rail_payment_id"],
+                failure_code=row["failure_code"],
+                updated_at=row["updated_at"],
+            )
+        ).rowcount
+        if changed != 1:
+            raise ValueError(f"no Payment {payment.payment_id}")
+
+    def _payment(self, where: ColumnElement[bool], *, lock: bool) -> Payment | None:
+        query = select(payments).where(payments.c.tenant_id == self._tenant_id, where)
+        row = (
+            self._conn.execute(query.with_for_update() if lock else query).mappings().one_or_none()
+        )
+        if row is None:
+            return None
+        return Payment(
+            payment_id=row["payment_id"],
+            tenant_id=row["tenant_id"],
+            decision_id=row["decision_id"],
+            mandate_id=row["mandate_id"],
+            amount=Money(minor=row["amount_minor"], currency=row["currency"]),
+            rail=row["rail"],
+            status=row["status"],
+            rail_payment_id=row["rail_payment_id"],
+            failure_code=row["failure_code"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
 
     def get_decision(self, decision_id: DecisionId) -> Decision | None:
         row = (
@@ -720,6 +776,23 @@ def _mandate(row: RowMapping) -> Mandate:
             display=row["rail_display"],
         ),
     )
+
+
+def _payment_row(payment: Payment) -> dict[str, object]:
+    return {
+        "tenant_id": payment.tenant_id,
+        "payment_id": payment.payment_id,
+        "decision_id": payment.decision_id,
+        "mandate_id": payment.mandate_id,
+        "amount_minor": payment.amount.minor,
+        "currency": payment.amount.currency,
+        "rail": payment.rail,
+        "status": payment.status,
+        "rail_payment_id": payment.rail_payment_id,
+        "failure_code": payment.failure_code,
+        "created_at": payment.created_at,
+        "updated_at": payment.updated_at,
+    }
 
 
 _conforms_uow: type[UnitOfWork] = PostgresStore  # mypy checks the adapter matches the ports

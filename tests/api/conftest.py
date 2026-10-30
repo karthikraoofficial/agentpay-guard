@@ -14,6 +14,7 @@ from sqlalchemy import create_engine
 
 from adapters.memory.clock import FixedClock
 from adapters.memory.model_gateway import ScriptedGateway
+from adapters.memory.rail import MockRail
 from adapters.memory.telemetry import InMemoryTelemetry
 from adapters.memory.unit_of_work import InMemoryUnitOfWork
 from adapters.memory.workflow import InMemoryWorkflow
@@ -53,6 +54,7 @@ class Api:
     telemetry: InMemoryTelemetry = field(default_factory=InMemoryTelemetry)
     gateway: ScriptedGateway = field(default_factory=ScriptedGateway)
     workflow: InMemoryWorkflow = field(default_factory=InMemoryWorkflow)
+    rail: MockRail = field(default_factory=MockRail)
     packs: Path = PACKS
 
     def use_packs(self, packs: Path) -> None:
@@ -65,6 +67,7 @@ class Api:
             telemetry=self.telemetry,
             gateway=self.gateway,
             workflow=self.workflow,
+            rail=self.rail,
         )
         self.client = TestClient(app)
         self.packs = packs
@@ -78,6 +81,7 @@ class Api:
             telemetry=self.telemetry,
             gateway=self.gateway,
             workflow=self.workflow,
+            rail=self.rail,
         )
         self.client = TestClient(app)
 
@@ -89,6 +93,7 @@ class Api:
             clock=clock,  # type: ignore[arg-type]
             telemetry=self.telemetry,
             workflow=self.workflow,
+            rail=self.rail,
         )
         return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
@@ -145,6 +150,7 @@ def api(request: pytest.FixtureRequest) -> Iterator[Api]:
     telemetry = InMemoryTelemetry()
     gateway = ScriptedGateway()
     workflow = InMemoryWorkflow()
+    rail = MockRail()
     app = create_app(
         make_settings(),
         store=store,
@@ -152,9 +158,16 @@ def api(request: pytest.FixtureRequest) -> Iterator[Api]:
         telemetry=telemetry,
         gateway=gateway,
         workflow=workflow,
+        rail=rail,
     )
     api = Api(
-        TestClient(app), store, clock, telemetry=telemetry, gateway=gateway, workflow=workflow
+        TestClient(app),
+        store,
+        clock,
+        telemetry=telemetry,
+        gateway=gateway,
+        workflow=workflow,
+        rail=rail,
     )
     yield api
     api.assert_evidence_holds()

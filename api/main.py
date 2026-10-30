@@ -11,14 +11,23 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from adapters.claude.gateway import ClaudeGateway
 from adapters.memory.model_gateway import UnconfiguredGateway
+from adapters.memory.rail import MockRail
 from adapters.otel.telemetry import OtelTelemetry
 from adapters.postgres.store import PostgresStore
 from adapters.system_clock import SystemClock
 from api import errors
 from api.deps import Store
-from api.routes import consent_links, consent_requests, decisions, intents, mandates, parties
+from api.routes import (
+    consent_links,
+    consent_requests,
+    decisions,
+    intents,
+    mandates,
+    parties,
+    payments,
+)
 from core.policy.packs import load_active_pack
-from core.ports import Clock, ModelGateway, Telemetry, Workflow
+from core.ports import Clock, ModelGateway, PaymentRail, Telemetry, Workflow
 from core.settings import Settings, get_settings
 from workflows.client import TemporalWorkflow
 
@@ -37,6 +46,7 @@ def create_app(
     telemetry: Telemetry | None = None,
     gateway: ModelGateway | None = None,
     workflow: Workflow | None = None,
+    rail: PaymentRail | None = None,
 ) -> FastAPI:
     """Build the app from explicit settings, so tests need no global state. Without a
     store, it uses Postgres at `settings.database_url` (connecting on first use).
@@ -63,6 +73,8 @@ def create_app(
     app.state.gateway = gateway or _default_gateway(settings, app.state.telemetry)
     # Only resolutions signal from here (best effort); the worker's relay starts workflows.
     app.state.workflow = workflow or TemporalWorkflow.from_settings(settings)
+    # Settings only allow the mock rail until RazorpayRail exists (#83).
+    app.state.rail = rail or MockRail()
     errors.install(app)
     app.include_router(parties.router)
     app.include_router(mandates.router)
@@ -70,6 +82,7 @@ def create_app(
     app.include_router(intents.router)
     app.include_router(consent_requests.router)
     app.include_router(consent_links.router)
+    app.include_router(payments.router)
     app.add_middleware(_LinkCors, origin=settings.web_origin)
 
     @app.get("/healthz", tags=["ops"])

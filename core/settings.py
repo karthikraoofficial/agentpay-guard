@@ -14,7 +14,7 @@ from typing import Literal
 from pydantic import AnyUrl, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from core.domain.payments import RailName
+from core.domain.rails import RailName
 
 
 class Settings(BaseSettings):

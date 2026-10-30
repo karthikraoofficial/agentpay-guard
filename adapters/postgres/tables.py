@@ -264,3 +264,27 @@ intent_checks = Table(
         "(failure_cause IS NULL) OR (verdict = 'unknown')", name="intent_cause_means_unknown"
     ),
 )
+
+payments = Table(
+    "payments",
+    metadata,
+    Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+    Column("payment_id", String, primary_key=True),
+    Column("decision_id", String, nullable=False),
+    Column("mandate_id", String, nullable=False),
+    Column("amount_minor", BigInteger, nullable=False),
+    Column("currency", String(3), nullable=False),
+    Column("rail", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("rail_payment_id", String, nullable=True),
+    Column("failure_code", String, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    ForeignKeyConstraint(
+        ["tenant_id", "decision_id"], ["decisions.tenant_id", "decisions.decision_id"]
+    ),
+    # One Payment per Decision (ADR-0014).
+    Index("ux_payments_tenant_decision", "tenant_id", "decision_id", unique=True),
+    CheckConstraint("status IN ('scheduled', 'captured', 'failed')", name="payments_status"),
+    CheckConstraint("amount_minor > 0", name="payments_amount_positive"),
+)

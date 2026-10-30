@@ -8,7 +8,8 @@ import threading
 
 from core.domain.money import Money
 from core.domain.parties import TenantId
-from core.domain.payments import PaymentId, RailToken
+from core.domain.payments import PaymentId
+from core.domain.rails import RailToken
 from core.ports import IdempotencyKey, PaymentRail, RailCharge, RailUnavailable
 
 # Token refs that decide how a mock debit ends. Any other ref captures.

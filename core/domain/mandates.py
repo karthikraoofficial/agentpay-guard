@@ -21,7 +21,7 @@ from pydantic import (
 
 from core.domain.money import CurrencyCode, Money
 from core.domain.parties import AgentId, PayerId, TenantId
-from core.domain.payments import RailToken
+from core.domain.rails import RailToken
 
 MandateId = NewType("MandateId", str)
 Mcc = Annotated[str, StringConstraints(pattern=r"^\d{4}$", strict=True)]

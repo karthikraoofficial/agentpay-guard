@@ -45,7 +45,8 @@ from core.domain.parties import (
     PayerId,
 )
 from core.domain.parties import TenantId as TenantId  # re-exported for adapters
-from core.domain.payments import PaymentId, RailToken
+from core.domain.payments import Payment, PaymentId
+from core.domain.rails import RailToken
 
 AttributeValue = str | int | float | bool
 Attributes = Mapping[str, AttributeValue]
@@ -245,6 +246,24 @@ class TenantTransaction(Protocol):
     def count_decisions(self, mandate_id: MandateId, after: datetime, until: datetime) -> int:
         """Decisions on a Mandate, of any Outcome, decided in (after, until]: Velocity.
         `until` is inclusive so earlier Decisions at the same instant count."""
+        ...
+
+    def add_payment(self, payment: Payment) -> None:
+        """Store a new Payment. A second Payment for the same Decision is refused, so a
+        Decision can never be paid twice (ADR-0014)."""
+        ...
+
+    def get_payment(self, payment_id: PaymentId) -> Payment | None: ...
+
+    def get_payment_for_decision(self, decision_id: DecisionId) -> Payment | None: ...
+
+    def lock_payment(self, payment_id: PaymentId) -> Payment | None:
+        """Read a Payment and hold it until this transaction ends, so two reports from
+        the rail about one Payment apply one after another."""
+        ...
+
+    def update_payment(self, payment: Payment) -> None:
+        """Store a Payment's new status (see Payment.charged)."""
         ...
 
     def add_consent_request(self, consent: ConsentRequest) -> None: ...
