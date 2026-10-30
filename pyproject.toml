@@ -18,6 +18,7 @@ dependencies = [
     "pyyaml>=6.0",
     "opentelemetry-exporter-otlp-proto-http>=1.28",
     "anthropic>=1.0",
+    "temporalio>=1.35",
 ]
 
 [dependency-groups]
@@ -56,8 +57,9 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q -m 'not perf and not contract'"
+addopts = "-q -m 'not perf and not contract and not workflow'"
 markers = [
     "perf: latency budgets; run with `uv run pytest -m perf -s`",
     "contract: calls a real vendor API; run with `uv run pytest -m contract -o addopts=\"\"`",
+    "workflow: runs on Temporal's test server (downloaded on first use); run with `uv run pytest -m workflow -o addopts=\"\"`",
 ]

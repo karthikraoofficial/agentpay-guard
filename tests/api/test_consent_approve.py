@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 
+from adapters.memory.workflow import InMemoryWorkflow
 from adapters.postgres.store import PostgresStore
 from api.main import create_app
 from tests.api.conftest import NOW, Api, MovableClock
@@ -177,7 +178,9 @@ def test_parallel_approvals_cannot_overspend_the_monthly_cap(
     store = PostgresStore(create_engine(migrated_database_url, pool_size=6))
     clock = MovableClock(NOW)
     settings = make_settings(policy_packs_dir=phase_1_packs(tmp_path))
-    api = Api(TestClient(create_app(settings, store=store, clock=clock)), store, clock)
+    workflow = InMemoryWorkflow()
+    app = create_app(settings, store=store, clock=clock, workflow=workflow)
+    api = Api(TestClient(app), store, clock, workflow=workflow)
     approvals = Approvals(api)
     approvals.spend_to(9)
     pending = [approvals.step_up_for(9_000_00) for _ in range(2)]

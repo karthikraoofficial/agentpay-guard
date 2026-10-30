@@ -70,3 +70,6 @@ jobs:
       - name: Latency budgets (decide p99 < 5 ms, POST /v1/decisions p95 < 150 ms)
         run: uv run pytest -m perf -s -o addopts=""
 
+      - name: Consent workflow on Temporal (worker killed mid-wait, resumed by signal and timer)
+        run: uv run pytest -m workflow -o addopts=""
+

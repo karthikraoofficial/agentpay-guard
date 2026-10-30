@@ -9,7 +9,6 @@ from sqlalchemy import create_engine
 
 from adapters.claude.gateway import ClaudeGateway
 from adapters.memory.model_gateway import UnconfiguredGateway
-from adapters.memory.workflow import UnconfiguredWorkflow
 from adapters.otel.telemetry import OtelTelemetry
 from adapters.postgres.store import PostgresStore
 from adapters.system_clock import SystemClock
@@ -19,6 +18,7 @@ from api.routes import consent_requests, decisions, intents, mandates, parties
 from core.policy.packs import load_active_pack
 from core.ports import Clock, ModelGateway, Telemetry, Workflow
 from core.settings import Settings, get_settings
+from workflows.client import TemporalWorkflow
 
 
 class Health(BaseModel):
@@ -59,9 +59,8 @@ def create_app(
     app.state.telemetry = telemetry or otel
     app.state.settings = settings
     app.state.gateway = gateway or _default_gateway(settings, app.state.telemetry)
-    # The Temporal adapter arrives with the worker (#61). Until then resolutions skip the
-    # signal; the outbox keeps every start for the relay.
-    app.state.workflow = workflow or UnconfiguredWorkflow()
+    # Only resolutions signal from here (best effort); the worker's relay starts workflows.
+    app.state.workflow = workflow or TemporalWorkflow.from_settings(settings)
     errors.install(app)
     app.include_router(parties.router)
     app.include_router(mandates.router)

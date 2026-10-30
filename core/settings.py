@@ -30,6 +30,9 @@ class Settings(BaseSettings):
 
     database_url: AnyUrl
     temporal_address: str = Field(pattern=r"^[\w.\-]+:\d+$")
+    temporal_namespace: str = "default"
+    # The task queue the consent workflow and its activities run on.
+    temporal_task_queue: str = "agentpay-consent"
     otel_exporter_endpoint: AnyUrl
     # "otlp" exports spans and metrics to otel_exporter_endpoint; "none" builds them but
     # exports nothing, for tests and CI where no collector runs.

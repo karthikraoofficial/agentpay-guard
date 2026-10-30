@@ -24,6 +24,7 @@ from core.domain.decisions import (
     PackRef,
     ReasonCode,
     RiskTier,
+    decision_time,
     month_window,
 )
 from core.domain.intents import IntentId
@@ -159,11 +160,6 @@ def compute_signals(
 
 def _iso(at: datetime) -> str:
     return at.astimezone(UTC).isoformat().replace("+00:00", "Z")
-
-
-def decision_time(now: datetime) -> datetime:
-    """The Decision time: one server-read instant, truncated to milliseconds."""
-    return now.replace(microsecond=now.microsecond // 1000 * 1000)
 
 
 @router.post("", response_model=DecisionOut)

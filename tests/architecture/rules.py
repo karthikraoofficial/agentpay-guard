@@ -154,6 +154,8 @@ def impure_engine(root: Path) -> list[Violation]:
 VENDOR_HOMES = {
     "anthropic": "adapters/claude",
     "opentelemetry": "adapters/otel",
+    # The workflow, its activities, the Workflow port adapter and the worker.
+    "temporalio": "workflows",
 }
 
 
