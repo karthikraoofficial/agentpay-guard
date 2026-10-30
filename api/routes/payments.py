@@ -17,7 +17,7 @@ Refusals are 409s, logged and traced but not audited, and never reach the rail.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Request, Response
 from pydantic import AwareDatetime, BaseModel, ConfigDict
@@ -141,7 +141,9 @@ def create_payment(
             first = run_idempotent(tx, key, fingerprint, clock, write)
         if made:
             payment, rail_token = made[0]
-        elif first.headers.get(REPLAYED) and (unanswered := _unanswered(store, tenant, first)):
+        elif first.headers.get(REPLAYED) and (
+            unanswered := _unanswered(store, tenant, first, clock, settings)
+        ):
             payment, rail_token = unanswered
         else:
             return first
@@ -149,9 +151,12 @@ def create_payment(
 
 
 def _unanswered(
-    store: StoreDep, tenant: TenantId, replay: Response
+    store: StoreDep, tenant: TenantId, replay: Response, clock: ClockDep, settings: SettingsDep
 ) -> tuple[Payment, RailToken] | None:
-    """The Payment a replayed response is for, if the rail has not answered for it yet."""
+    """The Payment a replayed response is for, if the rail has not answered for it yet and
+    a retry may still ask. Only in the first half of the reconciliation age: after that the
+    sweep owns the Payment, and may fail one the rail never saw, so a retry asking the rail
+    to charge then could charge a Payment the sweep is failing (#82)."""
     shown = PaymentOut.model_validate_json(bytes(replay.body))
     if shown.status != "scheduled" or shown.rail_payment_id is not None:
         return None
@@ -162,6 +167,9 @@ def _unanswered(
         raise RuntimeError(f"Payment {shown.payment_id} lost its Mandate or Rail token")
     if payment.status != "scheduled" or payment.rail_payment_id is not None:
         return None  # answered since the response was kept
+    retry_until = payment.created_at + timedelta(seconds=settings.reconcile_after_seconds / 2)
+    if clock.now() >= retry_until:
+        return None
     return payment, mandate.rail_token
 
 

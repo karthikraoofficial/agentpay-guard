@@ -1,0 +1,5 @@
+# A Payment the rail never saw is failed, not charged late
+
+Rarely, a Payment is saved but the rail is never asked to charge it: the API stops between the two, and the Agent never retries with the same Idempotency-Key. The reconciliation sweep finds it still scheduled, and the rail has no charge for it. The sweep fails it with `RAIL_CHARGE_MISSING` and Voids its Decision, rather than charging it then.
+
+Charging late would complete what the Agent was told, but at least ten minutes later and without checking again whether the Mandate is still active, the Agent enabled or the Payment window open. Failing it is always safe: no money moved, the amount leaves Spent this month, and the Agent sees a clear status and asks for a new Decision. To keep the sweep and a retry from acting on the same Payment, a same-key retry only asks the rail again in the first half of the sweep's age, and only a Payment with no rail payment id counts as never seen. A missing charge for one the rail did answer is a lookup fault, retried on the next sweep.

@@ -389,6 +389,11 @@ class TenantDirectory(Protocol):
         public request's Tenant is found."""
         ...
 
+    def scheduled_payments(self, created_before: datetime) -> list[tuple[TenantId, PaymentId]]:
+        """Payments still scheduled that were made before `created_before`, in every
+        Tenant, oldest first: what the reconciliation sweep asks the rail about."""
+        ...
+
     def payment_tenant(self, payment_id: PaymentId) -> TenantId | None:
         """The Tenant whose Payment this is: how a rail webhook's Tenant is found. One rail
         account serves every Tenant (ADR-0012), so events are matched by our own ids."""

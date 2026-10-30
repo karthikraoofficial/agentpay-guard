@@ -158,6 +158,10 @@ _Avoid_: Callback, notification (that is what the Tenant sends the Payer), rail 
 A signed message from the rail saying how a Rail charge ended, which settles its Payment as captured or failed. Each one is acted on at most once.
 _Avoid_: Callback, notification, Tenant webhook (that one goes to a Tenant)
 
+**Reconciliation**:
+Asking the rail how a Payment ended when no Rail webhook has said so after a while, and settling it the same way a webhook would. A Payment the rail has no Rail charge for is failed, never charged late.
+_Avoid_: Retry, polling
+
 **Rail token**:
 The rail's reference to the Payer's payment instrument, bound to a Mandate when it is granted, shown only in masked form. Never the card number or UPI PIN.
 _Avoid_: Card, payment method, credentials

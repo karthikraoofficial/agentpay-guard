@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     # The PaymentRail that Payments go through. "mock" settles in-process and needs no
     # account, so tests, evals and a fresh clone run without Razorpay (ADR-0012, ADR-0013).
     rail: RailName = "mock"
+    # The reconciliation sweep (#82): every `interval`, ask the rail about Payments still
+    # scheduled `after` seconds after they were made.
+    reconcile_interval_seconds: int = Field(default=300, gt=0)
+    # At least a minute, so the sweep never fails a Payment whose rail call is in flight.
+    reconcile_after_seconds: int = Field(default=600, ge=60)
     # Signs Razorpay's webhooks (#81). Without it every inbound rail webhook is refused.
     razorpay_webhook_secret: SecretStr | None = None
 

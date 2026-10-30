@@ -678,6 +678,17 @@ class PostgresStore:
             row = conn.execute(query).mappings().one_or_none()
         return None if row is None else ConsentLink.model_validate(dict(row))
 
+    def scheduled_payments(self, created_before: datetime) -> list[tuple[TenantId, PaymentId]]:
+        p = payments.c
+        query = (
+            select(p.tenant_id, p.payment_id)
+            .where(p.status == "scheduled", p.created_at < created_before)
+            .order_by(p.created_at, p.payment_id)
+        )
+        with self._engine.connect() as conn:
+            rows = conn.execute(query).all()
+        return [(TenantId(t), PaymentId(i)) for t, i in rows]
+
     def payment_tenant(self, payment_id: PaymentId) -> TenantId | None:
         query = select(payments.c.tenant_id).where(payments.c.payment_id == payment_id)
         with self._engine.connect() as conn:

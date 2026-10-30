@@ -1,8 +1,9 @@
 """Recording Payments and what the rail says about their Rail charges, in the caller's
 transaction. Each status change is one `payment` Audit record in the Tenant's chain, and
 a failed Payment Voids its Decision. `apply_charge` is the one transition every report goes
-through: the payments API, rail webhooks (#81) and reconciliation (ADR-0014)."""
+through: the payments API, rail webhooks (#81) and the reconciliation sweep (#82)."""
 
+import logging
 from datetime import datetime
 
 from core.domain.audit import AuditRecord, PaymentEvidence, seal
@@ -11,6 +12,8 @@ from core.domain.parties import new_id
 from core.domain.payments import Payment, PaymentId
 from core.ports import RailCharge, TenantTransaction
 from core.voids import record_void
+
+log = logging.getLogger(__name__)
 
 
 def record_payment(tx: TenantTransaction, payment: Payment, now: datetime) -> None:
@@ -49,6 +52,9 @@ def record_charge(
         return payment
     moved = payment.charged(charge.status, charge.rail_payment_id, charge.failure_code, now)
     if moved is None:
+        if payment.status == "failed" and charge.status == "captured":
+            # A settled Payment never reopens, but money moved: it needs a refund.
+            log.error("Payment %s was captured at the rail after it failed", payment_id)
         return payment
     tx.update_payment(moved)
     if moved.status != payment.status:
