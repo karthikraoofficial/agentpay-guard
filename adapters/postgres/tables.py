@@ -14,8 +14,9 @@ from sqlalchemy import (
     MetaData,
     String,
     Table,
+    text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
 metadata = MetaData()
 
@@ -183,6 +184,25 @@ consent_resolutions = Table(
         name="ck_consent_resolutions_status",
     ),
     Index("ix_consent_resolutions_status_resolved", "tenant_id", "status", "resolved_at"),
+)
+
+# The transactional outbox (ADR-0009): events written in the same transaction as the
+# work that raised them, and delivered by the relay. `delivered_at` is null until then.
+outbox_events = Table(
+    "outbox_events",
+    metadata,
+    Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+    Column("event_id", String, primary_key=True),
+    Column("event_type", String, nullable=False),
+    Column("occurred_at", DateTime(timezone=True), nullable=False),
+    Column("payload", JSONB, nullable=False),
+    Column("delivered_at", DateTime(timezone=True), nullable=True),
+    Index(
+        "ix_outbox_events_undelivered",
+        "occurred_at",
+        "event_id",
+        postgresql_where=text("delivered_at IS NULL"),
+    ),
 )
 
 # Intent checks (ADR-0007): `content` holds the canonical JSON of the Payer instruction

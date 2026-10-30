@@ -16,6 +16,7 @@ from adapters.memory.clock import FixedClock
 from adapters.memory.model_gateway import ScriptedGateway
 from adapters.memory.telemetry import InMemoryTelemetry
 from adapters.memory.unit_of_work import InMemoryUnitOfWork
+from adapters.memory.workflow import InMemoryWorkflow
 from adapters.postgres.store import PostgresStore
 from api.admin import create_key, create_tenant, replay_record, verify_chain
 from api.main import create_app
@@ -51,6 +52,7 @@ class Api:
     tenants: list[TenantId] = field(default_factory=list)
     telemetry: InMemoryTelemetry = field(default_factory=InMemoryTelemetry)
     gateway: ScriptedGateway = field(default_factory=ScriptedGateway)
+    workflow: InMemoryWorkflow = field(default_factory=InMemoryWorkflow)
     packs: Path = PACKS
 
     def use_packs(self, packs: Path) -> None:
@@ -62,6 +64,7 @@ class Api:
             clock=self.clock,
             telemetry=self.telemetry,
             gateway=self.gateway,
+            workflow=self.workflow,
         )
         self.client = TestClient(app)
         self.packs = packs
@@ -74,6 +77,7 @@ class Api:
             clock=self.clock,
             telemetry=self.telemetry,
             gateway=self.gateway,
+            workflow=self.workflow,
         )
         self.client = TestClient(app)
 
@@ -134,9 +138,17 @@ def api(request: pytest.FixtureRequest) -> Iterator[Api]:
     clock = MovableClock(NOW)
     telemetry = InMemoryTelemetry()
     gateway = ScriptedGateway()
+    workflow = InMemoryWorkflow()
     app = create_app(
-        make_settings(), store=store, clock=clock, telemetry=telemetry, gateway=gateway
+        make_settings(),
+        store=store,
+        clock=clock,
+        telemetry=telemetry,
+        gateway=gateway,
+        workflow=workflow,
     )
-    api = Api(TestClient(app), store, clock, telemetry=telemetry, gateway=gateway)
+    api = Api(
+        TestClient(app), store, clock, telemetry=telemetry, gateway=gateway, workflow=workflow
+    )
     yield api
     api.assert_evidence_holds()

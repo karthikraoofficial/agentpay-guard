@@ -25,7 +25,7 @@ from core.domain.parties import (
     Payer,
     PayerId,
 )
-from core.ports import TenantDirectory, TenantId, UnitOfWork
+from core.ports import DomainEvent, EventBus, TenantDirectory, TenantId, UnitOfWork
 
 
 @dataclass
@@ -39,6 +39,8 @@ class _TenantData:
     head: tuple[int, str] = (0, ZERO_HASH)
     consents: dict[DecisionId, ConsentRequest] = field(default_factory=dict)
     intents: dict[IntentId, IntentCheck] = field(default_factory=dict)
+    # event_id -> (event, delivered)
+    outbox: dict[str, tuple[DomainEvent, bool]] = field(default_factory=dict)
 
     def copy(self) -> "_TenantData":
         return _TenantData(
@@ -51,6 +53,7 @@ class _TenantData:
             self.head,
             dict(self.consents),
             dict(self.intents),
+            dict(self.outbox),
         )
 
 
@@ -216,6 +219,10 @@ class InMemoryTransaction:
     def lock_consent_request(self, consent_request_id: ConsentRequestId) -> ConsentRequest | None:
         return self.find_consent_request(consent_request_id)
 
+    def publish(self, event: DomainEvent) -> None:
+        self._own(event.tenant_id)
+        self._data.outbox.setdefault(event.event_id, (event, False))
+
     def add_consent_resolution(self, resolution: ConsentResolution) -> None:
         self._own(resolution.tenant_id)
         consent = self._data.consents.get(resolution.decision_id)
@@ -309,7 +316,23 @@ class InMemoryUnitOfWork:
     def api_key(self, key_hash: str) -> ApiKeyGrant | None:
         return self._keys.get(key_hash)
 
+    def undelivered(self, limit: int) -> list[DomainEvent]:
+        waiting = [
+            event
+            for data in list(self._tenants.values())
+            for event, delivered in data.outbox.values()
+            if not delivered
+        ]
+        return sorted(waiting, key=lambda e: (e.occurred_at, e.event_id))[:limit]
+
+    def mark_delivered(self, tenant_id: TenantId, event_id: str, at: datetime) -> None:
+        with self._commit:
+            data = self._tenants.get(tenant_id)
+            if data is not None and event_id in data.outbox:
+                data.outbox[event_id] = (data.outbox[event_id][0], True)
+
 
 # mypy checks the fake matches the ports
 _conforms_uow: type[UnitOfWork] = InMemoryUnitOfWork
 _conforms_directory: type[TenantDirectory] = InMemoryUnitOfWork
+_conforms_bus: type[EventBus] = InMemoryUnitOfWork

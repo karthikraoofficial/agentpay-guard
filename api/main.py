@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 
 from adapters.claude.gateway import ClaudeGateway
 from adapters.memory.model_gateway import UnconfiguredGateway
+from adapters.memory.workflow import UnconfiguredWorkflow
 from adapters.otel.telemetry import OtelTelemetry
 from adapters.postgres.store import PostgresStore
 from adapters.system_clock import SystemClock
@@ -16,7 +17,7 @@ from api import errors
 from api.deps import Store
 from api.routes import consent_requests, decisions, intents, mandates, parties
 from core.policy.packs import load_active_pack
-from core.ports import Clock, ModelGateway, Telemetry
+from core.ports import Clock, ModelGateway, Telemetry, Workflow
 from core.settings import Settings, get_settings
 
 
@@ -33,6 +34,7 @@ def create_app(
     clock: Clock | None = None,
     telemetry: Telemetry | None = None,
     gateway: ModelGateway | None = None,
+    workflow: Workflow | None = None,
 ) -> FastAPI:
     """Build the app from explicit settings, so tests need no global state. Without a
     store, it uses Postgres at `settings.database_url` (connecting on first use).
@@ -57,6 +59,9 @@ def create_app(
     app.state.telemetry = telemetry or otel
     app.state.settings = settings
     app.state.gateway = gateway or _default_gateway(settings, app.state.telemetry)
+    # The Temporal adapter arrives with the worker (#61). Until then resolutions skip the
+    # signal; the outbox keeps every start for the relay.
+    app.state.workflow = workflow or UnconfiguredWorkflow()
     errors.install(app)
     app.include_router(parties.router)
     app.include_router(mandates.router)
