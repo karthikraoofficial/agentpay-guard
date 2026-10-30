@@ -4,10 +4,12 @@ A trust layer for payments that AI agents make on a user's behalf. For each agen
 payment it decides, in real time, whether to **allow** it, ask the user for fresh consent
 (**step_up**), or **block** it, and it builds the evidence pack when a payment is disputed.
 
-> Status: Phase 2. On top of `v0.1.0` (Mandates, the deterministic policy engine and the audit
-> log), Policy pack `default@1.1.0` adds four Signals: Velocity, New merchant, the Intent
-> check and Price drift. See [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md) for the plan and GitHub
-> Issues for PRDs and tickets.
+> Status: `v0.2.0`, Phase 3. On top of Mandates, the deterministic policy engine and the
+> audit log (`v0.1.0`), and four Signals (Phase 2), a step_up is now a durable consent loop:
+> the Payer approves or declines through the Tenant or a hosted Consent link, approval
+> re-checks the Mandate, and a Temporal workflow notifies and expires the request. The
+> active Policy pack is `default@1.2.0`. See [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md) for
+> the plan and GitHub Issues for PRDs and tickets.
 
 ## Design in one paragraph
 
@@ -131,7 +133,7 @@ The eval gate runs every hand-labelled golden file in `evals/golden/` through th
 
 - `phase1.jsonl`: 44 cases on `default@1.0.0`, covering every Phase 1 rule and threshold edge.
 - `phase2.jsonl`: 36 cases on `default@1.1.0`, covering every Signal Reason code and edge, every way an Intent check can be missing or fail, and the Phase 1 thresholds under the new pack.
-- `approval.jsonl`: 6 cases on `default@1.1.0` for the re-check at approval, labelled with the Consent resolution: unchanged and cap-near (approved), and Mandate revoked, Mandate expired, Agent disabled and cap used up while waiting (blocked). An approval that goes through where the label says blocked is a false-allow.
+- `approval.jsonl`: 6 cases on `default@1.2.0` for the re-check at approval, labelled with the Consent resolution: unchanged and cap-near (approved), and Mandate revoked, Mandate expired, Agent disabled and cap used up while waiting (blocked). An approval that goes through where the label says blocked is a false-allow.
 
 Each case changes only a few fields of its base file. The gate prints false-allow and false-block counts per file, and fails on any mismatch, including a wrong Reason code. The full 200+ case set and per-release thresholds come with the Evals PRD.
 
@@ -150,7 +152,7 @@ Each case changes only a few fields of its base file. The gate prints false-allo
 | `infra/` | Docker Compose for local dev; deploy config later |
 | `web/` | Next.js front end; pages arrive from Phase 3 |
 
-## Signals (Policy pack `default@1.1.0`)
+## Signals (Policy packs from `default@1.1.0`)
 
 Signals are facts about a payment beyond the Mandate's terms. Each one can at most send a payment to step_up, so the Payer decides: a Signal never blocks and never turns a step_up into an allow (ADR-0006). A missing or failed Signal steps up too.
 
@@ -164,6 +166,22 @@ Signals are facts about a payment beyond the Mandate's terms. Each one can at mo
 **The Intent check.** Before checkout, the Agent sends the Payer's own instruction and its cart to `POST /v1/intents`. Claude Haiku 5.5 compares them, at low effort with a 2,500 ms timeout. The cart is passed as untrusted data, and Agent reasoning is never sent. The Agent gets back only an `intent_id` and then cites it in `POST /v1/decisions`. A check counts only for the same Mandate, Agent, merchant and Declared MCC, for 30 minutes. A timeout, error or unclear reply is stored as `unknown`. The Payer instruction stays out of the Audit chain; only its hash goes in (ADR-0007).
 
 Settings: `AGENTPAY_INTENT_CHECK_ENABLED` (default `true`), `AGENTPAY_INTENT_CHECK_MODEL` (default `claude-haiku-5-5`) and `AGENTPAY_INTENT_CHECK_TIMEOUT_MS` (default `2500`). While the check is enabled, any environment except `test` needs `AGENTPAY_ANTHROPIC_API_KEY` to start.
+
+## Step-up consent (Phase 3)
+
+A step_up is a question to the Payer, and the loop around it is durable:
+
+1. **The Decision** returns `step_up` with a pending Consent request. In the same transaction it writes an outbox event (ADR-0009). Nothing on the hot path calls Temporal.
+2. **The worker's relay** starts a `step_up_consent` workflow for that request. The workflow notifies (one log line today), then waits for an answer or for the expiry timer: `consent_ttl_seconds` in the Policy pack, 10 minutes in `default@1.2.0`.
+3. **The Payer answers** in one of two ways:
+   - through the Tenant, which confirms them in its own app and calls approve or decline with a `consent` key and an attestation
+   - through a hosted Consent link the Tenant delivered (ADR-0008)
+
+   An Agent's `decide` key can do neither (ADR-0011).
+4. **Approval re-checks the Mandate** (ADR-0010). The engine runs again on the request as it was asked, against the Mandate, Agent and Spent this month at the moment of approval. A Payer can lift a step_up but never a block.
+5. **Postgres holds the answer** as a Consent resolution in the Audit chain. The workflow is then told to stop waiting. If nobody answers, the timer writes the `expired` resolution instead. The Agent reads the result on its Decision and pays only on `approved`.
+
+The workflow survives its worker being killed while it waits. CI tests this by killing a real worker process and finishing the workflow on a fresh one, once by signal and once by timer.
 
 ## Who is liable (draft)
 
@@ -207,8 +225,8 @@ The decision rules read their parameters from a Policy pack, `policy_packs/<id>/
 
 To change a value, release a new version:
 
-1. Copy the current file to the next version, for example `default/1.1.1.yaml`. Then edit `version` and the values.
-2. Run `uv run python -m core.policy.packs --hash policy_packs/default/1.1.1.yaml`, then add the printed hash under `versions` in the manifest. Point `active` at the new version.
+1. Copy the current file to the next version, for example `default/1.2.1.yaml`. Then edit `version` and the values.
+2. Run `uv run python -m core.policy.packs --hash policy_packs/default/1.2.1.yaml`, then add the printed hash under `versions` in the manifest. Point `active` at the new version.
 3. Keep the old version. Replay needs every released pack.
 
 `policy_packs/schema.json` documents the format. It is generated from the pack model: regenerate it with `uv run python -m core.policy.packs --write-schema`, and a test fails if it's stale.

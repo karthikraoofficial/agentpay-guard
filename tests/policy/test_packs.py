@@ -10,8 +10,20 @@ from core.policy.packs import PackError, PolicyPack, load_active_pack, load_pack
 PACKS = Path(__file__).resolve().parents[2] / "policy_packs"
 
 
-def test_the_active_default_pack_is_1_1_0_with_the_agreed_signal_values() -> None:
+def test_the_active_default_pack_is_1_2_0_which_only_adds_the_consent_ttl() -> None:
     loaded = load_active_pack(PACKS, "default")
+    phase_2 = load_pack(PACKS, "default", "1.1.0").pack
+
+    assert (loaded.pack.id, loaded.pack.version) == ("default", "1.2.0")
+    assert loaded.pack.consent_ttl_seconds == 600
+    assert loaded.pack.model_dump(exclude={"version", "consent_ttl_seconds"}) == (
+        phase_2.model_dump(exclude={"version", "consent_ttl_seconds"})
+    )
+    assert loaded.hash.startswith("sha256:") and len(loaded.hash) == len("sha256:") + 64
+
+
+def test_default_1_1_0_keeps_the_agreed_signal_values() -> None:
+    loaded = load_pack(PACKS, "default", "1.1.0")
     pack = loaded.pack
     phase_1 = load_pack(PACKS, "default", "1.0.0").pack
 
