@@ -84,6 +84,10 @@ _Avoid_: Error code, rule ID
 How a Consent request ended: approved, declined, expired, or blocked (the Payer approved but the Mandate's terms no longer permit the payment). Recorded as a new Audit record and never by changing the original Decision.
 _Avoid_: Consent update, final decision
 
+**Attestation**:
+The Tenant's record of how it confirmed that the Payer was the one answering a Consent request. The Tenant attests to it; AgentPay Guard does not verify it.
+_Avoid_: Proof, verification, Consent evidence (that is for Mandates)
+
 **Consent link**:
 An expiring link to one Consent request, which the Tenant delivers to the Payer. Whoever opens it is treated as the Payer, and it is used up by the first Consent resolution, not by being opened.
 _Avoid_: Approval link, magic link

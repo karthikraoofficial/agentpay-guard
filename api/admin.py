@@ -5,9 +5,11 @@
   (ADR-0011). Only hashes are stored.
 - `create-key --tenant <id> --scopes decide,consent,manage`: issues another key with
   exactly those scopes. Exit 3 if there is no such Tenant.
-- `replay <audit_record_id> --tenant <id>`: re-runs a recorded Decision and checks the
-  output is byte-identical. Exit 0 identical, 1 different (a diff is printed),
-  2 pack missing or not the recorded one, 3 no such record for that Tenant.
+- `replay <audit_record_id> --tenant <id>`: re-runs a recorded engine run (a Decision,
+  or an approved or blocked Consent resolution) and checks the output is byte-identical.
+  A declined or expired resolution has nothing to re-run and exits 0. Exit 0 identical,
+  1 different (a diff is printed), 2 pack missing or not the recorded one, 3 no such
+  record for that Tenant.
 - `verify --tenant <id>`: walks the Tenant's Audit chain. Exit 0 clean, 1 broken (the
   first broken seq is printed).
 """
@@ -99,6 +101,15 @@ def replay_record(
         out(f"No Audit record {audit_record_id} for Tenant {tenant_id}.")
         return NOT_FOUND
     recorded = sealed.record.pack
+    if recorded is None:
+        resolution = sealed.record.resolution
+        status = resolution.status if resolution else sealed.record.kind
+        out(
+            f"Nothing to re-run: {audit_record_id} (seq {sealed.seq}) is a {status} "
+            "Consent resolution with no engine run. It parses; `verify` checks its place "
+            "in the chain."
+        )
+        return IDENTICAL
     try:
         loaded = load_pack(packs_dir, recorded.id, recorded.version)
         result = replay(sealed.body, loaded.pack, loaded.hash)

@@ -96,7 +96,7 @@ def test_the_list_pages_newest_first(consents: Consents) -> None:
 
 def test_a_bad_cursor_or_status_is_rejected(consents: Consents) -> None:
     assert_problem(consents.list(cursor="not-a-cursor"), 422, "VALIDATION_FAILED")
-    assert consents.list(status="approved").status_code == 422
+    assert consents.list(status="cancelled").status_code == 422
 
 
 def test_another_tenants_requests_are_never_listed_or_read(api: Api, tmp_path: Path) -> None:

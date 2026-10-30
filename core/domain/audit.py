@@ -9,9 +9,20 @@ import hashlib
 from collections.abc import Sequence
 from typing import Any, Literal, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    model_serializer,
+    model_validator,
+)
 
 from core.domain.canonical_json import canonical_json
+from core.domain.consent import ResolutionEvidence
 from core.domain.decisions import (
     AgentPaymentRequest,
     AuditRecordId,
@@ -52,12 +63,44 @@ class AuditRecord(_Frozen):
     kind: AuditKind
     decision_id: DecisionId
     recorded_at: AwareDatetime
-    inputs: DecisionInputs
-    pack: PackRef
+    # The engine run: always on a decision record, and on a consent_resolution record
+    # only when approval re-ran the engine (approved or blocked, ADR-0010).
+    inputs: DecisionInputs | None = None
+    pack: PackRef | None = None
     # Phase 1's placeholder, always empty. Kept so Phase 1 records still parse;
     # Signals are recorded in `inputs.signals`.
     signals: tuple[dict[str, Any], ...] = ()
-    output: EngineOutput
+    output: EngineOutput | None = None
+    resolution: ResolutionEvidence | None = None
+
+    @model_validator(mode="after")
+    def _matches_kind(self) -> Self:
+        ran = (self.inputs, self.pack, self.output)
+        if self.kind == "decision":
+            if None in ran or self.resolution is not None:
+                raise ValueError("a decision record has inputs, pack and output, no resolution")
+        elif self.kind == "consent_resolution":
+            if self.resolution is None:
+                raise ValueError("a consent_resolution record needs a resolution")
+            reran = self.resolution.status in ("approved", "blocked")
+            if (None not in ran) != reran or (reran is False and ran != (None, None, None)):
+                raise ValueError(
+                    f"a {self.resolution.status} resolution "
+                    + ("re-runs the engine" if reran else "has no engine run")
+                )
+        return self
+
+    @model_serializer(mode="wrap")
+    def _omit_unset(
+        self, handler: SerializerFunctionWrapHandler, info: SerializationInfo
+    ) -> dict[str, Any]:
+        """Leave out sections a record doesn't have, so decision records keep their
+        exact byte format and resolution records carry no empty engine fields."""
+        data: dict[str, Any] = handler(self)
+        return {k: v for k, v in data.items() if not (k in _OPTIONAL and v is None)}
+
+
+_OPTIONAL = frozenset({"inputs", "pack", "output", "resolution"})
 
 
 class SealedAuditRecord(_Frozen):
