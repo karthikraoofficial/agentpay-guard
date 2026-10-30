@@ -259,6 +259,23 @@ def test_a_capture_for_a_payment_whose_rail_call_timed_out_is_applied(
     assert (current["status"], current["rail_payment_id"]) == ("captured", "pay_from_razorpay")
 
 
+def test_a_capture_after_a_payment_failed_changes_nothing_but_is_logged_loudly(
+    api: Api, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    api.use_packs(phase_1_packs(tmp_path))
+    api.use_settings(make_settings(razorpay_webhook_secret=SECRET))
+    hooks = Webhooks(api, rail_token=MockRail.token_that_is_refused())
+    payment = hooks.pay(hooks.allow()["decision_id"]).json()
+    assert payment["status"] == "failed"
+
+    with caplog.at_level(logging.ERROR):
+        hooks.deliver(event(payment | {"rail_payment_id": "pay_surprise"}), "evt_surprise")
+
+    assert hooks.status(payment) == "failed"
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert any("captured at the rail after it failed" in r.getMessage() for r in errors)
+
+
 # --- What is kept --------------------------------------------------------------------
 
 

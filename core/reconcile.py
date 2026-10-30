@@ -6,7 +6,8 @@ its own Tenant. A rail error is logged and that Payment is tried again next time
 A Payment the rail has no charge for never reached it (the API stopped between saving
 the Payment and calling the rail, and the Agent never retried). It is failed and its
 Decision Voided rather than charged late: no money moved, and the Mandate may have
-changed since.
+changed since (ADR-0016). Only a Payment the rail never answered for is treated so; one
+that has a rail payment id but no charge at the rail is a lookup fault, retried.
 """
 
 import logging
@@ -45,6 +46,10 @@ def sweep(store: SweepStore, rail: PaymentRail, clock: Clock, older_than: timede
                 payment = tx.get_payment(payment_id)
                 if payment is None:
                     continue
+                if charge is None and payment.rail_payment_id is not None:
+                    # The rail answered for it once, so this is a lookup fault, not a
+                    # charge that never reached the rail: try again next sweep.
+                    raise LookupError(f"the rail lost track of Payment {payment_id}")
                 if charge is None:
                     log.warning("Payment %s has no Rail charge; failing it", payment_id)
                     charge = RailCharge(
@@ -61,5 +66,6 @@ def sweep(store: SweepStore, rail: PaymentRail, clock: Clock, older_than: timede
                 payment_id,
                 tenant_id,
                 type(exc).__name__,
+                exc_info=True,
             )
     return SweepResult(checked=len(due), errors=errors)

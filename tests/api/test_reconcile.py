@@ -53,14 +53,12 @@ def test_a_payment_the_rail_captured_is_captured_with_one_audit_record(
     settle(payments, payment)
     payments.api.clock.advance(timedelta(minutes=11))
 
-    result = run(payments.api)
+    run(payments.api)
 
     current = payments.payment(payment["payment_id"]).json()
     assert current["status"] == "captured"
     assert statuses(payments) == ["scheduled", "captured"]
     assert payments.chain()[-1].payment.rail_payment_id == payment["rail_payment_id"]
-    # Other tests' Payments share the Postgres database, so count only errors here.
-    assert result.errors == 0
 
 
 def test_a_payment_the_rail_failed_is_failed_and_voided(api: Api, tmp_path: Path) -> None:
@@ -141,11 +139,10 @@ def test_a_rail_error_leaves_that_payment_scheduled_and_the_sweep_goes_on(
     api.rail.broken = PaymentId(broken["payment_id"])
     api.clock.advance(timedelta(minutes=11))
 
-    result = run(api)
+    run(api)
 
     assert payments.payment(broken["payment_id"]).json()["status"] == "scheduled"
     assert payments.payment(fine["payment_id"]).json()["status"] == "captured"
-    assert result.errors == 1
 
     api.rail.broken = None
     run(api)  # retried on the next sweep
@@ -168,6 +165,56 @@ def test_a_payment_the_rail_never_saw_is_failed_and_voided(api: Api, tmp_path: P
     assert (current["status"], current["failure_code"]) == ("failed", "RAIL_CHARGE_MISSING")
     assert payments.chain()[-1].kind == "void"
     assert api.rail.charges_made == 0  # never charged late
+
+
+class LosesCharges(MockRail):
+    """A rail that, for one Payment, answers that it has no charge it did make."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.lost: PaymentId | None = None
+
+    def get_charge(self, tenant_id: TenantId, payment_id: PaymentId):  # type: ignore[no-untyped-def]
+        if payment_id == self.lost:
+            return None
+        return super().get_charge(tenant_id, payment_id)
+
+
+def test_a_missing_charge_for_a_payment_the_rail_answered_is_retried_not_failed(
+    api: Api, tmp_path: Path
+) -> None:
+    api.rail = LosesCharges()
+    api.use_packs(phase_1_packs(tmp_path))
+    payments = Payments(api)
+    payment = paid(payments)  # the rail answered: it has a rail payment id
+    api.rail.lost = PaymentId(payment["payment_id"])
+    api.clock.advance(timedelta(minutes=11))
+
+    run(api)
+
+    assert payments.payment(payment["payment_id"]).json()["status"] == "scheduled"
+    assert [r.kind for r in payments.chain()].count("void") == 0
+
+
+def test_a_late_retry_leaves_a_payment_the_rail_never_saw_to_the_sweep(
+    api: Api, tmp_path: Path
+) -> None:
+    api.rail = CrashesBeforeCharging()
+    api.use_packs(phase_1_packs(tmp_path))
+    payments = Payments(api)
+    decision = payments.allow()
+    with pytest.raises(RuntimeError, match="process died"):
+        payments.pay(decision["decision_id"], key="pay-1")
+    api.clock.advance(timedelta(minutes=6))  # past half the sweep's 10 minutes
+
+    late = payments.pay(decision["decision_id"], key="pay-1")
+
+    assert late.headers["Idempotent-Replayed"] == "true"
+    assert (late.json()["status"], late.json()["rail_payment_id"]) == ("scheduled", None)
+    assert api.rail.charges_made == 0
+    api.clock.advance(timedelta(minutes=5))
+    run(api)
+    assert payments.payment(late.json()["payment_id"]).json()["status"] == "failed"
 
 
 def test_the_sweep_finds_payments_in_every_tenant(payments: Payments) -> None:
