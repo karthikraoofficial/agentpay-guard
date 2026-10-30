@@ -14,6 +14,8 @@ from typing import Literal
 from pydantic import AnyUrl, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from core.domain.payments import RailName
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -61,7 +63,7 @@ class Settings(BaseSettings):
 
     # The PaymentRail that Payments go through. "mock" settles in-process and needs no
     # account, so tests, evals and a fresh clone run without Razorpay (ADR-0012, ADR-0013).
-    rail: Literal["mock", "razorpay"] = "mock"
+    rail: RailName = "mock"
 
     @model_validator(mode="after")
     def _rail_available(self) -> "Settings":

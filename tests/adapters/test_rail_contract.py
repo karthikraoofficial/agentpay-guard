@@ -27,6 +27,7 @@ class RailHarness:
     captures: RailToken  # a token whose debit succeeds
     fails: RailToken  # a token the rail accepts, then fails to debit
     settle: Callable[[TenantId, PaymentId], None]
+    charges_for: Callable[[TenantId, PaymentId], int]  # Rail charges ever made for a Payment
 
 
 @pytest.fixture(params=["mock"])
@@ -37,6 +38,7 @@ def harness(request: pytest.FixtureRequest) -> Iterator[RailHarness]:
         captures=MockRail.token_that_captures(),
         fails=MockRail.token_that_fails(),
         settle=rail.settle,
+        charges_for=rail.charges_for,
     )
 
 
@@ -78,6 +80,7 @@ def test_scheduling_the_same_payment_again_returns_the_same_charge(harness: Rail
 
     assert again == first
     assert again.rail_payment_id == first.rail_payment_id
+    assert harness.charges_for(TENANT, PaymentId("pmt_twice")) == 1
 
 
 def test_scheduling_a_settled_payment_again_never_reopens_it(harness: RailHarness) -> None:

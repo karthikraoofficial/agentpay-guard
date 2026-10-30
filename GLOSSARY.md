@@ -117,7 +117,7 @@ The merchant category code the Agent states in an Agent payment request. On an a
 _Avoid_: MCC (when the source matters)
 
 **Merchant of record**:
-The party the payment rail actually pays: the Tenant's own rail account. It is distinct from the merchant named in an Agent payment request, which the rail does not see.
+The party the payment rail actually pays, as the rail sees it. It is distinct from the merchant named in an Agent payment request, which the rail does not see.
 _Avoid_: Merchant (when the rail's view matters), payee
 
 **Agent reasoning**:
@@ -136,10 +136,14 @@ _Avoid_: False positive, false decline
 
 **Payment**:
 The money movement for one allowed Decision or approved step-up, for exactly its amount. A Decision has at most one Payment. A Payment is scheduled when the rail accepts it, then captured or failed when the rail reports back.
-_Avoid_: Transaction, charge, Agent payment request (that is only the ask)
+_Avoid_: Transaction, Agent payment request (that is only the ask)
+
+**Rail charge**:
+The rail's own record of the debit for one Payment: what the rail says happened, which a Payment follows.
+_Avoid_: Payment (that is our record), transaction
 
 **Payment window**:
-How long after an allow an Agent may start its Payment, set in the Policy pack. After it, the allow can no longer be paid.
+How long an Agent has to start its Payment, counted from the allow or from the approval of a step-up, and set in the Policy pack. After it, the Decision can no longer be paid.
 _Avoid_: Expiry, TTL
 
 **Void**:
