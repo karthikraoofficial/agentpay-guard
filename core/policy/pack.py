@@ -24,6 +24,8 @@ from core.domain.money import CurrencyCode
 
 # The consent TTL of packs released before `consent_ttl_seconds` existed.
 LEGACY_CONSENT_TTL_SECONDS = 600
+# The Payment window of packs released before `payment_window_seconds` existed.
+LEGACY_PAYMENT_WINDOW_SECONDS = 900
 
 RuleId = Literal[
     "mandate_revoked",
@@ -112,10 +114,17 @@ class PolicyPack(_Strict):
     # How long the Payer has to answer a Consent request. Optional for the same reason;
     # unset means LEGACY_CONSENT_TTL_SECONDS.
     consent_ttl_seconds: StrictInt | None = Field(default=None, gt=0)
+    # How long an allow, or an approved step-up, can be paid. No rule reads it: the API
+    # derives `payable_until` from it. Unset means LEGACY_PAYMENT_WINDOW_SECONDS.
+    payment_window_seconds: StrictInt | None = Field(default=None, gt=0)
 
     @property
     def consent_ttl(self) -> timedelta:
         return timedelta(seconds=self.consent_ttl_seconds or LEGACY_CONSENT_TTL_SECONDS)
+
+    @property
+    def payment_window(self) -> timedelta:
+        return timedelta(seconds=self.payment_window_seconds or LEGACY_PAYMENT_WINDOW_SECONDS)
 
     @model_validator(mode="after")
     def _unique_rules(self) -> "PolicyPack":

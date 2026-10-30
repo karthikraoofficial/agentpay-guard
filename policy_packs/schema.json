@@ -244,6 +244,19 @@
       ],
       "default": null,
       "title": "Consent Ttl Seconds"
+    },
+    "payment_window_seconds": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Payment Window Seconds"
     }
   },
   "required": [

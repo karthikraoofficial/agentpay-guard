@@ -30,6 +30,7 @@ from api.deps import (
 )
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
+from api.payability import window_end
 from core.domain.audit import DecisionInputs
 from core.domain.consent import (
     Attestation,
@@ -54,6 +55,7 @@ from core.domain.decisions import (
 )
 from core.domain.money import Money
 from core.policy.engine import decide
+from core.policy.pack import PolicyPack
 from core.policy.packs import LoadedPack
 from core.ports import TenantId, TenantTransaction, Workflow
 from core.resolutions import record_resolution
@@ -96,6 +98,8 @@ class ConsentResolutionOut(BaseModel):
     audit_record_id: AuditRecordId
     # Only when an approval was blocked: the re-check's Reason codes.
     reason_codes: tuple[ReasonCode, ...] | None
+    # Only when approved: the end of the Payment window, counted from `resolved_at`.
+    payable_until: AwareDatetime | None
 
 
 class ConsentLinkOut(BaseModel):
@@ -165,7 +169,7 @@ def decline_consent_request(
     def write(read_at: datetime) -> tuple[int, ConsentResolutionOut]:
         csr = ConsentRequestId(consent_request_id)
         resolution = decline(tx, csr, "tenant_api", attestation, decision_time(read_at))
-        return 200, resolution_out(resolution)
+        return 200, resolution_out(resolution, None)
 
     with store.transaction(tenant) as tx:
         response = run_idempotent(tx, key, request_hash(request, body), clock, write)
@@ -192,7 +196,7 @@ def approve_consent_request(
         csr = ConsentRequestId(consent_request_id)
         now = decision_time(read_at)
         resolution = approve(tx, csr, "tenant_api", body.attestation, now, pack)
-        return 200, resolution_out(resolution)
+        return 200, resolution_out(resolution, pack.pack)
 
     with store.transaction(tenant) as tx:
         response = run_idempotent(tx, key, request_hash(request, body), clock, write)
@@ -330,9 +334,19 @@ def _open_for_resolution(
     return consent
 
 
-def resolution_out(resolution: ConsentResolution) -> ConsentResolutionOut:
+def resolution_out(
+    resolution: ConsentResolution, recheck_pack: PolicyPack | None
+) -> ConsentResolutionOut:
+    """The resolution as returned. An approval needs the pack it was re-checked with, for
+    its Payment window; a decline has none."""
+    until = None
+    if resolution.status == "approved":
+        if recheck_pack is None:
+            raise ValueError("an approved resolution needs the pack it was re-checked with")
+        until = window_end(resolution.resolved_at, recheck_pack)
     return ConsentResolutionOut.model_validate(
         resolution.model_dump(include=set(ConsentResolutionOut.model_fields))
+        | {"payable_until": until}
     )
 
 

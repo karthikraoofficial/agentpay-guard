@@ -16,7 +16,7 @@ from tests.api.test_decisions import Pay
 from tests.conftest import make_settings
 
 PACKS = Path(__file__).resolve().parents[2] / "policy_packs"
-ACTIVE_FILE = "1.2.0.yaml"  # the pack new Decisions are made with
+ACTIVE_FILE = "1.3.0.yaml"  # the pack new Decisions are made with
 
 
 @pytest.fixture

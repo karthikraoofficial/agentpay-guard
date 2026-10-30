@@ -1,11 +1,12 @@
 {
   "packs": {
     "default": {
-      "active": "1.2.0",
+      "active": "1.3.0",
       "versions": {
         "1.0.0": "sha256:a9037729f2af9b6ad63761c6a396c9483a3277c7a876e9d119e8b424342551ea",
         "1.1.0": "sha256:37c381ead1c8d187ad9efaa7c0a995efac879dbdfc122dfec8fa853065383891",
-        "1.2.0": "sha256:a206362fed2d9e3172d350da3668ce173422254922457921caa84aae40d8b5e7"
+        "1.2.0": "sha256:a206362fed2d9e3172d350da3668ce173422254922457921caa84aae40d8b5e7",
+        "1.3.0": "sha256:38a24d444876c4356ed32a314ea3c8758b3667f7c4768e72647dab29d79dc420"
       }
     }
   }

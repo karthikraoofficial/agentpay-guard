@@ -8,7 +8,7 @@ payment it decides, in real time, whether to **allow** it, ask the user for fres
 > audit log (`v0.1.0`), and four Signals (Phase 2), a step_up is now a durable consent loop:
 > the Payer approves or declines through the Tenant or a hosted Consent link, approval
 > re-checks the Mandate, and a Temporal workflow notifies and expires the request. The
-> active Policy pack is `default@1.2.0`. See [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md) for
+> active Policy pack is `default@1.3.0`. See [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md) for
 > the plan and GitHub Issues for PRDs and tickets.
 
 ## Design in one paragraph
@@ -79,9 +79,9 @@ Send a key as `Authorization: Bearer apg_test_…` on every call, and an `Idempo
 | `GET /v1/mandates?payer_id=…` | any | List a Payer's Mandates, newest first. Pass `next_cursor` back as `cursor` |
 | `POST /v1/mandates/{id}/revoke` | any | End a Mandate for good, recording `revoked_by` (`payer` or `tenant`) |
 | `POST /v1/intents`, `GET /v1/intents/{id}` | decide / manage | Before checkout, submit the Payer instruction and the proposed cart for an Intent check by Claude Haiku 5.5. The POST returns only `intent_id` and `expires_at`; the verdict (`match`, `mismatch`, `unknown`) is readable by the Tenant through GET with a `manage` key. A timeout, error or unclear reply is stored as `unknown` |
-| `POST /v1/decisions`, `GET /v1/decisions/{id}` | decide / any | Ask whether an Agent may pay under a Mandate. Every Outcome (`allow`, `step_up`, `block`) is a 200 with Reason codes, Risk tier, the Policy pack hash and an Audit record ID. Pass the `intent_id` from `POST /v1/intents` to cite an Intent check; packs from `1.1.0` step up a medium or high payment without a usable match |
+| `POST /v1/decisions`, `GET /v1/decisions/{id}` | decide / any | Ask whether an Agent may pay under a Mandate. Every Outcome (`allow`, `step_up`, `block`) is a 200 with Reason codes, Risk tier, the Policy pack hash and an Audit record ID. Pass the `intent_id` from `POST /v1/intents` to cite an Intent check; packs from `1.1.0` step up a medium or high payment without a usable match. `payable_until` is the end of the Payment window: set on an allow, and on a step_up once approved, otherwise null |
 | `GET /v1/consent-requests?status=pending`, `GET /v1/consent-requests/{id}` | consent / any | List Consent requests newest first (filter by `status`: `pending`, `approved`, `declined`, `expired` or `blocked`; pass `next_cursor` back as `cursor`), or read one |
-| `POST /v1/consent-requests/{id}/approve` | consent | Record that the Payer said yes, with a required `attestation`. Returns `approved`, or `blocked` with `reason_codes` after the re-check. Same `409`s as decline |
+| `POST /v1/consent-requests/{id}/approve` | consent | Record that the Payer said yes, with a required `attestation`. Returns `approved` with `payable_until`, or `blocked` with `reason_codes` after the re-check. Same `409`s as decline |
 | `POST /v1/consent-requests/{id}/link` | consent | Mint a Consent link to deliver to the Payer: `{url, expires_at}`, where `url` is `<web origin>/consent#<token>`. Minting again revokes the previous link. Only the token's hash is stored, so an idempotent replay returns `url: null` |
 | `GET /v1/consent-link`, `POST /v1/consent-link/approve`, `/decline` | none (the link) | The hosted consent screen's API. Send the token in a `Consent-Link` header, never in a path, so it never reaches an access log. The view holds the amount, merchant, Agent, a plain-language line per Reason code, the Intent verdict, the expiry and a stale-Mandate warning, and never Agent reasoning. Approve and decline take an `Idempotency-Key`, go through the same re-check, and record `resolved_via: consent_link`. Any link that is unknown, replaced, used or expired gets `404 CONSENT_LINK_INVALID`. CORS allows only `AGENTPAY_WEB_ORIGIN`, and only here |
 | `POST /v1/consent-requests/{id}/decline` | consent | Record that the Payer said no, optionally with an `attestation` (`method`, `reference`, `captured_at`) of how you confirmed it. Writes a Consent resolution into the Audit chain. `409 CONSENT_EXPIRED` at or after `expires_at`, `409 CONSENT_ALREADY_RESOLVED` once resolved |
@@ -95,6 +95,7 @@ How a Decision is reached:
 - **On step_up,** the response carries a pending Consent request (`step_up.consent_request_id`, `expires_at`, `status_url`). Its `consent.status` reads `expired` once the active Policy pack's consent TTL has passed (`consent_ttl_seconds`; 10 minutes for packs that don't set it). Once the Tenant resolves it, `consent.status` reads `approved`, `declined` or `blocked` with `resolved_at`, and `consent.mandate_inactive` warns, while it is pending, that an approval would now be blocked; the Decision's own `outcome` stays `step_up`. The Agent may pay only on `approved`.
 - **The consent workflow starts from an outbox** (ADR-0009). A step_up writes a `consent_requested` event in the same transaction as the Decision, so the hot path never calls Temporal. A relay starts one workflow per event, with the Consent request ID as its workflow ID, and keeps the event until the start succeeds. Approving or declining signals the workflow after the answer is stored; if that signal fails, the answer still stands.
 - **Approval re-checks the Mandate** (ADR-0010). The engine runs again on the request as it was asked and the Signals recorded then, against the Mandate, Agent and Spent this month as they are at approval. A Payer can lift a step_up but never a block: if the Mandate was revoked or expired, the Agent disabled, or the monthly cap used up while the request waited, the approval is recorded as `blocked` with `consent.reason_codes`.
+- **The Payment window.** An allow can be paid until `payable_until`: its `decided_at` plus `payment_window_seconds` from the pack it was decided with. An approved step-up gets its window from the approval's `resolved_at`, with the window of the pack the approval re-checked with. The window is 15 minutes in `default@1.3.0`, and also for packs that don't set it. It is worked out when the response is built, so neither the engine nor the Audit record sees it.
 - **No amounts are disclosed:** responses never include thresholds or caps.
 
 Mandates can't be edited. To change terms, create a new Mandate with `supersedes` set to the old one, and revoke the old one.
@@ -133,7 +134,7 @@ The eval gate runs every hand-labelled golden file in `evals/golden/` through th
 
 - `phase1.jsonl`: 44 cases on `default@1.0.0`, covering every Phase 1 rule and threshold edge.
 - `phase2.jsonl`: 36 cases on `default@1.1.0`, covering every Signal Reason code and edge, every way an Intent check can be missing or fail, and the Phase 1 thresholds under the new pack.
-- `approval.jsonl`: 6 cases on `default@1.2.0` for the re-check at approval, labelled with the Consent resolution: unchanged and cap-near (approved), and Mandate revoked, Mandate expired, Agent disabled and cap used up while waiting (blocked). An approval that goes through where the label says blocked is a false-allow.
+- `approval.jsonl`: 6 cases on `default@1.3.0` for the re-check at approval, labelled with the Consent resolution: unchanged and cap-near (approved), and Mandate revoked, Mandate expired, Agent disabled and cap used up while waiting (blocked). An approval that goes through where the label says blocked is a false-allow.
 
 Each case changes only a few fields of its base file. The gate prints false-allow and false-block counts per file, and fails on any mismatch, including a wrong Reason code. The full 200+ case set and per-release thresholds come with the Evals PRD.
 
@@ -172,7 +173,7 @@ Settings: `AGENTPAY_INTENT_CHECK_ENABLED` (default `true`), `AGENTPAY_INTENT_CHE
 A step_up is a question to the Payer, and the loop around it is durable:
 
 1. **The Decision** returns `step_up` with a pending Consent request. In the same transaction it writes an outbox event (ADR-0009). Nothing on the hot path calls Temporal.
-2. **The worker's relay** starts a `step_up_consent` workflow for that request. The workflow notifies (one log line today), then waits for an answer or for the expiry timer: `consent_ttl_seconds` in the Policy pack, 10 minutes in `default@1.2.0`.
+2. **The worker's relay** starts a `step_up_consent` workflow for that request. The workflow notifies (one log line today), then waits for an answer or for the expiry timer: `consent_ttl_seconds` in the Policy pack, 10 minutes in `default@1.3.0`.
 3. **The Payer answers** in one of two ways:
    - through the Tenant, which confirms them in its own app and calls approve or decline with a `consent` key and an attestation
    - through a hosted Consent link the Tenant delivered (ADR-0008)
@@ -225,8 +226,8 @@ The decision rules read their parameters from a Policy pack, `policy_packs/<id>/
 
 To change a value, release a new version:
 
-1. Copy the current file to the next version, for example `default/1.2.1.yaml`. Then edit `version` and the values.
-2. Run `uv run python -m core.policy.packs --hash policy_packs/default/1.2.1.yaml`, then add the printed hash under `versions` in the manifest. Point `active` at the new version.
+1. Copy the current file to the next version, for example `default/1.3.1.yaml`. Then edit `version` and the values.
+2. Run `uv run python -m core.policy.packs --hash policy_packs/default/1.3.1.yaml`, then add the printed hash under `versions` in the manifest. Point `active` at the new version.
 3. Keep the old version. Replay needs every released pack.
 
 `policy_packs/schema.json` documents the format. It is generated from the pack model: regenerate it with `uv run python -m core.policy.packs --write-schema`, and a test fails if it's stale.

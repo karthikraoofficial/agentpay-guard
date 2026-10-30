@@ -11,9 +11,19 @@ from fastapi import APIRouter, Request, Response
 from pydantic import AwareDatetime, BaseModel
 
 from api.consent_view import mandate_inactive
-from api.deps import ClockDep, DecideTenant, IdemKey, PackDep, StoreDep, TelemetryDep, Tenant
+from api.deps import (
+    ClockDep,
+    DecideTenant,
+    IdemKey,
+    PackDep,
+    SettingsDep,
+    StoreDep,
+    TelemetryDep,
+    Tenant,
+)
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
+from api.payability import payable_until, window_end
 from core.domain.audit import AuditRecord, DecisionInputs, seal
 from core.domain.consent import ConsentRequest, ConsentRequestId, ConsentStatus
 from core.domain.decisions import (
@@ -67,14 +77,22 @@ class DecisionOut(BaseModel):
     policy_pack: PackRef
     audit_record_id: AuditRecordId
     decided_at: AwareDatetime
+    # The end of the Payment window: set on an allow, and on a step_up once approved.
+    payable_until: AwareDatetime | None
     step_up: StepUpOut | None
     consent: ConsentOut | None
 
 
 def _out(
-    decision: Decision, consent: ConsentRequest | None, now: datetime, inactive: bool = False
+    decision: Decision,
+    consent: ConsentRequest | None,
+    now: datetime,
+    payable_until: datetime | None,
+    inactive: bool = False,
 ) -> DecisionOut:
-    fields = decision.model_dump(include=set(DecisionOut.model_fields) - {"step_up", "consent"})
+    fields = decision.model_dump(include=set(DecisionOut.model_fields)) | {
+        "payable_until": payable_until
+    }
     if consent is None:
         return DecisionOut.model_validate({**fields, "step_up": None, "consent": None})
     step_up = StepUpOut(
@@ -264,7 +282,8 @@ def create_decision(
             span.set_attribute("primary_reason_code", output.reason_codes[0])
         span.set_attribute("pack_id", ref.id)
         span.set_attribute("pack_version", ref.version)
-        return 200, _out(decision, consent, now)
+        until = window_end(now, pack.pack) if output.outcome == "allow" else None
+        return 200, _out(decision, consent, now, until)
 
     # One span per request. A replayed idempotent response carries only the Tenant.
     with telemetry.start_span("decision", {"tenant_id": tenant}) as span:
@@ -273,8 +292,16 @@ def create_decision(
 
 
 @router.get("/{decision_id}")
-def get_decision(decision_id: str, tenant: Tenant, store: StoreDep, clock: ClockDep) -> DecisionOut:
-    """The Decision, with its Consent request's status if it was a step_up."""
+def get_decision(
+    decision_id: str,
+    tenant: Tenant,
+    store: StoreDep,
+    clock: ClockDep,
+    pack: PackDep,
+    settings: SettingsDep,
+) -> DecisionOut:
+    """The Decision, with its Consent request's status if it was a step_up, and until when
+    it can be paid."""
     now = clock.now()
     with store.transaction(tenant) as tx:
         decision = tx.get_decision(DecisionId(decision_id))
@@ -284,4 +311,5 @@ def get_decision(decision_id: str, tenant: Tenant, store: StoreDep, clock: Clock
         inactive = consent is not None and mandate_inactive(
             tx.get_mandate(decision.mandate_id), tx.get_agent(decision.agent_id), now
         )
-    return _out(decision, consent, now, inactive)
+        until = payable_until(tx, decision, consent, pack, settings.policy_packs_dir)
+    return _out(decision, consent, now, until, inactive)
