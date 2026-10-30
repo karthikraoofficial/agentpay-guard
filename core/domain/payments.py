@@ -120,6 +120,18 @@ class RailReport(BaseModel):
     amount: Money
     failure_code: str | None = None
 
+    def to_event(self, event_id: str, tenant_id: TenantId, at: datetime) -> "RailEvent":
+        return RailEvent(
+            event_id=event_id,
+            tenant_id=tenant_id,
+            event_type=self.event_type,
+            payment_id=self.payment_id,
+            rail_payment_id=self.rail_payment_id,
+            status=self.status,
+            failure_code=self.failure_code,
+            received_at=at,
+        )
+
 
 class RailEvent(BaseModel):
     """A rail event we acted on, kept so a redelivery is recognised. Never the payload:

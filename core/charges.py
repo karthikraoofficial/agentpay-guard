@@ -1,6 +1,6 @@
 """Recording Payments and what the rail says about their Rail charges, in the caller's
 transaction. Each status change is one `payment` Audit record in the Tenant's chain, and
-a failed Payment Voids its Decision. `settle` is the one transition every report goes
+a failed Payment Voids its Decision. `apply_charge` is the one transition every report goes
 through: the payments API, rail webhooks (#81) and reconciliation (ADR-0014)."""
 
 from datetime import datetime
@@ -19,7 +19,7 @@ def record_payment(tx: TenantTransaction, payment: Payment, now: datetime) -> No
     _audit(tx, payment, now)
 
 
-def settle(
+def apply_charge(
     tx: TenantTransaction, payment_id: PaymentId, charge: RailCharge | None, now: datetime
 ) -> Payment:
     """Apply a rail report to a Payment: forward only, auditing any change, and Voiding

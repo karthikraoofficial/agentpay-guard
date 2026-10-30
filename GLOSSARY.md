@@ -154,6 +154,10 @@ _Avoid_: Cancellation, reversal, refund (a refund returns captured money)
 A signed notice that AgentPay Guard sends to a Tenant's own endpoint when something it cares about happens, such as a Consent request being created or a Payment being captured. Delivered at least once.
 _Avoid_: Callback, notification (that is what the Tenant sends the Payer), rail webhook
 
+**Rail webhook**:
+A signed message from the rail saying how a Rail charge ended, which settles its Payment as captured or failed. Each one is acted on at most once.
+_Avoid_: Callback, notification, Tenant webhook (that one goes to a Tenant)
+
 **Rail token**:
 The rail's reference to the Payer's payment instrument, bound to a Mandate when it is granted, shown only in masked form. Never the card number or UPI PIN.
 _Avoid_: Card, payment method, credentials

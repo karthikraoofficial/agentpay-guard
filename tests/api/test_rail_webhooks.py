@@ -15,7 +15,6 @@ from typing import Any
 import pytest
 
 from adapters.memory.rail import MockRail
-from core.domain.payments import PaymentId
 from tests.api.conftest import Api
 from tests.api.test_payments import Payments
 from tests.api.test_tenants_payers_agents import assert_problem
@@ -233,6 +232,33 @@ def test_an_event_for_a_different_amount_is_dropped(hooks: Webhooks) -> None:
     assert hooks.stored_event("evt_odd") is None
 
 
+def test_an_event_for_another_razorpay_payment_is_dropped(hooks: Webhooks) -> None:
+    payment = hooks.paid()
+
+    stale = event(payment, "payment.failed", id="pay_an_earlier_attempt")
+    response = hooks.deliver(stale, "evt_stale")
+
+    assert response.status_code == 200
+    assert hooks.status(payment) == "scheduled"
+    assert hooks.stored_event("evt_stale") is None
+    assert [r.kind for r in hooks.chain()].count("void") == 0
+
+
+def test_a_capture_for_a_payment_whose_rail_call_timed_out_is_applied(
+    api: Api, tmp_path: Path
+) -> None:
+    api.use_packs(phase_1_packs(tmp_path))
+    api.use_settings(make_settings(razorpay_webhook_secret=SECRET))
+    hooks = Webhooks(api, rail_token=MockRail.token_that_times_out())
+    payment = hooks.pay(hooks.allow()["decision_id"]).json()
+    assert payment["rail_payment_id"] is None
+
+    hooks.deliver(event(payment | {"rail_payment_id": "pay_from_razorpay"}), "evt_late")
+
+    current = hooks.payment(payment["payment_id"]).json()
+    assert (current["status"], current["rail_payment_id"]) == ("captured", "pay_from_razorpay")
+
+
 # --- What is kept --------------------------------------------------------------------
 
 
@@ -243,10 +269,12 @@ def test_a_stored_event_keeps_only_the_allowed_fields(hooks: Webhooks) -> None:
 
     stored = hooks.stored_event("evt_kept")
     assert stored is not None
-    assert stored.model_dump(exclude={"tenant_id", "received_at"}) == {
+    assert stored.model_dump(mode="json") == {
+        "tenant_id": hooks.tenant_id(),
+        "received_at": "2026-11-02T09:30:00Z",
         "event_id": "evt_kept",
         "event_type": "payment.failed",
-        "payment_id": PaymentId(payment["payment_id"]),
+        "payment_id": payment["payment_id"],
         "rail_payment_id": payment["rail_payment_id"],
         "status": "failed",
         "failure_code": "BAD_REQUEST_ERROR",

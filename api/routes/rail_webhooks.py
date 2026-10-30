@@ -2,10 +2,14 @@
 
 No API key: Razorpay signs the raw body, and that signature is checked before the body is
 read at all. A bad signature is a 400, logged without the body. A signed event we don't
-act on (another type, or no Payment of ours) is a 200, so Razorpay stops retrying it.
+act on is a 200, so Razorpay stops retrying it: another type, no Payment of ours, another
+amount, or another Razorpay payment than the one the Payment is charged on (a stale
+attempt must never fail a Payment whose money moved).
+
 Otherwise the Payment, and through it the Tenant, is found by our Payment id, and one
-transaction applies the report through the shared transition and keeps the event id, so
-a redelivery changes nothing.
+transaction applies the report through the shared transition and keeps the event. The
+event id plays the part of the Idempotency-Key (non-negotiable 4): a redelivery of an
+event that was applied changes nothing.
 """
 
 import logging
@@ -14,12 +18,12 @@ from fastapi import APIRouter, Header, Request, Response
 from starlette.concurrency import run_in_threadpool
 
 from adapters.razorpay.webhooks import payment_report, signature_ok
-from api.deps import ClockDep, SettingsDep, StoreDep
+from api.deps import ClockDep, SettingsDep, Store, StoreDep
 from api.errors import ApiError
-from core.charges import settle
+from core.charges import apply_charge
 from core.domain.decisions import decision_time
-from core.domain.payments import RailEvent, RailReport
-from core.ports import RailCharge
+from core.domain.payments import Payment, RailReport
+from core.ports import Clock, RailCharge, TenantId
 
 router = APIRouter(prefix="/v1/rail/razorpay", tags=["rail"])
 log = logging.getLogger(__name__)
@@ -37,7 +41,7 @@ async def razorpay_webhook(
     raw = await request.body()
     secret = settings.razorpay_webhook_secret
     if not signature_ok(raw, signature, secret.get_secret_value() if secret else None):
-        log.warning("rail webhook refused: bad or missing signature (event %s)", event_id)
+        log.warning("rail webhook refused: bad or missing signature")
         raise ApiError(400, "BAD_SIGNATURE", "The X-Razorpay-Signature does not match.")
     if not event_id:
         raise ApiError(400, "EVENT_ID_MISSING", "Send the X-Razorpay-Event-Id header.")
@@ -50,7 +54,7 @@ async def razorpay_webhook(
     return Response(status_code=200)
 
 
-def _apply(store: StoreDep, clock: ClockDep, event_id: str, report: RailReport) -> None:
+def _apply(store: Store, clock: Clock, event_id: str, report: RailReport) -> None:
     tenant = store.payment_tenant(report.payment_id)
     if tenant is None:
         log.info("rail webhook %s dropped: no Payment %s", event_id, report.payment_id)
@@ -64,34 +68,32 @@ def _apply(store: StoreDep, clock: ClockDep, event_id: str, report: RailReport) 
         tx.lock_mandate(payment.mandate_id)
         if tx.get_rail_event(event_id) is not None:
             return  # a redelivery
-        if payment.amount != report.amount:
+        mismatch = _mismatch(payment, report)
+        if mismatch:
             log.warning(
-                "rail webhook %s dropped: amount does not match Payment %s",
+                "rail webhook %s dropped: %s differs from Payment %s",
                 event_id,
+                mismatch,
                 report.payment_id,
             )
             return
-        settle(
-            tx,
-            report.payment_id,
-            RailCharge(
-                payment_id=report.payment_id,
-                status=report.status,
-                amount=report.amount,
-                rail_payment_id=report.rail_payment_id,
-                failure_code=report.failure_code,
-            ),
-            now,
-        )
-        tx.add_rail_event(
-            RailEvent(
-                event_id=event_id,
-                tenant_id=tenant,
-                event_type=report.event_type,
-                payment_id=report.payment_id,
-                rail_payment_id=report.rail_payment_id,
-                status=report.status,
-                failure_code=report.failure_code,
-                received_at=now,
-            )
-        )
+        apply_charge(tx, report.payment_id, _charge(report), now)
+        tx.add_rail_event(report.to_event(event_id, TenantId(tenant), now))
+
+
+def _mismatch(payment: Payment, report: RailReport) -> str | None:
+    if payment.amount != report.amount:
+        return "the amount"
+    if payment.rail_payment_id not in (None, report.rail_payment_id):
+        return "the rail payment id"
+    return None
+
+
+def _charge(report: RailReport) -> RailCharge:
+    return RailCharge(
+        payment_id=report.payment_id,
+        status=report.status,
+        amount=report.amount,
+        rail_payment_id=report.rail_payment_id,
+        failure_code=report.failure_code,
+    )
