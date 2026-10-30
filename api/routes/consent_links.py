@@ -173,7 +173,7 @@ def _resolve(
             resolution = approve(tx, csr, "consent_link", None, now, pack)
         else:
             resolution = decline(tx, csr, "consent_link", None, now)
-        return 200, resolution_out(resolution, pack.pack.payment_window)
+        return 200, resolution_out(resolution, pack.pack)
 
     with store.transaction(link.tenant_id) as tx:
         response = run_idempotent(tx, idempotency_key, request_hash(request, None), clock, write)

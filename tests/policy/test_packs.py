@@ -1,5 +1,7 @@
 import json
+import runpy
 import shutil
+import sys
 from datetime import timedelta
 from pathlib import Path
 
@@ -231,3 +233,17 @@ def test_a_consent_ttl_that_is_not_a_positive_integer_is_refused(ttl: object) ->
 
     with pytest.raises(ValueError):
         PolicyPack.model_validate(doc | {"consent_ttl_seconds": ttl})
+
+
+# run_module re-executes an already imported module as __main__, which is what we want.
+@pytest.mark.filterwarnings("ignore:.*found in sys.modules:RuntimeWarning")
+def test_hash_prints_the_manifest_hash_of_1_3_0(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest = json.loads((PACKS / "manifest.json").read_text(encoding="utf-8"))
+    file = PACKS / "default" / "1.3.0.yaml"
+    monkeypatch.setattr(sys, "argv", ["core.policy.packs", "--hash", str(file)])
+
+    runpy.run_module("core.policy.packs", run_name="__main__")
+
+    assert capsys.readouterr().out.strip() == manifest["packs"]["default"]["versions"]["1.3.0"]

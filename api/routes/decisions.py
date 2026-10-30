@@ -23,7 +23,7 @@ from api.deps import (
 )
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
-from api.payability import payable_until
+from api.payability import payable_until, window_end
 from core.domain.audit import AuditRecord, DecisionInputs, seal
 from core.domain.consent import ConsentRequest, ConsentRequestId, ConsentStatus
 from core.domain.decisions import (
@@ -282,7 +282,7 @@ def create_decision(
             span.set_attribute("primary_reason_code", output.reason_codes[0])
         span.set_attribute("pack_id", ref.id)
         span.set_attribute("pack_version", ref.version)
-        until = now + pack.pack.payment_window if output.outcome == "allow" else None
+        until = window_end(now, pack.pack) if output.outcome == "allow" else None
         return 200, _out(decision, consent, now, until)
 
     # One span per request. A replayed idempotent response carries only the Tenant.

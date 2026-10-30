@@ -13,6 +13,7 @@ import pytest
 from tests.api.conftest import Api
 from tests.api.test_consent_approve import inr
 from tests.api.test_consent_links import Links, api_settings
+from tests.api.test_decisions import Pay
 from tests.packs import release_test_pack
 
 
@@ -37,8 +38,6 @@ def test_an_allow_is_payable_for_the_packs_window_from_the_decision_time(links: 
 
 
 def test_the_active_default_pack_gives_fifteen_minutes(api: Api) -> None:
-    from tests.api.test_decisions import Pay
-
     body = Pay(api).ask().json()
 
     assert body["policy_pack"]["version"] == "1.3.0"
