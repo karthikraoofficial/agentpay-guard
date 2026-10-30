@@ -59,6 +59,16 @@ class Settings(BaseSettings):
     # The outbox relay: how often it looks for undelivered events (ADR-0009).
     outbox_poll_interval_ms: int = Field(default=1000, gt=0, le=60_000)
 
+    # The PaymentRail that Payments go through. "mock" settles in-process and needs no
+    # account, so tests, evals and a fresh clone run without Razorpay (ADR-0012, ADR-0013).
+    rail: Literal["mock", "razorpay"] = "mock"
+
+    @model_validator(mode="after")
+    def _rail_available(self) -> "Settings":
+        if self.rail == "razorpay":
+            raise ValueError("AGENTPAY_RAIL=razorpay is not available yet; use mock")
+        return self
+
     @model_validator(mode="after")
     def _key_when_checking(self) -> "Settings":
         if self.intent_check_enabled and self.env != "test" and self.anthropic_api_key is None:
