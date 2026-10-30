@@ -51,7 +51,7 @@ The largest single payment a Mandate permits.
 _Avoid_: Limit, max amount
 
 **Monthly cap**:
-The most a Mandate permits in total across one calendar month (UTC), counting only allowed payments and approved step-ups.
+The most a Mandate permits in total across one calendar month (UTC), counting only allowed payments and approved step-ups, less Voids.
 _Avoid_: Budget, rolling limit
 
 **Allowed MCCs**:
@@ -59,7 +59,7 @@ The merchant category codes a Mandate permits. Anything not listed is outside th
 _Avoid_: Categories, whitelist
 
 **Spent this month**:
-The sum of allowed payments and approved step-ups under a Mandate in the current calendar month (UTC), checked against the Monthly cap. An approved step-up counts in the month it was approved, not the month it was requested.
+The sum of allowed payments and approved step-ups under a Mandate in the current calendar month (UTC), less any that were Voided, checked against the Monthly cap. An approved step-up counts in the month it was approved, not the month it was requested.
 _Avoid_: Usage, balance
 
 ## Decisions
@@ -113,8 +113,12 @@ A pending ask to the Payer to approve or decline one step_up Decision.
 _Avoid_: Step-up request, approval, challenge
 
 **Declared MCC**:
-The merchant category code the Agent states in an Agent payment request, which is not yet confirmed by the rail.
+The merchant category code the Agent states in an Agent payment request. On an acquiring rail it can never be confirmed, because the rail only knows the Merchant of record.
 _Avoid_: MCC (when the source matters)
+
+**Merchant of record**:
+The party the payment rail actually pays, as the rail sees it. It is distinct from the merchant named in an Agent payment request, which the rail does not see.
+_Avoid_: Merchant (when the rail's view matters), payee
 
 **Agent reasoning**:
 The Agent's own free-text explanation for a payment, kept as evidence and never used to decide.
@@ -127,6 +131,32 @@ _Avoid_: False negative, miss
 **False-block**:
 A block where the label says the request should have been allowed or stepped up.
 _Avoid_: False positive, false decline
+
+## Payments
+
+**Payment**:
+The money movement for one allowed Decision or approved step-up, for exactly its amount. A Decision has at most one Payment. A Payment is scheduled when the rail accepts it, then captured or failed when the rail reports back.
+_Avoid_: Transaction, Agent payment request (that is only the ask)
+
+**Rail charge**:
+The rail's own record of the debit for one Payment: what the rail says happened, which a Payment follows.
+_Avoid_: Payment (that is our record), transaction
+
+**Payment window**:
+How long an Agent has to start its Payment, counted from the allow or from the approval of a step-up, and set in the Policy pack. After it, the Decision can no longer be paid.
+_Avoid_: Expiry, TTL
+
+**Void**:
+Releasing an allow or approved step-up from Spent this month, because its Payment failed or the Tenant cancelled it before paying. Recorded as a new Audit record and never by changing the Decision.
+_Avoid_: Cancellation, reversal, refund (a refund returns captured money)
+
+**Tenant webhook**:
+A signed notice that AgentPay Guard sends to a Tenant's own endpoint when something it cares about happens, such as a Consent request being created or a Payment being captured. Delivered at least once.
+_Avoid_: Callback, notification (that is what the Tenant sends the Payer), rail webhook
+
+**Rail token**:
+The rail's reference to the Payer's payment instrument, bound to a Mandate when it is granted, shown only in masked form. Never the card number or UPI PIN.
+_Avoid_: Card, payment method, credentials
 
 ## Signals
 

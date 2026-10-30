@@ -261,6 +261,8 @@ test that kills the worker mid-wait and proves the workflow resumes.
 
 **Phase 4 — real sandbox rail** (`/clear` first)
 
+> Superseded in detail by the Phase 4 PRD (#74) and ADR-0012 to ADR-0015. The rail is Razorpay test mode with card recurring payments, as an acquirer. The Agent pays an allowed or approved Decision through `POST /v1/payments`, and the Payment settles later by webhook. One Payment per Decision is enforced by our database. A failed or abandoned allow is Voided. Signed Tenant webhooks are the last ticket and can be cut.
+
 ```text
 Read CLAUDE.md, SPEC-02. Implement one real PaymentRail adapter in test mode only: [Razorpay | Stripe].
 Allowed decisions proceed to the rail; blocked ones never reach it. Verify inbound webhooks by signature.

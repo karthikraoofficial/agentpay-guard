@@ -45,6 +45,7 @@ from core.domain.parties import (
     PayerId,
 )
 from core.domain.parties import TenantId as TenantId  # re-exported for adapters
+from core.domain.payments import PaymentId, RailToken
 
 AttributeValue = str | int | float | bool
 Attributes = Mapping[str, AttributeValue]
@@ -68,44 +69,55 @@ class Clock(Protocol):
 
 # --- PaymentRail -------------------------------------------------------------
 
-RailStatus = Literal["authorised", "captured", "refunded", "pending", "failed"]
+# A debit is never instant on an Indian e-mandate rail (ADR-0013): it is scheduled, then
+# captured or failed when the rail settles it.
+ChargeStatus = Literal["scheduled", "captured", "failed"]
 
 
-class RailResult(_Frozen):
-    rail_payment_id: str
-    status: RailStatus
+class RailCharge(_Frozen):
+    """The rail's view of the charge for one Payment."""
+
+    payment_id: PaymentId
+    status: ChargeStatus
     amount: Money
+    rail_payment_id: str | None = None
     failure_code: str | None = None
 
 
+class RailUnavailable(Exception):
+    """The rail call's outcome is unknown (timeout, 5xx). The charge may or may not exist, so
+    the caller must not guess: it looks the charge up again by Payment id later."""
+
+
 class PaymentRail(Protocol):
-    """Moves money. Only reached after an `allow` decision. `payment_token` is a rail token,
-    never a card number or UPI PIN (non-negotiable 7)."""
+    """Moves money. Only reached for a payable Decision. Charges are keyed by our Payment id,
+    so scheduling the same Payment again never makes a second charge (ADR-0014)."""
 
-    def authorise(
+    def schedule_charge(
         self,
         tenant_id: TenantId,
-        payment_token: str,
+        rail_token: RailToken,
         amount: Money,
-        merchant_ref: str,
+        payment_id: PaymentId,
         idempotency_key: IdempotencyKey,
-    ) -> RailResult: ...
+    ) -> RailCharge:
+        """Schedule the debit. A final refusal comes back as `failed`; an unknown outcome
+        raises `RailUnavailable`."""
+        ...
 
-    def capture(
-        self,
-        tenant_id: TenantId,
-        rail_payment_id: str,
-        amount: Money,
-        idempotency_key: IdempotencyKey,
-    ) -> RailResult: ...
+    def get_charge(self, tenant_id: TenantId, payment_id: PaymentId) -> RailCharge | None:
+        """The charge for a Payment as the rail sees it now, or None if there is none."""
+        ...
 
     def refund(
         self,
         tenant_id: TenantId,
-        rail_payment_id: str,
+        payment_id: PaymentId,
         amount: Money,
         idempotency_key: IdempotencyKey,
-    ) -> RailResult: ...
+    ) -> RailCharge:
+        """Declared for Phase 5 (disputes). No adapter implements it yet."""
+        ...
 
 
 # --- ModelGateway ------------------------------------------------------------

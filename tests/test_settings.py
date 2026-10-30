@@ -42,3 +42,17 @@ def test_outside_tests_the_intent_check_needs_an_api_key_unless_it_is_off() -> N
 
     assert make_settings(env="local", intent_check_enabled=False).anthropic_api_key is None
     assert make_settings(env="test").intent_check_timeout_ms == 2500
+
+
+def test_the_rail_is_the_mock_unless_chosen() -> None:
+    assert make_settings().rail == "mock"
+
+
+def test_razorpay_cannot_be_chosen_before_its_adapter_exists() -> None:
+    with pytest.raises(ValidationError, match="AGENTPAY_RAIL=razorpay is not available yet"):
+        make_settings(rail="razorpay")
+
+
+def test_an_unknown_rail_is_refused() -> None:
+    with pytest.raises(ValidationError, match="rail"):
+        make_settings(rail="stripe")
