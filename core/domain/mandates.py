@@ -80,8 +80,8 @@ class MandateTerms(_Frozen):
             raise ValueError("expires_at must be after valid_from")
         if self.expires_at > _one_year_after(self.valid_from):
             raise ValueError("a Mandate can last at most one year")
-        if self.rail_token and self.rail_token.rail == "razorpay" and self.currency != "INR":
-            raise ValueError("a Razorpay Rail token needs an INR Mandate")
+        if self.rail_token and not self.rail_token.charges_in(self.currency):
+            raise ValueError(f"the {self.rail_token.rail} rail cannot charge {self.currency}")
         return self
 
     @model_serializer(mode="wrap")

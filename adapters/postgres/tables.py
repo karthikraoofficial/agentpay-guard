@@ -97,7 +97,7 @@ mandates = Table(
     ForeignKeyConstraint(["tenant_id", "payer_id"], ["payers.tenant_id", "payers.payer_id"]),
     CheckConstraint(
         "(rail IS NULL) = (rail_customer_ref IS NULL) AND (rail IS NULL) = (rail_token_ref IS NULL)"
-        " AND (rail IS NULL) = (rail_display IS NULL)",
+        " AND (rail IS NULL) = (rail_display IS NULL) AND rail IN ('razorpay', 'mock')",
         name="mandates_rail_token_whole",
     ),
     CheckConstraint("revoked_by IN ('payer', 'tenant')", name="mandates_revoked_by_valid"),

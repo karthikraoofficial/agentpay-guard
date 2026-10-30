@@ -81,3 +81,12 @@ def test_a_mandate_without_a_rail_token_keeps_the_old_snapshot_bytes(api: Api) -
     sealed = pay.audit(pay.ask().json()["audit_record_id"])
 
     assert b"rail_token" not in sealed.body
+
+
+def test_a_mock_rail_token_works_in_any_currency(setup: Setup) -> None:
+    usd = {"minor": 100_00, "currency": "USD"}
+    token = RAIL_TOKEN | {"rail": "mock"}
+
+    mandate = setup.create(currency="USD", per_txn_cap=usd, monthly_cap=usd, rail_token=token)
+
+    assert mandate["rail_token"] == token

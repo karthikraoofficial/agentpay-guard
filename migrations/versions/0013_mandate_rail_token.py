@@ -25,7 +25,7 @@ def upgrade() -> None:
         "mandates_rail_token_whole",
         "mandates",
         "(rail IS NULL) = (rail_customer_ref IS NULL) AND (rail IS NULL) = (rail_token_ref IS NULL)"
-        " AND (rail IS NULL) = (rail_display IS NULL)",
+        " AND (rail IS NULL) = (rail_display IS NULL) AND rail IN ('razorpay', 'mock')",
     )
 
 
