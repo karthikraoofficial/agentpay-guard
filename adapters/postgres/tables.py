@@ -173,6 +173,7 @@ consent_resolutions = Table(
     Column("attestation_reference", String, nullable=True),
     Column("attestation_captured_at", DateTime(timezone=True), nullable=True),
     Column("audit_record_id", String, nullable=False),
+    Column("reason_codes", ARRAY(String), nullable=True),
     ForeignKeyConstraint(
         ["tenant_id", "consent_request_id"],
         ["consent_requests.tenant_id", "consent_requests.consent_request_id"],
@@ -181,6 +182,7 @@ consent_resolutions = Table(
         "status IN ('approved', 'declined', 'expired', 'blocked')",
         name="ck_consent_resolutions_status",
     ),
+    Index("ix_consent_resolutions_status_resolved", "tenant_id", "status", "resolved_at"),
 )
 
 # Intent checks (ADR-0007): `content` holds the canonical JSON of the Payer instruction

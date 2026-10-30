@@ -9,6 +9,11 @@ where the label says allow or step_up. Each case lists only what it changes from
 file's base (`<name>_base.json` beside `<name>.jsonl`). The base names the Policy pack
 the file is decided with, so a golden file keeps testing the pack it was labelled for
 after a newer version becomes active. The schema is provisional until the Evals PRD.
+
+A case with `stage: approval` is the re-check when a Payer approves a step_up (ADR-0010):
+its inputs are as they are at approval, and it also labels the Consent resolution. There
+a false-allow is an approval that goes through where the label says blocked, and a
+false-block is the reverse.
 """
 
 import argparse
@@ -16,10 +21,11 @@ import json
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from core.domain.consent import ResolutionStatus, approval_result
 from core.domain.decisions import AgentPaymentRequest, Outcome, ReasonCode
 from core.domain.mandates import Mandate
 from core.domain.money import Money
@@ -37,6 +43,8 @@ class Expected(BaseModel):
 
     outcome: Outcome
     reason_codes: tuple[ReasonCode, ...]
+    # Only on approval cases: the Consent resolution the re-check gives.
+    resolution: ResolutionStatus | None = None
 
 
 class PackPin(BaseModel):
@@ -52,6 +60,7 @@ class Case(BaseModel):
     id: str
     description: str
     pack: PackPin
+    stage: Literal["decision", "approval"] = "decision"
     mandate: dict[str, Any]
     request: dict[str, Any]
     agent_status: AgentStatus | None
@@ -111,7 +120,8 @@ def _actual(case: Case, pack_root: Path) -> Expected:
     spent = Money(minor=case.spent_this_month_minor, currency=mandate.currency)
     signals = Signals.model_validate(case.signals)
     output = decide(request, mandate, agent, spent, signals, pack, case.now)
-    return Expected(outcome=output.outcome, reason_codes=output.reason_codes)
+    resolution = approval_result(output) if case.stage == "approval" else None
+    return Expected(outcome=output.outcome, reason_codes=output.reason_codes, resolution=resolution)
 
 
 def run_cases(cases: Sequence[Case], pack_root: Path = PACKS) -> Report:
@@ -121,8 +131,12 @@ def run_cases(cases: Sequence[Case], pack_root: Path = PACKS) -> Report:
         actual = _actual(case, pack_root)
         if actual == case.expected:
             continue
-        false_allow += actual.outcome == "allow" and case.expected.outcome != "allow"
-        false_block += actual.outcome == "block" and case.expected.outcome != "block"
+        if case.stage == "approval":
+            false_allow += actual.resolution == "approved" != case.expected.resolution
+            false_block += actual.resolution == "blocked" != case.expected.resolution
+        else:
+            false_allow += actual.outcome == "allow" and case.expected.outcome != "allow"
+            false_block += actual.outcome == "block" and case.expected.outcome != "block"
         mismatches.append(
             Mismatch(
                 case_id=case.id, description=case.description, expected=case.expected, actual=actual

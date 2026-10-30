@@ -207,7 +207,8 @@ class TenantTransaction(Protocol):
     def add_decision(self, decision: Decision) -> None: ...
 
     def allowed_spend(self, mandate_id: MandateId, start: datetime, end: datetime) -> int:
-        """Total minor units of allowed Decisions on a Mandate decided in [start, end)."""
+        """Spent this month: the minor units of allowed Decisions on a Mandate decided in
+        [start, end), plus approved step_ups resolved in [start, end)."""
         ...
 
     def has_allowed_payment_to(self, payer_id: PayerId, merchant_id: str) -> bool:

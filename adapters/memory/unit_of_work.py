@@ -145,11 +145,21 @@ class InMemoryTransaction:
         return self._data.decisions.get(decision_id)
 
     def allowed_spend(self, mandate_id: MandateId, start: datetime, end: datetime) -> int:
-        return sum(
+        decisions = self._data.decisions
+        allowed = sum(
             d.amount.minor
-            for d in self._data.decisions.values()
+            for d in decisions.values()
             if d.mandate_id == mandate_id and d.outcome == "allow" and start <= d.decided_at < end
         )
+        approved = sum(
+            decisions[c.decision_id].amount.minor
+            for c in self._data.consents.values()
+            if c.resolution is not None
+            and c.resolution.status == "approved"
+            and decisions[c.decision_id].mandate_id == mandate_id
+            and start <= c.resolution.resolved_at < end
+        )
+        return allowed + approved
 
     def has_allowed_payment_to(self, payer_id: PayerId, merchant_id: str) -> bool:
         mandates = self._data.mandates

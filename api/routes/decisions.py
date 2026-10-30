@@ -50,6 +50,8 @@ class StepUpOut(BaseModel):
 class ConsentOut(BaseModel):
     status: ConsentStatus
     resolved_at: AwareDatetime | None
+    # Only when an approval was blocked: why the Mandate no longer permits the payment.
+    reason_codes: tuple[ReasonCode, ...] | None
 
 
 class DecisionOut(BaseModel):
@@ -81,7 +83,9 @@ def _out(decision: Decision, consent: ConsentRequest | None, now: datetime) -> D
 def _consent_out(consent: ConsentRequest, now: datetime) -> ConsentOut:
     resolution = consent.resolution
     return ConsentOut(
-        status=consent.status(now), resolved_at=resolution.resolved_at if resolution else None
+        status=consent.status(now),
+        resolved_at=resolution.resolved_at if resolution else None,
+        reason_codes=resolution.reason_codes if resolution else None,
     )
 
 

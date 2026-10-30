@@ -5,7 +5,8 @@ Listing and resolving need a `consent` key (ADR-0011); reading one works with an
 so an Agent can check on its own step_up. A resolution is a new Audit record in the
 Tenant's chain, written in one transaction with the Consent request locked first, then
 the chain head (ADR-0009). The Decision itself never changes, and the first resolution
-written wins."""
+written wins. Approval locks the Mandate before the Consent request and re-runs the
+engine on fresh inputs, so it can lift a step_up but never a block (ADR-0010)."""
 
 import base64
 import binascii
@@ -16,10 +17,11 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Request, Response
 from pydantic import AwareDatetime, BaseModel, ConfigDict, ValidationError
 
-from api.deps import ClockDep, ConsentTenant, IdemKey, StoreDep, Tenant
+from api.deps import ClockDep, ConsentTenant, IdemKey, PackDep, StoreDep, Tenant
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
-from core.domain.audit import AuditRecord, seal
+from api.routes.decisions import decision_time
+from core.domain.audit import AuditRecord, DecisionInputs, seal
 from core.domain.consent import (
     Attestation,
     ConsentRequest,
@@ -29,9 +31,20 @@ from core.domain.consent import (
     ResolutionEvidence,
     ResolutionStatus,
     ResolvedVia,
+    approval_result,
 )
-from core.domain.decisions import AuditRecordId, DecisionId
+from core.domain.decisions import (
+    AuditRecordId,
+    DecisionId,
+    EngineOutput,
+    PackRef,
+    ReasonCode,
+    month_window,
+)
+from core.domain.money import Money
 from core.domain.parties import new_id
+from core.policy.engine import decide
+from core.policy.packs import LoadedPack
 from core.ports import TenantTransaction
 
 router = APIRouter(prefix="/v1/consent-requests", tags=["consent"])
@@ -56,6 +69,12 @@ class DeclineBody(BaseModel):
     attestation: Attestation | None = None
 
 
+class ApproveBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    attestation: Attestation
+
+
 class ConsentResolutionOut(BaseModel):
     consent_request_id: ConsentRequestId
     decision_id: DecisionId
@@ -63,6 +82,8 @@ class ConsentResolutionOut(BaseModel):
     resolved_at: AwareDatetime
     resolved_via: ResolvedVia
     audit_record_id: AuditRecordId
+    # Only when an approval was blocked: the re-check's Reason codes.
+    reason_codes: tuple[ReasonCode, ...] | None
 
 
 def _out(consent: ConsentRequest, now: datetime) -> ConsentRequestOut:
@@ -104,9 +125,7 @@ def get_consent_request(
     with store.transaction(tenant) as tx:
         consent = tx.find_consent_request(ConsentRequestId(consent_request_id))
     if consent is None:
-        raise ApiError(
-            404, "CONSENT_REQUEST_NOT_FOUND", f"No Consent request {consent_request_id}."
-        )
+        raise _not_found(consent_request_id)
     return _out(consent, clock.now())
 
 
@@ -123,13 +142,94 @@ def decline_consent_request(
     """The Payer said no. The attestation of how the Tenant confirmed it is optional."""
     attestation = body.attestation if body else None
 
-    def write(now: datetime) -> tuple[int, ConsentResolutionOut]:
-        consent = _open_for_resolution(tx, ConsentRequestId(consent_request_id), now)
-        resolution = record_resolution(tx, consent, "declined", "tenant_api", attestation, now)
+    def write(read_at: datetime) -> tuple[int, ConsentResolutionOut]:
+        csr = ConsentRequestId(consent_request_id)
+        resolution = decline(tx, csr, "tenant_api", attestation, decision_time(read_at))
         return 200, _resolution_out(resolution)
 
     with store.transaction(tenant) as tx:
         return run_idempotent(tx, key, request_hash(request, body), clock, write)
+
+
+@router.post("/{consent_request_id}/approve", response_model=ConsentResolutionOut)
+def approve_consent_request(
+    request: Request,
+    consent_request_id: str,
+    body: ApproveBody,
+    tenant: ConsentTenant,
+    store: StoreDep,
+    clock: ClockDep,
+    pack: PackDep,
+    key: IdemKey,
+) -> Response:
+    """The Payer said yes. Returns 200 with `approved`, or `blocked` with the Reason
+    codes if the Mandate no longer permits the payment."""
+
+    def write(read_at: datetime) -> tuple[int, ConsentResolutionOut]:
+        csr = ConsentRequestId(consent_request_id)
+        now = decision_time(read_at)
+        resolution = approve(tx, csr, "tenant_api", body.attestation, now, pack)
+        return 200, _resolution_out(resolution)
+
+    with store.transaction(tenant) as tx:
+        return run_idempotent(tx, key, request_hash(request, body), clock, write)
+
+
+def decline(
+    tx: TenantTransaction,
+    consent_request_id: ConsentRequestId,
+    via: ResolvedVia,
+    attestation: Attestation | None,
+    now: datetime,
+) -> ConsentResolution:
+    consent = _open_for_resolution(tx, consent_request_id, now)
+    return record_resolution(tx, consent, "declined", via, attestation, now)
+
+
+def approve(
+    tx: TenantTransaction,
+    consent_request_id: ConsentRequestId,
+    via: ResolvedVia,
+    attestation: Attestation,
+    now: datetime,
+    pack: LoadedPack,
+) -> ConsentResolution:
+    """Re-run the engine on the request as it was asked, with the Signals recorded then,
+    against the Mandate, Agent and Spent this month as they are now (ADR-0010)."""
+    found = tx.find_consent_request(consent_request_id)
+    if found is None:
+        raise _not_found(consent_request_id)
+    decision = tx.get_decision(found.decision_id)
+    original = tx.get_audit_record(decision.audit_record_id) if decision else None
+    asked = original.record.inputs if original else None
+    if decision is None or asked is None:
+        raise RuntimeError(f"Consent request {consent_request_id} has no recorded Decision")
+    # Mandate first, as a Decision does, so approvals and Decisions on one Mandate queue.
+    mandate = tx.lock_mandate(decision.mandate_id)
+    if mandate is None:
+        raise RuntimeError(f"Mandate {decision.mandate_id} vanished")
+    consent = _open_for_resolution(tx, consent_request_id, now)
+    spent = Money(
+        minor=tx.allowed_spend(mandate.mandate_id, *month_window(now)),
+        currency=mandate.currency,
+    )
+    agent = tx.get_agent(decision.agent_id)
+    inputs = DecisionInputs(
+        request=asked.request,
+        mandate=mandate,
+        agent=agent,
+        spent_this_month=spent,
+        signals=asked.signals,
+        now=now,
+    )
+    output = decide(asked.request, mandate, agent, spent, asked.signals, pack.pack, now)
+    ref = PackRef(id=pack.pack.id, version=pack.pack.version, hash=pack.hash)
+    status = approval_result(output)
+    return record_resolution(tx, consent, status, via, attestation, now, run=(inputs, ref, output))
+
+
+def _not_found(consent_request_id: str) -> ApiError:
+    return ApiError(404, "CONSENT_REQUEST_NOT_FOUND", f"No Consent request {consent_request_id}.")
 
 
 def _open_for_resolution(
@@ -138,9 +238,7 @@ def _open_for_resolution(
     """Lock the request and check it can still be resolved at `now` (server time)."""
     consent = tx.lock_consent_request(consent_request_id)
     if consent is None:
-        raise ApiError(
-            404, "CONSENT_REQUEST_NOT_FOUND", f"No Consent request {consent_request_id}."
-        )
+        raise _not_found(consent_request_id)
     if consent.resolution is not None:
         raise ApiError(
             409,
@@ -159,9 +257,13 @@ def record_resolution(
     via: ResolvedVia,
     attestation: Attestation | None,
     now: datetime,
+    *,
+    run: tuple[DecisionInputs, PackRef, EngineOutput] | None = None,
 ) -> ConsentResolution:
     """Append the resolution's Audit record and store it for lookup. The caller holds
-    the Consent request's lock; this takes the chain head."""
+    the Consent request's lock; this takes the chain head. `run` is an approval's engine
+    re-run, recorded so the resolution replays like a Decision."""
+    inputs, ref, output = run if run else (None, None, None)
     seq, prev_hash = tx.lock_chain_head()
     resolution = ConsentResolution(
         consent_request_id=consent.consent_request_id,
@@ -172,6 +274,7 @@ def record_resolution(
         resolved_via=via,
         attestation=attestation,
         audit_record_id=AuditRecordId(new_id("aud")),
+        reason_codes=output.reason_codes if output and status == "blocked" else None,
     )
     sealed = seal(
         AuditRecord(
@@ -182,6 +285,9 @@ def record_resolution(
             kind="consent_resolution",
             decision_id=consent.decision_id,
             recorded_at=now,
+            inputs=inputs,
+            pack=ref,
+            output=output,
             resolution=ResolutionEvidence(
                 consent_request_id=consent.consent_request_id,
                 status=status,

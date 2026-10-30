@@ -122,3 +122,32 @@ def test_by_default_every_golden_file_runs_against_its_own_pack(
     assert main([]) == 0
     out = capsys.readouterr().out
     assert "phase1.jsonl" in out and "phase2.jsonl" in out
+
+
+def test_the_approval_set_covers_both_resolutions_and_every_wait_change() -> None:
+    cases = load_cases(GOLDEN / "approval.jsonl")
+
+    assert {c.stage for c in cases} == {"approval"}
+    assert {c.expected.resolution for c in cases} == {"approved", "blocked"}
+    primary = {c.expected.reason_codes[0] for c in cases if c.expected.resolution == "blocked"}
+    assert primary == {
+        "MANDATE_REVOKED",
+        "MANDATE_EXPIRED",
+        "AGENT_DISABLED",
+        "MONTHLY_CAP_EXCEEDED",
+    }
+
+
+def test_an_approval_labelled_blocked_that_goes_through_is_a_false_allow(tmp_path: Path) -> None:
+    shutil.copytree(GOLDEN, tmp_path, dirs_exist_ok=True)
+    path = tmp_path / "approval.jsonl"
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    for row in rows:
+        if row["id"] == "approve-unchanged":
+            row["expected"]["resolution"] = "blocked"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+
+    report = run_cases(load_cases(path), PACKS)
+
+    assert (report.false_allow, report.false_block) == (1, 0)
+    assert [m.case_id for m in report.mismatches] == ["approve-unchanged"]

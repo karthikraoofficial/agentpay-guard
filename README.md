@@ -75,6 +75,7 @@ Send a key as `Authorization: Bearer apg_test_…` on every call, and an `Idempo
 | `POST /v1/intents`, `GET /v1/intents/{id}` | decide / manage | Before checkout, submit the Payer instruction and the proposed cart for an Intent check by Claude Haiku 5.5. The POST returns only `intent_id` and `expires_at`; the verdict (`match`, `mismatch`, `unknown`) is readable by the Tenant through GET with a `manage` key. A timeout, error or unclear reply is stored as `unknown` |
 | `POST /v1/decisions`, `GET /v1/decisions/{id}` | decide / any | Ask whether an Agent may pay under a Mandate. Every Outcome (`allow`, `step_up`, `block`) is a 200 with Reason codes, Risk tier, the Policy pack hash and an Audit record ID. Pass the `intent_id` from `POST /v1/intents` to cite an Intent check; packs from `1.1.0` step up a medium or high payment without a usable match |
 | `GET /v1/consent-requests?status=pending`, `GET /v1/consent-requests/{id}` | consent / any | List Consent requests newest first (filter by `status`: `pending`, `approved`, `declined`, `expired` or `blocked`; pass `next_cursor` back as `cursor`), or read one |
+| `POST /v1/consent-requests/{id}/approve` | consent | Record that the Payer said yes, with a required `attestation`. Returns `approved`, or `blocked` with `reason_codes` after the re-check. Same `409`s as decline |
 | `POST /v1/consent-requests/{id}/decline` | consent | Record that the Payer said no, optionally with an `attestation` (`method`, `reference`, `captured_at`) of how you confirmed it. Writes a Consent resolution into the Audit chain. `409 CONSENT_EXPIRED` at or after `expires_at`, `409 CONSENT_ALREADY_RESOLVED` once resolved |
 
 How a Decision is reached:
@@ -82,8 +83,9 @@ How a Decision is reached:
 - **Every rule runs** and the most severe result wins: block, then step_up, then allow.
 - **Blocks:** a revoked or out-of-date Mandate, an Agent that isn't on the Mandate or is disabled, a currency mismatch, a high-risk MCC (gambling, quasi-cash, money transfer) or one the Mandate doesn't list, and an amount over the per-transaction cap or past the monthly cap.
 - **Steps up:** INR 5,000 / USD 100 or more, or reaching 80% of the monthly cap.
-- **Spend:** only allowed Decisions count towards the monthly cap, per UTC calendar month.
-- **On step_up,** the response carries a pending Consent request (`step_up.consent_request_id`, `expires_at`, `status_url`). Its `consent.status` reads `expired` once the active Policy pack's consent TTL has passed (`consent_ttl_seconds`; 10 minutes for packs that don't set it). Once the Tenant declines it, `consent.status` reads `declined` with `resolved_at`; the Decision's own `outcome` stays `step_up`. Approving arrives with #59.
+- **Spend:** allowed Decisions and approved step-ups count towards the monthly cap, per UTC calendar month. An approved step-up counts in the month it was approved.
+- **On step_up,** the response carries a pending Consent request (`step_up.consent_request_id`, `expires_at`, `status_url`). Its `consent.status` reads `expired` once the active Policy pack's consent TTL has passed (`consent_ttl_seconds`; 10 minutes for packs that don't set it). Once the Tenant resolves it, `consent.status` reads `approved`, `declined` or `blocked` with `resolved_at`; the Decision's own `outcome` stays `step_up`. The Agent may pay only on `approved`.
+- **Approval re-checks the Mandate** (ADR-0010). The engine runs again on the request as it was asked and the Signals recorded then, against the Mandate, Agent and Spent this month as they are at approval. A Payer can lift a step_up but never a block: if the Mandate was revoked or expired, the Agent disabled, or the monthly cap used up while the request waited, the approval is recorded as `blocked` with `consent.reason_codes`.
 - **No amounts are disclosed:** responses never include thresholds or caps.
 
 Mandates can't be edited. To change terms, create a new Mandate with `supersedes` set to the old one, and revoke the old one.
@@ -120,6 +122,7 @@ The eval gate runs every hand-labelled golden file in `evals/golden/` through th
 
 - `phase1.jsonl`: 44 cases on `default@1.0.0`, covering every Phase 1 rule and threshold edge.
 - `phase2.jsonl`: 36 cases on `default@1.1.0`, covering every Signal Reason code and edge, every way an Intent check can be missing or fail, and the Phase 1 thresholds under the new pack.
+- `approval.jsonl`: 6 cases on `default@1.1.0` for the re-check at approval, labelled with the Consent resolution: unchanged and cap-near (approved), and Mandate revoked, Mandate expired, Agent disabled and cap used up while waiting (blocked). An approval that goes through where the label says blocked is a false-allow.
 
 Each case changes only a few fields of its base file. The gate prints false-allow and false-block counts per file, and fails on any mismatch, including a wrong Reason code. The full 200+ case set and per-release thresholds come with the Evals PRD.
 
@@ -166,7 +169,8 @@ Settings: `AGENTPAY_INTENT_CHECK_ENABLED` (default `true`), `AGENTPAY_INTENT_CHE
 - **The Declared MCC is trusted.** The merchant category the Agent states isn't yet checked against what the rail reports.
 - **Monthly caps reset at midnight UTC,** which is 05:30 IST on the 1st.
 - **Decisions within one Tenant queue briefly on that Tenant's Audit chain lock,** so per-Tenant throughput has a ceiling. Measured with every Signal on (`default@1.1.0`, medium payments citing an Intent check): p50 53 ms and p95 62 ms for one client on local Postgres. A load test against a real server is still to do.
-- **A Consent request can be declined but not yet approved.** Approval, Consent links, notification and the durable workflow come later in Phase 3.
+- **Consent requests are resolved only through the Tenant API so far.** Consent links, notification and the durable workflow come later in Phase 3.
+- **An approved step-up doesn't make its merchant known.** New merchant counts only allowed Decisions, so the next payment to that merchant can step up again.
 - **Only INR and USD,** and one Policy pack for every Tenant.
 - **Scopes only help if the Agent gets only the agent key.** A Tenant that hands an Agent its tenant key, or a key with every scope, gives it back the power to grant Mandates and read Intent verdicts.
 - **New merchant has a harmless race.** Two parallel first payments to the same merchant under different Mandates can both see it as new. Both just step up.
@@ -182,7 +186,7 @@ uv run python -m api.admin replay <audit_record_id> --tenant <tenant_id>
 uv run python -m api.admin verify --tenant <tenant_id>
 ```
 
-- **`replay`** re-runs the engine on the recorded inputs with the recorded Policy pack and compares bytes. A declined or expired Consent resolution has no engine run, so it reports nothing to re-run and exits `0`. Exit codes: `0` identical, `1` different (prints a diff), `2` the recorded pack is missing or its hash doesn't match, `3` no such record for that Tenant.
+- **`replay`** re-runs the engine on the recorded inputs with the recorded Policy pack and compares bytes. That covers Decisions and approved or blocked Consent resolutions. A declined or expired resolution has no engine run, so it reports nothing to re-run and exits `0`. Exit codes: `0` identical, `1` different (prints a diff), `2` the recorded pack is missing or its hash doesn't match, `3` no such record for that Tenant.
 - **`verify`** walks the chain and prints the first broken `seq` if any record was edited, removed or added. Exit codes: `0` clean, `1` broken.
 
 The test suite replays every Decision it makes and verifies every chain it touches.

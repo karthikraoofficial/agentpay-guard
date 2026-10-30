@@ -60,7 +60,11 @@ def test_a_decline_is_recorded_and_the_decision_reads_declined(declines: Decline
     assert resolution["audit_record_id"].startswith("aud_")
     after = declines.decision(decision["decision_id"])
     assert after["outcome"] == "step_up"  # the Decision itself never changes
-    assert after["consent"] == {"status": "declined", "resolved_at": "2026-11-02T09:32:00Z"}
+    assert after["consent"] == {
+        "status": "declined",
+        "resolved_at": "2026-11-02T09:32:00Z",
+        "reason_codes": None,
+    }
 
 
 def test_a_decline_needs_no_attestation_or_body(declines: Declines) -> None:
