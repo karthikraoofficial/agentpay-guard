@@ -38,6 +38,7 @@ cp .env.example .env                              # the app refuses to start wit
 docker compose -f infra/docker-compose.yml up -d  # Postgres 16, Temporal dev server, OTel collector
 uv run uvicorn api.main:asgi_app --factory --reload
 uv run python -m workflows.worker                 # in a second terminal: the consent worker
+cd web && npm ci && npm run dev                   # in a third: the consent screen on :3000
 ```
 
 Then open http://localhost:8000/healthz (liveness) and http://localhost:8000/docs (OpenAPI).
@@ -177,7 +178,6 @@ Settings: `AGENTPAY_INTENT_CHECK_ENABLED` (default `true`), `AGENTPAY_INTENT_CHE
 - **The Declared MCC is trusted.** The merchant category the Agent states isn't yet checked against what the rail reports.
 - **Monthly caps reset at midnight UTC,** which is 05:30 IST on the 1st.
 - **Decisions within one Tenant queue briefly on that Tenant's Audit chain lock,** so per-Tenant throughput has a ceiling. Measured with every Signal on (`default@1.1.0`, medium payments citing an Intent check): p50 53 ms and p95 62 ms for one client on local Postgres. A load test against a real server is still to do.
-- **The consent screen itself comes next (#63).** The Consent link API is ready, and links point to `AGENTPAY_WEB_ORIGIN`.
 - **Notify is a log line.** The workflow's notify activity writes one structured `consent_request.created` line (identifiers and times only); signed Tenant webhooks come with Phase 4. Tenants can also list `GET /v1/consent-requests?status=pending`.
 - **The expiry record lands after the timer fires,** which can be later than `expires_at` if no worker is running. Status reads `expired` from `expires_at` regardless, and a late approve or decline is refused.
 - **An approved step-up doesn't make its merchant known.** New merchant counts only allowed Decisions, so the next payment to that merchant can step up again.
