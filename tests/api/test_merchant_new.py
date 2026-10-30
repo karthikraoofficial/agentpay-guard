@@ -55,6 +55,15 @@ def test_blocked_and_stepped_up_payments_do_not_make_a_merchant_known(pay: Pay) 
     assert outcome(spend(pay, MEDIUM)) == ("step_up", ["MERCHANT_NEW"])
 
 
+def test_a_voided_allow_does_not_make_a_merchant_known(pay: Pay) -> None:
+    allowed = spend(pay, LOW)
+    voided = pay.api.post(f"/v1/decisions/{allowed['decision_id']}/void", pay.tenant)
+    assert voided.status_code == 200
+
+    # Never paid, so no history with the merchant (#91).
+    assert outcome(spend(pay, MEDIUM)) == ("step_up", ["MERCHANT_NEW"])
+
+
 def test_another_payers_history_in_the_same_tenant_does_not_count(pay: Pay) -> None:
     spend(pay, LOW)
     other_payer = pay.api.post(

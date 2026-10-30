@@ -241,8 +241,9 @@ class TenantTransaction(Protocol):
         ...
 
     def has_allowed_payment_to(self, payer_id: PayerId, merchant_id: str) -> bool:
-        """Whether any of the Payer's Mandates has an allowed Decision for this merchant:
-        the New merchant Signal. Read without a lock (a race only adds a step_up)."""
+        """Whether any of the Payer's Mandates has an allowed Decision for this merchant
+        that wasn't Voided: the New merchant Signal. Read without a lock (a race only adds
+        a step_up)."""
         ...
 
     def count_decisions(self, mandate_id: MandateId, after: datetime, until: datetime) -> int:

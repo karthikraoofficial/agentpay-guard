@@ -231,6 +231,12 @@ class PostgresTransaction:
                 decisions.c.merchant_id == merchant_id,
                 decisions.c.outcome == "allow",
                 mandates.c.payer_id == payer_id,
+                ~select(voids.c.decision_id)
+                .where(
+                    voids.c.tenant_id == decisions.c.tenant_id,
+                    voids.c.decision_id == decisions.c.decision_id,
+                )
+                .exists(),
             )
             .limit(1)
         )

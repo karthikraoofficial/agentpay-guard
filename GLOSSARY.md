@@ -169,7 +169,7 @@ The number of Decisions, of any Outcome, made on a Mandate within a recent windo
 _Avoid_: Rate, frequency
 
 **New merchant**:
-A merchant that the Payer has never had an allowed payment to, under any of their Mandates.
+A merchant that the Payer has never had an allowed payment to, under any of their Mandates. A Voided allow doesn't count, because it was never paid.
 _Avoid_: Unknown merchant, first-time merchant
 
 **Payer instruction**:
