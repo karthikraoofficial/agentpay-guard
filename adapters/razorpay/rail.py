@@ -201,10 +201,11 @@ class RazorpayRail:
             order = self._lookup(f"/orders/{order['id']}")
         # A debit made and still in flight.
         made = _parsed(lambda: max(items, key=lambda p: int(p["created_at"]), default=None))
-        if made is None:
+        if made is None and not order.get("attempts") and order.get("status") == "created":
             return _parsed(lambda: _undebited(payment_id, order))
+        # Attempted, but the payment isn't listed yet: still in flight, whatever the notice.
         scheduled = _parsed(lambda: _scheduled(payment_id, order))
-        return scheduled.model_copy(update={"rail_payment_id": made["id"]})
+        return scheduled.model_copy(update={"rail_payment_id": made["id"]}) if made else scheduled
 
     def _lookup(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
         """A read whose refusal says nothing about the charge, so its outcome is unknown."""

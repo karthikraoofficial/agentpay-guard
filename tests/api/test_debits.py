@@ -10,6 +10,7 @@ import pytest
 from adapters.memory.rail import MockRail
 from core.debits import run_debit_step
 from core.domain.payments import PaymentId
+from core.domain.rails import RAIL_NOTICE_FAILED
 from core.ports import RailUnavailable
 from core.reconcile import sweep
 from tests.api.conftest import Api
@@ -169,7 +170,7 @@ def test_a_failed_notice_fails_the_payment_voids_its_decision_and_tells_the_tena
     step(api)
 
     failed = status(hooks, payment)
-    assert (failed["status"], failed["failure_code"]) == ("failed", "RAIL_NOTICE_FAILED")
+    assert (failed["status"], failed["failure_code"]) == ("failed", RAIL_NOTICE_FAILED)
     assert failed["rail_payment_id"] is None
     assert hooks.charges(payment["payment_id"]) == 0
     chain = hooks.chain()
@@ -177,7 +178,7 @@ def test_a_failed_notice_fails_the_payment_voids_its_decision_and_tells_the_tena
     assert [r.payment.status for r in chain if r.kind == "payment"] == ["scheduled", "failed"]
     hooks.relay()
     [sent] = [body for body, _, _ in hooks.received() if body["type"] == "payment.failed"]
-    assert sent["data"]["failure_code"] == "RAIL_NOTICE_FAILED"
+    assert sent["data"]["failure_code"] == RAIL_NOTICE_FAILED
 
 
 def test_a_webhook_and_the_debit_step_give_one_transition(api: Api, tmp_path: Path) -> None:

@@ -60,6 +60,7 @@ class MockRail:
 
     @staticmethod
     def token_whose_notice_fails() -> RailToken:
+        """Only with a notice period; without one there is no notice, and it captures."""
         return _token(_NOTICE_FAILS)
 
     def schedule_charge(
@@ -93,13 +94,14 @@ class MockRail:
             )
         else:
             charge = self._debited(key, amount)
-        self._charges[key] = charge
+        notice_fails = self._notice is not None and rail_token.token_ref == _NOTICE_FAILS
+        # A failed notice fails after this answer: every later read sees the charge failed.
+        self._charges[key] = (
+            charge.model_copy(update={"status": "failed", "failure_code": RAIL_NOTICE_FAILED})
+            if notice_fails
+            else charge
+        )
         self._tokens[key] = rail_token
-        if self._notice is not None and rail_token.token_ref == _NOTICE_FAILS:
-            # The notice fails after this answer: every later read sees the charge failed.
-            self._charges[key] = charge.model_copy(
-                update={"status": "failed", "failure_code": RAIL_NOTICE_FAILED}
-            )
         if rail_token.token_ref == _TIMES_OUT:
             raise RailUnavailable("mock rail timed out after making the charge")
         return charge

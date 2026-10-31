@@ -296,6 +296,20 @@ def test_a_failed_notice_is_never_debited_and_fails_the_charge(
     assert not [r for r in fake.requests if r.url.path.endswith("/payments/create/recurring")]
 
 
+def test_an_attempted_order_is_in_flight_even_if_its_notice_reads_failed(
+    rail: RazorpayRail, fake: FakeRazorpay
+) -> None:
+    fake.failed_notices.add(TOKEN.token_ref)
+    _schedule(rail, "pmt_attempted")
+    [order] = fake.orders
+    order["attempts"] = 1  # a debit Razorpay counts but doesn't list yet
+
+    charge = rail.get_charge(TENANT, PaymentId("pmt_attempted"))
+
+    assert charge is not None
+    assert (charge.status, charge.failure_code) == ("scheduled", None)
+
+
 def test_once_the_notice_period_ends_the_card_is_debited_once(
     rail: RazorpayRail, fake: FakeRazorpay
 ) -> None:
