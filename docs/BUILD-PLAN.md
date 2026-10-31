@@ -305,3 +305,6 @@ None of these need a rewrite if the seams hold; each is a swap or an addition. L
 - [ ] Observability: OTel collector to a hosted backend, SLO alerts on p95 decision latency and false-allow rate.
 - [ ] Load test: decision API at your target throughput (state it, e.g. 500 decisions/s) with p95 still under 150 ms.
 - [ ] Runbooks: rail outage (fail to step\_up or block, never allow), model outage, stuck consent workflows.
+- [ ] Rail: live Razorpay keys (the code refuses them today, ADR-0012), and UPI Reserve Pay alongside card recurring payments (the later swap ADR-0013 names).
+- [ ] Rail: Razorpay Route, a connected account per Tenant, so each Tenant is the Merchant of record instead of our one account (ADR-0012).
+- [ ] Rail: refunds. `PaymentRail.refund` is declared but not implemented; it comes with disputes in Phase 5.

@@ -151,7 +151,7 @@ function Purchase({ view }: { view: ConsentView }) {
 
 function Outcome({ resolution }: { resolution: Resolution }) {
   if (resolution.status === "approved") {
-    return <p className="rounded-md bg-emerald-50 p-3 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100">Approved. The agent can now complete this payment.</p>;
+    return <p className="rounded-md bg-emerald-50 p-3 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100">Approved: the agent can now schedule this payment.</p>;
   }
   if (resolution.status === "declined") {
     return <p className="rounded-md bg-neutral-100 p-3 dark:bg-neutral-900">Declined. The agent won&apos;t make this payment.</p>;
