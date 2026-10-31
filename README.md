@@ -216,22 +216,31 @@ Check the signature over the raw body before parsing it, and reject an old `t` t
 
 One Payment from allow to `scheduled` on the real rail, by hand. Razorpay won't debit for 36 h 5 min and a test token expires sooner (ADR-0017), so the rest of the path, from the debit to `captured` and the Tenant's `payment.captured` webhook, is `tests/api/test_end_to_end.py` on the mock rail with the same notice period.
 
-1. **Set up.** Put the test key id, key secret and webhook secret in `.env`, register a test card with `uv run python -m adapters.razorpay.wizard` (it prints a `cust_…` and a `token_…`), then run the API with `AGENTPAY_RAIL=razorpay`. Create a Tenant with `uv run python -m api.admin create-tenant "E2E"` and keep its two keys in `$AGENT` and `$TENANT`.
-2. **Grant an INR Mandate** with that card as its Rail token, after registering a Payer and an Agent:
+1. **Set up.** Put the test key id, key secret and webhook secret in `.env` and register a test card with `uv run python -m adapters.razorpay.wizard`, which prints a `cust_…` and a `token_…`. Run the API with `AGENTPAY_RAIL=razorpay uv run uvicorn api.main:asgi_app --factory`. Create a Tenant with `uv run python -m api.admin create-tenant "E2E"` and keep its agent key in `$AGENT` and its tenant key in `$TENANT`.
+2. **Register a Payer and an Agent,** and grant an INR Mandate with that test card as its Rail token. Fill in the ids each call returns, and times as ISO 8601 (`valid_from` now, `expires_at` within a year, `captured_at` in the past):
 
    ```bash
-   curl -s localhost:8000/v1/mandates -H "Authorization: Bearer $TENANT" -H "Idempotency-Key: $(uuidgen)" \
-     -H "Content-Type: application/json" -d '{"payer_id":"pyr_…","allowed_agent_ids":["agt_…"],"currency":"INR",
+   call() { curl -s "localhost:8000$1" -H "Authorization: Bearer $2" -H "Idempotency-Key: $(uuidgen)" \
+              -H "Content-Type: application/json" -d "$3"; echo; }
+   call /v1/payers "$TENANT" '{"display_name":"Asha","contact_ref":"tok_payer_1"}'
+   call /v1/agents "$TENANT" '{"name":"ShopBot"}'
+   call /v1/mandates "$TENANT" '{"payer_id":"pyr_…","allowed_agent_ids":["agt_…"],"currency":"INR",
      "per_txn_cap":{"minor":100000,"currency":"INR"},"monthly_cap":{"minor":500000,"currency":"INR"},
      "allowed_mccs":["5411"],"valid_from":"…","expires_at":"…",
      "consent_evidence":{"method":"upi_mandate_ref","reference":"E2E-0001","captured_at":"…"},
      "rail_token":{"rail":"razorpay","customer_ref":"cust_…","token_ref":"token_…","display":"visa •••• 1111"}}'
    ```
 
-3. **Get an allow:** `POST /v1/decisions` with the agent key, `{"mandate_id","agent_id","amount":{"minor":49900,"currency":"INR"},"merchant":{"id":"m_freshmart","name":"FreshMart","mcc":"5411"}}`.
-4. **Pay it:** `POST /v1/payments` with `{"decision_id": …}`. Expect `202`, `scheduled`, and `debit_after` 36 h 5 min from now.
-5. **See it booked on Razorpay.** In the Dashboard (Test Mode) the order has our Payment id as its receipt, and about a minute later its Pre-debit notice is `delivered`. A debit tried now is refused as "not yet", and the Payment stays `scheduled`.
-6. **Check the evidence:** `uv run python -m api.admin verify --tenant <id>` reports a clean chain: the Decision, then the `scheduled` Payment.
+3. **Get an allow** with the agent key:
+
+   ```bash
+   call /v1/decisions "$AGENT" '{"mandate_id":"mnd_…","agent_id":"agt_…",
+     "amount":{"minor":49900,"currency":"INR"},"merchant":{"id":"m_freshmart","name":"FreshMart","mcc":"5411"}}'
+   ```
+
+4. **Pay it:** `call /v1/payments "$AGENT" '{"decision_id":"dec_…"}'`. Expect the Payment `scheduled`, with `debit_after` 36 h 5 min from now.
+5. **See it booked on Razorpay.** In the Dashboard (Test Mode), Orders has one with our Payment id as its receipt, and about a minute later its Pre-debit notice is delivered. The worker won't try the debit before `debit_after`. The rail contract test `uv run pytest -m contract -o addopts="" -k not_yet tests/adapters/test_rail_contract.py` shows Razorpay refusing a debit made early, which we read as "not yet". It needs the wizard's refs in `.env` as `AGENTPAY_RAZORPAY_TEST_CUSTOMER_REF` and `AGENTPAY_RAZORPAY_TEST_TOKEN_REF`.
+6. **Check the evidence:** `uv run python -m api.admin verify --tenant <id>` reports `Clean: 2 Audit records`, the Decision and the `scheduled` Payment, and `uv run python -m api.admin replay <audit_record_id> --tenant <id>` replays the Decision byte for byte.
 
 The run for #85, with ids and timings, is posted on the Phase 4 PRD (#74).
 
@@ -246,7 +255,7 @@ The run for #85, with ids and timings, is posted on the Phase 4 PRD (#74).
 - **An approved step-up doesn't make its merchant known.** New merchant counts only allowed Decisions, so the next payment to that merchant can step up again.
 - **Payments are scheduled, not instant.** Indian e-mandate rules need a Pre-debit notice, so on Razorpay a Payment is `scheduled` when its order and notice exist, and the worker debits the card 36 h 5 min later (`debit_after`, ADR-0017). `scheduled` means booked, not about to settle.
 - **A Razorpay card debit can't complete in test mode.** With `AGENTPAY_RAIL=razorpay` (test keys only; the app won't start with a live key or without the key secret and webhook secret), test tokens expire after about 22 hours, before the debit is allowed. So the real run stops at `scheduled` (see [End to end](#end-to-end-on-razorpay-test-mode)), and the full flow to `captured` runs on the mock rail and a fake Razorpay API.
-- **A failed Pre-debit notice leaves its Payment `scheduled`.** Razorpay can mark a notice `failed` (in test mode, after about 20 notices on one token), and then refuses the debit. The debit step reads that as "not yet" and tries again every interval, so the Payment stays `scheduled` until the token expires.
+- **A failed Pre-debit notice leaves its Payment `scheduled`.** Razorpay can mark a notice `failed`, with no reason given (seen in test mode on a token with many open notices; see #74), and then refuses the debit. The debit step reads that as "not yet" and tries again every interval, so the Payment stays `scheduled` until the token expires.
 - **Run one worker.** The debit step relies on asking Razorpay for an earlier debit before making one, so two workers could debit the same Payment twice.
 - **A Revocation in the last seconds before a debit can miss it.** The debit step re-checks the Mandate and Agent, then calls the rail without holding the Mandate, so a Revocation that lands during that call doesn't stop the debit.
 - **A debit can be up to one sweep interval late:** the debit step runs every `AGENTPAY_RECONCILE_INTERVAL_SECONDS` (5 minutes).
