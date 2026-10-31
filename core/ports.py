@@ -457,9 +457,15 @@ class EventBus(Protocol):
     `undelivered` is the one read here not scoped to a Tenant, like TenantDirectory's key
     lookup, because the relay finds work for every Tenant. Every write is scoped."""
 
-    def undelivered(self, limit: int, now: datetime | None = None) -> list[DomainEvent]:
+    def undelivered(
+        self,
+        limit: int,
+        now: datetime | None = None,
+        event_types: AbstractSet[str] | None = None,
+    ) -> list[DomainEvent]:
         """Events not yet delivered nor given up, oldest first. With `now`, only those
-        due by then: an event put off by `retry_later` waits until its time."""
+        due by then: an event put off by `retry_later` waits until its time. With
+        `event_types`, only events of those types."""
         ...
 
     def mark_delivered(self, tenant_id: TenantId, event_id: str, at: datetime) -> None: ...

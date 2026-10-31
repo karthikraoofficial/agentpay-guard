@@ -5,13 +5,13 @@ only encrypted (ADR-0015): an idempotent replay returns `secret: null`."""
 from datetime import datetime
 
 from fastapi import APIRouter, Request, Response
-from pydantic import AwareDatetime, BaseModel, ConfigDict, ValidationError
+from pydantic import AwareDatetime, BaseModel, ConfigDict
 
 from api.deps import ClockDep, IdemKey, ManageTenant, SecretBoxDep, StoreDep
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
 from core.domain.decisions import decision_time
-from core.domain.webhooks import WebhookEndpoint, new_signing_secret
+from core.domain.webhooks import WebhookEndpoint, is_https_url, new_signing_secret
 from core.ports import SecretBox, TenantId, TenantTransaction
 
 router = APIRouter(prefix="/v1/webhook-endpoint", tags=["webhooks"])
@@ -60,12 +60,12 @@ def register_endpoint(
     def write(read_at: datetime) -> tuple[int, EndpointOut]:
         now = decision_time(read_at)
         current = tx.get_webhook_endpoint()
+        if not is_https_url(body.url):
+            raise ApiError(422, "WEBHOOK_URL_INVALID", "The endpoint must be an https:// URL.")
         if current is not None:
-            _endpoint(tenant, body.url, current.secret_ciphertext, now)  # checks the URL
             moved = current.model_copy(update={"url": body.url})
             tx.save_webhook_endpoint(moved)
             return 200, _out(moved)
-        _endpoint(tenant, body.url, "unchecked", now)  # a bad URL fails before any secret
         secret = new_signing_secret()
         made = _endpoint(tenant, body.url, _encrypted(box, secret), now)
         tx.save_webhook_endpoint(made)
@@ -113,18 +113,9 @@ def rotate_secret(
 
 
 def _endpoint(tenant: TenantId, url: str, ciphertext: str, at: datetime) -> WebhookEndpoint:
-    try:
-        return WebhookEndpoint(
-            tenant_id=tenant,
-            url=url,
-            secret_ciphertext=ciphertext,
-            created_at=at,
-            secret_rotated_at=at,
-        )
-    except ValidationError:
-        raise ApiError(
-            422, "WEBHOOK_URL_INVALID", "The endpoint must be an https:// URL."
-        ) from None
+    return WebhookEndpoint(
+        tenant_id=tenant, url=url, secret_ciphertext=ciphertext, created_at=at, secret_rotated_at=at
+    )
 
 
 def _encrypted(box: SecretBox, secret: str) -> str:

@@ -12,14 +12,23 @@ from typing import Any
 
 import pytest
 
+from adapters.memory.clock import FixedClock
 from adapters.memory.rail import MockRail
+from adapters.memory.unit_of_work import InMemoryUnitOfWork
+from adapters.memory.workflow import InMemoryWorkflow
+from adapters.webhooks.secret_box import secret_box
+from api.admin import create_tenant
 from core.charges import apply_charge
 from core.domain.payments import PaymentId
+from core.domain.webhooks import WebhookEndpoint
+from core.ports import DomainEvent
 from core.reconcile import sweep
 from core.relay import relay_once
-from tests.api.conftest import NOW, Api, RecordingSender, tenant_webhooks
+from core.tenant_webhooks import TenantWebhooks
+from tests.api.conftest import NOW, Api, MovableClock, RecordingSender, tenant_webhooks
 from tests.api.test_payments import Payments
 from tests.api.test_tenants_payers_agents import assert_problem
+from tests.conftest import make_settings
 from tests.packs import phase_1_packs
 
 EVERYTHING = 100_000  # the Postgres outbox is shared by every test in the run
@@ -325,3 +334,78 @@ def test_rotating_signs_later_events_with_the_new_secret(hooks: Hooks) -> None:
     read = hooks.api.client.get("/v1/webhook-endpoint", headers=hooks.tenant).json()
     assert read["secret"] is None
     assert read["secret_rotated_at"] == rotated.json()["secret_rotated_at"]
+
+
+# --- The relay's batches and deadline, on a store of their own --------------------------
+
+
+def _outbox_with_endpoint() -> tuple[InMemoryUnitOfWork, MovableClock, RecordingSender]:
+    store, clock, sender = InMemoryUnitOfWork(), MovableClock(NOW), RecordingSender()
+    create_tenant(store, "solo", live=False, clock=FixedClock(NOW))
+    [tenant] = list(store._tenants)
+    box = secret_box(make_settings())
+    with store.transaction(tenant) as tx:
+        tx.save_webhook_endpoint(
+            WebhookEndpoint(
+                tenant_id=tenant,
+                url="https://hooks.example/solo",
+                secret_ciphertext=box.encrypt("whsec_solo"),
+                created_at=NOW,
+                secret_rotated_at=NOW,
+            )
+        )
+    return store, clock, sender
+
+
+def _publish(
+    store: InMemoryUnitOfWork, event_type: str, n: int, at: Any, attempts: int = 0
+) -> None:
+    [tenant] = list(store._tenants)
+    with store.transaction(tenant) as tx:
+        for i in range(n):
+            tx.publish(
+                DomainEvent(
+                    event_id=f"evt_{event_type}_{i}",
+                    tenant_id=tenant,
+                    event_type=event_type,  # type: ignore[arg-type]
+                    occurred_at=at,
+                    attempts=attempts,
+                    payload={
+                        "consent_request_id": f"csr_{i}",
+                        "expires_at": "2026-11-02T00:00:00Z",
+                    },
+                )
+            )
+
+
+def test_stuck_workflow_events_never_hold_up_tenant_webhooks() -> None:
+    store, clock, sender = _outbox_with_endpoint()
+    _publish(store, "consent_requested", 5, NOW - timedelta(minutes=1))  # older, so first
+    _publish(store, "consent_request.created", 1, NOW)
+    workflow = InMemoryWorkflow()
+    workflow.fail_starts = True
+
+    relay_once(
+        store,
+        workflow,
+        clock,
+        TenantWebhooks(store, secret_box(make_settings()), sender, clock),
+        limit=2,
+    )
+
+    assert [url for url, _, _ in sender.sent] == ["https://hooks.example/solo"]
+
+
+def test_retries_stop_exactly_a_day_after_the_event() -> None:
+    store, clock, sender = _outbox_with_endpoint()
+    sender.status = 503
+    _publish(store, "consent_request.created", 1, NOW, attempts=8)  # its next wait: an hour
+    webhooks = TenantWebhooks(store, secret_box(make_settings()), sender, clock)
+    clock.advance(timedelta(hours=23, minutes=30))
+
+    relay_once(store, InMemoryWorkflow(), clock, webhooks)  # fails: next try capped at 24 h
+    clock.advance(timedelta(minutes=30))
+    relay_once(store, InMemoryWorkflow(), clock, webhooks)  # the last try, then given up
+
+    assert len(sender.sent) == 2
+    assert store.undelivered(10) == []

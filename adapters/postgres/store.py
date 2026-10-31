@@ -738,12 +738,18 @@ class PostgresStore:
         # Payment ids are random, so two Tenants never share one; refuse to guess if they do.
         return TenantId(found[0]) if len(found) == 1 else None
 
-    def undelivered(self, limit: int, now: datetime | None = None) -> list[DomainEvent]:
+    def undelivered(
+        self,
+        limit: int,
+        now: datetime | None = None,
+        event_types: AbstractSet[str] | None = None,
+    ) -> list[DomainEvent]:
         o = outbox_events.c
         due = [] if now is None else [or_(o.next_attempt_at.is_(None), o.next_attempt_at <= now)]
+        kinds = [] if event_types is None else [o.event_type.in_(sorted(event_types))]
         query = (
             select(outbox_events)
-            .where(o.delivered_at.is_(None), *due)
+            .where(o.delivered_at.is_(None), *due, *kinds)
             .order_by(o.occurred_at, o.event_id)
             .limit(limit)
         )

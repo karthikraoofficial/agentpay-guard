@@ -210,7 +210,7 @@ X-AgentPay-Signature: t=1793460000,v1=<hex HMAC-SHA256 of "<t>.<raw body>" keyed
 {"created_at":"…","data":{"consent_request_id":"csr_…","decision_id":"dec_…","expires_at":"…","status":"pending"},"id":"evt_…","type":"consent_request.created"}
 ```
 
-Check the signature over the raw body before parsing it, and reject an old `t` to stop replays. Bodies hold identifiers, statuses, codes, amounts in minor units and times only: never Payer contact details, Rail token refs or free text. Delivery is at least once, so dedupe by `id`. Any non-2xx answer, or no answer within 5 seconds, is retried with backoff (30 s, doubling to at most an hour) until a day after the event, then given up and logged. A Tenant with no endpoint gets nothing sent. The signing secret is stored encrypted with `AGENTPAY_WEBHOOK_ENCRYPTION_KEY` (ADR-0015).
+Check the signature over the raw body before parsing it, and reject an old `t` to stop replays. Bodies hold identifiers, statuses, codes, amounts in minor units and times only: never Payer contact details, Rail token refs or free text. Delivery is at least once, so dedupe by `id`. Any non-2xx answer, or no answer within 5 seconds, is retried with backoff (30 s, doubling to at most an hour), with a last try a day after the event, then given up and logged. A Tenant with no endpoint gets nothing sent. The signing secret is stored encrypted with `AGENTPAY_WEBHOOK_ENCRYPTION_KEY` (ADR-0015).
 
 ## Known limitations
 
@@ -218,7 +218,7 @@ Check the signature over the raw body before parsing it, and reject an old `t` t
 - **The Declared MCC is trusted.** The merchant category the Agent states isn't yet checked against what the rail reports.
 - **Monthly caps reset at midnight UTC,** which is 05:30 IST on the 1st.
 - **Decisions within one Tenant queue briefly on that Tenant's Audit chain lock,** so per-Tenant throughput has a ceiling. Measured with every Signal on (`default@1.1.0`, medium payments citing an Intent check): p50 53 ms and p95 62 ms for one client on local Postgres. A load test against a real server is still to do.
-- **Tenant webhooks are sent by one relay, in order.** A slow endpoint (up to the 5-second timeout per send) delays other Tenants' events in the same pass. The workflow's notify activity still writes its `consent_request.created` log line too.
+- **Tenant webhooks come in no guaranteed order,** and one relay sends them. A retried event can arrive after a later one for the same Consent request or Payment, so read the `status` in each body. A slow endpoint (up to the 5-second timeout per send) delays other Tenants' events in the same pass. The workflow's notify activity still writes its `consent_request.created` log line too.
 - **The expiry record lands after the timer fires,** which can be later than `expires_at` if no worker is running. Status reads `expired` from `expires_at` regardless, and a late approve or decline is refused.
 - **An approved step-up doesn't make its merchant known.** New merchant counts only allowed Decisions, so the next payment to that merchant can step up again.
 - **A Razorpay card debit can't complete in test mode.** With `AGENTPAY_RAIL=razorpay` (test keys only; the app won't start with a live key or without the key secret and webhook secret), a Payment gets its Razorpay order and Pre-debit notice, and the worker debits the card 36 h 5 min later. Test tokens expire after about 22 hours, before that, so the full flow is only exercised on the mock rail and a fake Razorpay API.

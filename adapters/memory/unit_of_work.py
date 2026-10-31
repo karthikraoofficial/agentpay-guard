@@ -426,12 +426,19 @@ class InMemoryUnitOfWork:
                 return tenant_id
         return None
 
-    def undelivered(self, limit: int, now: datetime | None = None) -> list[DomainEvent]:
+    def undelivered(
+        self,
+        limit: int,
+        now: datetime | None = None,
+        event_types: AbstractSet[str] | None = None,
+    ) -> list[DomainEvent]:
         waiting = [
             event
             for data in list(self._tenants.values())
             for event, done, due in list(data.outbox.values())
-            if not done and (now is None or due is None or due <= now)
+            if not done
+            and (now is None or due is None or due <= now)
+            and (event_types is None or event.event_type in event_types)
         ]
         return sorted(waiting, key=lambda e: (e.occurred_at, e.event_id))[:limit]
 

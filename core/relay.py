@@ -8,7 +8,9 @@
   retried with backoff, and given up a day after the event; a Tenant with no endpoint
   gets nothing sent.
 
-An event is marked delivered only after its delivery succeeds.
+An event is marked delivered only after its delivery succeeds. Workflow events and Tenant
+webhook events are read in separate batches, so a backlog of one never holds up the other.
+Tenant webhooks carry no ordering guarantee: a retried event can arrive after a later one.
 """
 
 import logging
@@ -21,6 +23,8 @@ from core.tenant_webhooks import TenantWebhooks
 
 log = logging.getLogger(__name__)
 
+WORKFLOW_EVENT_TYPES = frozenset({"consent_requested"})
+
 
 def relay_once(
     bus: EventBus,
@@ -29,20 +33,21 @@ def relay_once(
     webhooks: TenantWebhooks,
     limit: int = 100,
 ) -> int:
-    """Deliver up to `limit` events that are due, oldest first. Returns how many were
-    delivered."""
+    """Deliver up to `limit` due workflow events and up to `limit` due Tenant webhook
+    events, oldest first in each. Returns how many were delivered."""
     delivered = 0
-    for event in bus.undelivered(limit, clock.now()):
-        try:
-            if event.event_type in TENANT_EVENT_TYPES:
-                webhooks.deliver(event)
-            else:
-                _start_workflow(event, workflow)
-        except Exception as exc:  # any failure leaves the event for a later pass
-            _failed(bus, event, exc, clock.now())
-            continue
-        bus.mark_delivered(event.tenant_id, event.event_id, clock.now())
-        delivered += 1
+    for kinds in (WORKFLOW_EVENT_TYPES, TENANT_EVENT_TYPES):
+        for event in bus.undelivered(limit, clock.now(), kinds):
+            try:
+                if event.event_type in TENANT_EVENT_TYPES:
+                    webhooks.deliver(event)
+                else:
+                    _start_workflow(event, workflow)
+            except Exception as exc:  # any failure leaves the event for a later pass
+                _failed(bus, event, exc, clock.now())
+                continue
+            bus.mark_delivered(event.tenant_id, event.event_id, clock.now())
+            delivered += 1
     return delivered
 
 
@@ -67,7 +72,9 @@ def _failed(bus: EventBus, event: DomainEvent, exc: Exception, now: datetime) ->
             reason,
         )
         return
-    bus.retry_later(event.tenant_id, event.event_id, retry_at(event.attempts + 1, now))
+    bus.retry_later(
+        event.tenant_id, event.event_id, retry_at(event.attempts + 1, now, event.occurred_at)
+    )
     log.warning(
         "Tenant webhook %s for Tenant %s not delivered, will retry: %s",
         event.event_id,
