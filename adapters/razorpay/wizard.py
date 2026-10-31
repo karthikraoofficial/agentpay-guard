@@ -12,12 +12,14 @@ only the key id, which Checkout needs and which is public.
 import html
 import time
 import webbrowser
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from typing import Any
 
 from adapters.razorpay.api import RazorpayApi
+from adapters.razorpay.rail import RazorpayRail
+from core.domain.rails import RailToken
 from core.settings import get_settings
 
 WAIT_MINUTES = 15
@@ -89,8 +91,12 @@ def main() -> None:
         token_id = _wait_for_token(api, order["id"])
     finally:
         server.shutdown()
-    token = api.get(f"/customers/{customer['id']}/tokens/{token_id}")
-    expires = datetime.fromtimestamp(int(token["expired_at"]), UTC)
+    token = RailToken(
+        rail="razorpay", customer_ref=customer["id"], token_ref=token_id, display="test card"
+    )
+    expires = RazorpayRail.from_settings(settings).token_expires_at(token)
+    if expires is None:
+        raise SystemExit(f"Razorpay doesn't know token {token_id}; run me again.")
 
     print("3/3 Registered. Put these in .env:\n")
     print(f"AGENTPAY_RAZORPAY_TEST_CUSTOMER_REF={customer['id']}")

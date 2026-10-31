@@ -94,8 +94,12 @@ def _razorpay_fake() -> RailHarness:
 def _razorpay() -> RailHarness:
     settings = get_settings()
     customer, token = settings.razorpay_test_customer_ref, settings.razorpay_test_token_ref
-    if settings.razorpay_key_id is None or customer is None or token is None:
-        pytest.skip(f"no Razorpay test token: run `{WIZARD}` and put its refs in .env")
+    keys = (settings.razorpay_key_id, settings.razorpay_key_secret)
+    if None in keys or customer is None or token is None:
+        pytest.skip(
+            "no Razorpay test keys or test token: set the keys and run "
+            f"`{WIZARD}`, then put its refs in .env"
+        )
     rail = RazorpayRail.from_settings(settings)
     captures = RailToken(
         rail="razorpay", customer_ref=customer, token_ref=token, display="card for contract"

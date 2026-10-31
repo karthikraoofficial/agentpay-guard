@@ -63,7 +63,7 @@ def test_scheduling_makes_an_order_with_a_pre_debit_notice(
     assert json.loads(created[0].content)["payment_capture"] is True
     assert charge.status == "scheduled"
     assert charge.amount == AMOUNT
-    assert charge.rail_payment_id is None  # no Razorpay payment until the debit (#95)
+    assert charge.rail_payment_id is None  # no Razorpay payment until the debit
     assert charge.debit_after == datetime.fromtimestamp(CREATED_AT + NOTICE_SECONDS, UTC)
 
 
@@ -224,3 +224,18 @@ def test_it_is_built_from_settings() -> None:
     )
 
     assert isinstance(RazorpayRail.from_settings(settings), RazorpayRail)
+
+
+def test_an_order_for_another_amount_is_never_taken_as_the_payments_charge(
+    rail: RazorpayRail,
+) -> None:
+    _schedule(rail, "pmt_amount")
+
+    with pytest.raises(ValueError, match="amount"):
+        rail.schedule_charge(
+            TENANT,
+            TOKEN,
+            Money(minor=50_000, currency="INR"),
+            PaymentId("pmt_amount"),
+            IdempotencyKey("idem_pmt_amount"),
+        )

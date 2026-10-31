@@ -1,5 +1,5 @@
 """A fake Razorpay API behind an httpx transport, shaped by what the real test account
-returned in #75 and #83's probes:
+returned when probed:
 
 - `GET /orders?receipt=` lists orders without their `notification`; `GET /orders/{id}`
   includes it.

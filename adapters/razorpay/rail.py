@@ -38,7 +38,8 @@ _CAPTURED = frozenset({"captured", "refunded"})
 
 
 class RazorpayRail:
-    # Razorpay's order search found a new order by its receipt after about 25 s (#83);
+    # Razorpay's order search found a new order by its receipt after about 25 s on the
+    # test account (ADR-0014);
     # fetching an order by id is immediate, but a lost answer leaves us no id.
     lookup_lag = timedelta(minutes=2)
 
@@ -67,7 +68,10 @@ class RazorpayRail:
     ) -> RailCharge:
         existing = self._find_order(tenant_id, payment_id)
         if existing is not None:
-            return self._charge(payment_id, existing)
+            charge = self._charge(payment_id, existing)
+            if charge.amount != amount:  # a Payment is always its Decision's amount (ADR-0014)
+                raise ValueError(f"Razorpay's order for Payment {payment_id} is for another amount")
+            return charge
         try:
             order = self._api.post(
                 "/orders",
