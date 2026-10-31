@@ -17,6 +17,8 @@ VALID: dict[str, Any] = {
     "temporal_address": "localhost:7233",
     "otel_exporter_endpoint": "http://localhost:4318",
     "telemetry_exporter": "none",
+    # A fixed Fernet key, so Tenant webhook secrets can be encrypted and read back.
+    "webhook_encryption_key": "dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktdGVzdDA=",
 }
 
 

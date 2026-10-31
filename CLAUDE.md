@@ -24,7 +24,7 @@ Read the relevant PRD and ticket before changing code. docs/BUILD-PLAN.md is the
 
 Run from the repo root. These are the same commands CI runs.
 
-- Setup: `uv sync`, then `cp .env.example .env` (set `AGENTPAY_ANTHROPIC_API_KEY`, or `AGENTPAY_INTENT_CHECK_ENABLED=false`; outside `env=test` the app won't start with neither)
+- Setup: `uv sync`, then `cp .env.example .env` (set `AGENTPAY_ANTHROPIC_API_KEY`, or `AGENTPAY_INTENT_CHECK_ENABLED=false`; outside `env=test` the app won't start with neither; Tenant webhooks also need `AGENTPAY_WEBHOOK_ENCRYPTION_KEY`, see `.env.example`)
 - Local infra: `docker compose -f infra/docker-compose.yml up -d`
 - Run the API: `uv run uvicorn api.main:asgi_app --factory --reload` (health: `/healthz`, docs: `/docs`)
 - Run the consent worker (Temporal workflow, activities, outbox relay, and the Payment debit step and reconciliation sweep, which are off on the mock rail; needs local infra): `uv run python -m workflows.worker`

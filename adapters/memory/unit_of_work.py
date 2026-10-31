@@ -28,6 +28,7 @@ from core.domain.parties import (
 )
 from core.domain.payments import Payment, PaymentId, RailEvent
 from core.domain.voids import Void
+from core.domain.webhooks import WebhookEndpoint
 from core.ports import DomainEvent, EventBus, TenantDirectory, TenantId, UnitOfWork
 
 
@@ -42,12 +43,13 @@ class _TenantData:
     head: tuple[int, str] = (0, ZERO_HASH)
     consents: dict[DecisionId, ConsentRequest] = field(default_factory=dict)
     intents: dict[IntentId, IntentCheck] = field(default_factory=dict)
-    # event_id -> (event, delivered)
-    outbox: dict[str, tuple[DomainEvent, bool]] = field(default_factory=dict)
+    # event_id -> (event, done: delivered or given up, not before: when a retry is due)
+    outbox: dict[str, tuple[DomainEvent, bool, datetime | None]] = field(default_factory=dict)
     links: dict[str, ConsentLink] = field(default_factory=dict)
     payments: dict[PaymentId, Payment] = field(default_factory=dict)
     voids: dict[DecisionId, Void] = field(default_factory=dict)
     rail_events: dict[str, RailEvent] = field(default_factory=dict)
+    webhook: WebhookEndpoint | None = None
 
     def copy(self) -> "_TenantData":
         return _TenantData(
@@ -65,6 +67,7 @@ class _TenantData:
             dict(self.payments),
             dict(self.voids),
             dict(self.rail_events),
+            self.webhook,
         )
 
 
@@ -157,6 +160,13 @@ class InMemoryTransaction:
 
     def get_decision(self, decision_id: DecisionId) -> Decision | None:
         return self._data.decisions.get(decision_id)
+
+    def get_webhook_endpoint(self) -> WebhookEndpoint | None:
+        return self._data.webhook
+
+    def save_webhook_endpoint(self, endpoint: WebhookEndpoint) -> None:
+        self._own(endpoint.tenant_id)
+        self._data.webhook = endpoint
 
     def allowed_spend(self, mandate_id: MandateId, start: datetime, end: datetime) -> int:
         decisions, voided = self._data.decisions, self._data.voids
@@ -287,7 +297,7 @@ class InMemoryTransaction:
 
     def publish(self, event: DomainEvent) -> None:
         self._own(event.tenant_id)
-        self._data.outbox.setdefault(event.event_id, (event, False))
+        self._data.outbox.setdefault(event.event_id, (event, False, None))
 
     def add_consent_resolution(self, resolution: ConsentResolution) -> None:
         self._own(resolution.tenant_id)
@@ -416,20 +426,41 @@ class InMemoryUnitOfWork:
                 return tenant_id
         return None
 
-    def undelivered(self, limit: int) -> list[DomainEvent]:
+    def undelivered(self, limit: int, now: datetime | None = None) -> list[DomainEvent]:
         waiting = [
             event
             for data in list(self._tenants.values())
-            for event, delivered in data.outbox.values()
-            if not delivered
+            for event, done, due in list(data.outbox.values())
+            if not done and (now is None or due is None or due <= now)
         ]
         return sorted(waiting, key=lambda e: (e.occurred_at, e.event_id))[:limit]
 
     def mark_delivered(self, tenant_id: TenantId, event_id: str, at: datetime) -> None:
+        self._outboxed(tenant_id, event_id, done=True)
+
+    def retry_later(self, tenant_id: TenantId, event_id: str, at: datetime) -> None:
+        self._outboxed(tenant_id, event_id, done=False, due=at, failed=True)
+
+    def give_up(self, tenant_id: TenantId, event_id: str, at: datetime) -> None:
+        self._outboxed(tenant_id, event_id, done=True)
+
+    def _outboxed(
+        self,
+        tenant_id: TenantId,
+        event_id: str,
+        *,
+        done: bool,
+        due: datetime | None = None,
+        failed: bool = False,
+    ) -> None:
         with self._commit:
             data = self._tenants.get(tenant_id)
-            if data is not None and event_id in data.outbox:
-                data.outbox[event_id] = (data.outbox[event_id][0], True)
+            if data is None or event_id not in data.outbox:
+                return
+            event = data.outbox[event_id][0]
+            if failed:
+                event = event.model_copy(update={"attempts": event.attempts + 1})
+            data.outbox[event_id] = (event, done, due)
 
 
 # mypy checks the fake matches the ports

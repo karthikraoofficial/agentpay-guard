@@ -15,6 +15,7 @@ from adapters.otel.telemetry import OtelTelemetry
 from adapters.postgres.store import PostgresStore
 from adapters.rails import build_rail
 from adapters.system_clock import SystemClock
+from adapters.webhooks.secret_box import secret_box as build_secret_box
 from api import errors
 from api.deps import Store
 from api.routes import (
@@ -26,9 +27,10 @@ from api.routes import (
     parties,
     payments,
     rail_webhooks,
+    webhook_endpoint,
 )
 from core.policy.packs import load_active_pack
-from core.ports import Clock, ModelGateway, PaymentRail, Telemetry, Workflow
+from core.ports import Clock, ModelGateway, PaymentRail, SecretBox, Telemetry, Workflow
 from core.settings import Settings, get_settings
 from workflows.client import TemporalWorkflow
 
@@ -48,6 +50,7 @@ def create_app(
     gateway: ModelGateway | None = None,
     workflow: Workflow | None = None,
     rail: PaymentRail | None = None,
+    secret_box: SecretBox | None = None,
 ) -> FastAPI:
     """Build the app from explicit settings, so tests need no global state. Without a
     store, it uses Postgres at `settings.database_url` (connecting on first use).
@@ -74,6 +77,7 @@ def create_app(
     app.state.gateway = gateway or _default_gateway(settings, app.state.telemetry)
     # Only resolutions signal from here (best effort); the worker's relay starts workflows.
     app.state.workflow = workflow or TemporalWorkflow.from_settings(settings)
+    app.state.secret_box = secret_box or build_secret_box(settings)
     app.state.rail = rail or build_rail(settings)
     errors.install(app)
     app.include_router(parties.router)
@@ -84,6 +88,7 @@ def create_app(
     app.include_router(consent_links.router)
     app.include_router(payments.router)
     app.include_router(rail_webhooks.router)
+    app.include_router(webhook_endpoint.router)
     app.add_middleware(_LinkCors, origin=settings.web_origin)
 
     @app.get("/healthz", tags=["ops"])

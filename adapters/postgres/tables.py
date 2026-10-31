@@ -3,6 +3,7 @@ tenant_id (non-negotiable 3); tenant-owned tables key on (tenant_id, id)."""
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -221,7 +222,12 @@ outbox_events = Table(
     Column("event_type", String, nullable=False),
     Column("occurred_at", DateTime(timezone=True), nullable=False),
     Column("payload", JSONB, nullable=False),
+    # Set once the event is delivered, or given up (then `gave_up` is true).
     Column("delivered_at", DateTime(timezone=True), nullable=True),
+    # Tenant webhook retries: failed sends so far, and when the next one is due.
+    Column("attempts", Integer, nullable=False, server_default=text("0")),
+    Column("next_attempt_at", DateTime(timezone=True), nullable=True),
+    Column("gave_up", Boolean, nullable=False, server_default=text("false")),
     Index(
         "ix_outbox_events_undelivered",
         "occurred_at",
@@ -327,4 +333,16 @@ rail_events = Table(
         ["tenant_id", "payment_id"], ["payments.tenant_id", "payments.payment_id"]
     ),
     CheckConstraint("status IN ('captured', 'failed')", name="rail_events_status"),
+)
+
+# Tenant webhook endpoints: one per Tenant. The signing secret is stored encrypted with the
+# key from settings, never in plaintext (ADR-0015).
+webhook_endpoints = Table(
+    "webhook_endpoints",
+    metadata,
+    Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+    Column("url", String, nullable=False),
+    Column("secret_ciphertext", String, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("secret_rotated_at", DateTime(timezone=True), nullable=False),
 )

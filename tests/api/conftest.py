@@ -2,7 +2,7 @@
 fake can't drift from the real adapter. When each test ends, every Decision it made is
 replayed byte-identical and every Audit chain it touched is verified."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from itertools import count
@@ -19,11 +19,13 @@ from adapters.memory.telemetry import InMemoryTelemetry
 from adapters.memory.unit_of_work import InMemoryUnitOfWork
 from adapters.memory.workflow import InMemoryWorkflow
 from adapters.postgres.store import PostgresStore
+from adapters.webhooks.secret_box import secret_box
 from api.admin import create_key, create_tenant, replay_record, verify_chain
 from api.main import create_app
 from core.domain.parties import ALL_SCOPES, ApiKeyScope, hash_api_key
-from core.ports import TenantId
+from core.ports import Clock, TenantId, UnitOfWork, WebhookUnreachable
 from core.settings import Settings
+from core.tenant_webhooks import TenantWebhooks
 from tests.conftest import make_settings
 
 PACKS = Path(__file__).resolve().parents[2] / "policy_packs"
@@ -171,3 +173,25 @@ def api(request: pytest.FixtureRequest) -> Iterator[Api]:
     )
     yield api
     api.assert_evidence_holds()
+
+
+@dataclass
+class RecordingSender:
+    """A WebhookSender that records every send and answers `status`, or can't connect."""
+
+    status: int = 200
+    unreachable: bool = False
+    sent: list[tuple[str, bytes, dict[str, str]]] = field(default_factory=list)
+
+    def post(self, url: str, body: bytes, headers: Mapping[str, str]) -> int:
+        self.sent.append((url, body, dict(headers)))
+        if self.unreachable:
+            raise WebhookUnreachable("ConnectError")
+        return self.status
+
+
+def tenant_webhooks(
+    store: UnitOfWork, clock: Clock, sender: RecordingSender | None = None
+) -> TenantWebhooks:
+    """Tenant webhook delivery for a relay in tests, with the test settings' key."""
+    return TenantWebhooks(store, secret_box(make_settings()), sender or RecordingSender(), clock)

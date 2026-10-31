@@ -14,6 +14,7 @@ from core.ports import (
     IdempotencyKey,
     ModelGateway,
     PaymentRail,
+    SecretBox,
     Telemetry,
     TenantDirectory,
     TenantId,
@@ -56,6 +57,11 @@ def get_gateway(request: Request) -> ModelGateway:
 def get_rail(request: Request) -> PaymentRail:
     rail: PaymentRail = request.app.state.rail
     return rail
+
+
+def get_secret_box(request: Request) -> SecretBox:
+    box: SecretBox = request.app.state.secret_box
+    return box
 
 
 def get_workflow(request: Request) -> Workflow:
@@ -126,4 +132,5 @@ GatewayDep = Annotated[ModelGateway, Depends(get_gateway)]
 SettingsDep = Annotated[Settings, Depends(get_app_settings)]
 RailDep = Annotated[PaymentRail, Depends(get_rail)]
 WorkflowDep = Annotated[Workflow, Depends(get_workflow)]
+SecretBoxDep = Annotated[SecretBox, Depends(get_secret_box)]
 IdemKey = Annotated[IdempotencyKey, Depends(idempotency_key)]
