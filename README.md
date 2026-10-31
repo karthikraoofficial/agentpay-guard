@@ -179,7 +179,7 @@ Settings: `AGENTPAY_INTENT_CHECK_ENABLED` (default `true`), `AGENTPAY_INTENT_CHE
 A step_up is a question to the Payer, and the loop around it is durable:
 
 1. **The Decision** returns `step_up` with a pending Consent request. In the same transaction it writes an outbox event (ADR-0009). Nothing on the hot path calls Temporal.
-2. **The worker's relay** starts a `step_up_consent` workflow for that request. The workflow notifies (one log line today), then waits for an answer or for the expiry timer: `consent_ttl_seconds` in the Policy pack, 10 minutes in `default@1.3.0`.
+2. **The worker's relay** starts a `step_up_consent` workflow for that request. The workflow notifies (a log line; a Tenant with a webhook endpoint also gets `consent_request.created`, see [Tenant webhooks](#tenant-webhooks)), then waits for an answer or for the expiry timer: `consent_ttl_seconds` in the Policy pack, 10 minutes in `default@1.3.0`.
 3. **The Payer answers** in one of two ways:
    - through the Tenant, which confirms them in its own app and calls approve or decline with a `consent` key and an attestation
    - through a hosted Consent link the Tenant delivered (ADR-0008)
@@ -212,16 +212,41 @@ X-AgentPay-Signature: t=1793460000,v1=<hex HMAC-SHA256 of "<t>.<raw body>" keyed
 
 Check the signature over the raw body before parsing it, and reject an old `t` to stop replays. Bodies hold identifiers, statuses, codes, amounts in minor units and times only: never Payer contact details, Rail token refs or free text. Delivery is at least once, so dedupe by `id`. Any non-2xx answer, or no answer within 5 seconds, is retried with backoff (30 s, doubling to at most an hour), with a last try a day after the event, then given up and logged. A Tenant with no endpoint gets nothing sent. The signing secret is stored encrypted with `AGENTPAY_WEBHOOK_ENCRYPTION_KEY` (ADR-0015).
 
+## End to end on Razorpay test mode
+
+One Payment from allow to `scheduled` on the real rail, by hand. Razorpay won't debit for 36 h 5 min and a test token expires sooner (ADR-0017), so the rest of the path, from the debit to `captured` and the Tenant's `payment.captured` webhook, is `tests/api/test_end_to_end.py` on the mock rail with the same notice period.
+
+1. **Set up.** Put the test key id, key secret and webhook secret in `.env`, register a test card with `uv run python -m adapters.razorpay.wizard` (it prints a `cust_…` and a `token_…`), then run the API with `AGENTPAY_RAIL=razorpay`. Create a Tenant with `uv run python -m api.admin create-tenant "E2E"` and keep its two keys in `$AGENT` and `$TENANT`.
+2. **Grant an INR Mandate** with that card as its Rail token, after registering a Payer and an Agent:
+
+   ```bash
+   curl -s localhost:8000/v1/mandates -H "Authorization: Bearer $TENANT" -H "Idempotency-Key: $(uuidgen)" \
+     -H "Content-Type: application/json" -d '{"payer_id":"pyr_…","allowed_agent_ids":["agt_…"],"currency":"INR",
+     "per_txn_cap":{"minor":100000,"currency":"INR"},"monthly_cap":{"minor":500000,"currency":"INR"},
+     "allowed_mccs":["5411"],"valid_from":"…","expires_at":"…",
+     "consent_evidence":{"method":"upi_mandate_ref","reference":"E2E-0001","captured_at":"…"},
+     "rail_token":{"rail":"razorpay","customer_ref":"cust_…","token_ref":"token_…","display":"visa •••• 1111"}}'
+   ```
+
+3. **Get an allow:** `POST /v1/decisions` with the agent key, `{"mandate_id","agent_id","amount":{"minor":49900,"currency":"INR"},"merchant":{"id":"m_freshmart","name":"FreshMart","mcc":"5411"}}`.
+4. **Pay it:** `POST /v1/payments` with `{"decision_id": …}`. Expect `202`, `scheduled`, and `debit_after` 36 h 5 min from now.
+5. **See it booked on Razorpay.** In the Dashboard (Test Mode) the order has our Payment id as its receipt, and about a minute later its Pre-debit notice is `delivered`. A debit tried now is refused as "not yet", and the Payment stays `scheduled`.
+6. **Check the evidence:** `uv run python -m api.admin verify --tenant <id>` reports a clean chain: the Decision, then the `scheduled` Payment.
+
+The run for #85, with ids and timings, is posted on the Phase 4 PRD (#74).
+
 ## Known limitations
 
 - **An unpaid allow keeps using cap until the Tenant voids it.** Nothing voids an allow whose Payment window closed; call `POST /v1/decisions/{id}/void`.
-- **The Declared MCC is trusted.** The merchant category the Agent states isn't yet checked against what the rail reports.
+- **The Declared MCC can never be confirmed on an acquiring rail.** As an acquirer (ADR-0013), Razorpay knows only the Merchant of record, not the merchant the Agent bought from, so the category the Agent states is trusted.
 - **Monthly caps reset at midnight UTC,** which is 05:30 IST on the 1st.
 - **Decisions within one Tenant queue briefly on that Tenant's Audit chain lock,** so per-Tenant throughput has a ceiling. Measured with every Signal on (`default@1.1.0`, medium payments citing an Intent check): p50 53 ms and p95 62 ms for one client on local Postgres. A load test against a real server is still to do.
 - **Tenant webhooks come in no guaranteed order,** and one relay sends them. A retried event can arrive after a later one for the same Consent request or Payment, so read the `status` in each body. A slow endpoint (up to the 5-second timeout per send) delays other Tenants' events in the same pass. The workflow's notify activity still writes its `consent_request.created` log line too.
 - **The expiry record lands after the timer fires,** which can be later than `expires_at` if no worker is running. Status reads `expired` from `expires_at` regardless, and a late approve or decline is refused.
 - **An approved step-up doesn't make its merchant known.** New merchant counts only allowed Decisions, so the next payment to that merchant can step up again.
-- **A Razorpay card debit can't complete in test mode.** With `AGENTPAY_RAIL=razorpay` (test keys only; the app won't start with a live key or without the key secret and webhook secret), a Payment gets its Razorpay order and Pre-debit notice, and the worker debits the card 36 h 5 min later. Test tokens expire after about 22 hours, before that, so the full flow is only exercised on the mock rail and a fake Razorpay API.
+- **Payments are scheduled, not instant.** Indian e-mandate rules need a Pre-debit notice, so on Razorpay a Payment is `scheduled` when its order and notice exist, and the worker debits the card 36 h 5 min later (`debit_after`, ADR-0017). `scheduled` means booked, not about to settle.
+- **A Razorpay card debit can't complete in test mode.** With `AGENTPAY_RAIL=razorpay` (test keys only; the app won't start with a live key or without the key secret and webhook secret), test tokens expire after about 22 hours, before the debit is allowed. So the real run stops at `scheduled` (see [End to end](#end-to-end-on-razorpay-test-mode)), and the full flow to `captured` runs on the mock rail and a fake Razorpay API.
+- **A failed Pre-debit notice leaves its Payment `scheduled`.** Razorpay can mark a notice `failed` (in test mode, after about 20 notices on one token), and then refuses the debit. The debit step reads that as "not yet" and tries again every interval, so the Payment stays `scheduled` until the token expires.
 - **Run one worker.** The debit step relies on asking Razorpay for an earlier debit before making one, so two workers could debit the same Payment twice.
 - **A Revocation in the last seconds before a debit can miss it.** The debit step re-checks the Mandate and Agent, then calls the rail without holding the Mandate, so a Revocation that lands during that call doesn't stop the debit.
 - **A debit can be up to one sweep interval late:** the debit step runs every `AGENTPAY_RECONCILE_INTERVAL_SECONDS` (5 minutes).
@@ -231,6 +256,10 @@ Check the signature over the raw body before parsing it, and reject an old `t` t
 - **New merchant has a harmless race.** Two parallel first payments to the same merchant under different Mandates can both see it as new. Both just step up.
 - **One Intent check can be cited for 30 minutes,** by any Decision on the same Mandate, Agent and merchant.
 - **Each Intent check holds a database connection while the model answers,** up to 2.5 s, so that a retry never calls the model twice.
+
+## Going live
+
+The production go-live checklist is at the end of [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md#production-go-live-checklist). For the rail it adds live Razorpay keys, UPI Reserve Pay, a Razorpay Route account per Tenant, and refunds.
 
 ## Proving a Decision
 

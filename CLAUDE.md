@@ -24,7 +24,7 @@ Read the relevant PRD and ticket before changing code. docs/BUILD-PLAN.md is the
 
 Run from the repo root. These are the same commands CI runs.
 
-- Setup: `uv sync`, then `cp .env.example .env` (set `AGENTPAY_ANTHROPIC_API_KEY`, or `AGENTPAY_INTENT_CHECK_ENABLED=false`; outside `env=test` the app won't start with neither; Tenant webhooks also need `AGENTPAY_WEBHOOK_ENCRYPTION_KEY`, see `.env.example`)
+- Setup: `uv sync`, then `cp .env.example .env` (set `AGENTPAY_ANTHROPIC_API_KEY`, or `AGENTPAY_INTENT_CHECK_ENABLED=false`; outside `env=test` the app won't start with neither; Tenant webhooks also need `AGENTPAY_WEBHOOK_ENCRYPTION_KEY`, see `.env.example`). The rail is `mock` by default and needs no account; `AGENTPAY_RAIL=razorpay` needs the Razorpay test key id, key secret and webhook secret, and only `rzp_test_` keys are accepted
 - Local infra: `docker compose -f infra/docker-compose.yml up -d`
 - Run the API: `uv run uvicorn api.main:asgi_app --factory --reload` (health: `/healthz`, docs: `/docs`)
 - Run the consent worker (Temporal workflow, activities, outbox relay, and the Payment debit step and reconciliation sweep, which are off on the mock rail; needs local infra): `uv run python -m workflows.worker`
@@ -40,6 +40,7 @@ Run from the repo root. These are the same commands CI runs.
 - Latency budgets: `uv run pytest -m perf -s -o addopts=""` (skipped by the default `pytest` run; CI runs them)
 - Consent workflow on Temporal: `uv run pytest -m workflow -o addopts=""` (downloads Temporal's test and dev servers on first use; skipped by the default `pytest` run; CI runs it)
 - Tests: `uv run pytest` (needs local infra up and `.env`; tests create their own `<database>_test`)
+- End-to-end Payment, allow to captured (mock rail, part of `pytest`): `uv run pytest tests/api/test_end_to_end.py`; the real Razorpay half is the runbook in the README
 - Contract tests against real vendor APIs: `uv run pytest -m contract -o addopts=""` (not in CI; skip without the vendor key)
 - Register a Razorpay test card for those contract tests (prints the two `AGENTPAY_RAZORPAY_TEST_*` refs for `.env`; test tokens expire within about a day, so re-run before each contract run): `uv run python -m adapters.razorpay.wizard`
 - Web: `cd web && npm ci && npm run lint && npm run typecheck && npm run build` (CI runs the same in its `web` job)
