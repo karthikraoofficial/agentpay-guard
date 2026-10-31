@@ -15,6 +15,7 @@ from core.reconcile import sweep
 from tests.api.conftest import Api
 from tests.api.test_payments import Payments
 from tests.api.test_rail_webhooks import SECRET, Webhooks, event
+from tests.api.test_tenant_webhooks import Hooks
 from tests.conftest import make_settings
 from tests.packs import phase_1_packs
 
@@ -152,6 +153,31 @@ def test_a_mandate_revoked_or_agent_disabled_in_the_notice_period_stops_the_debi
         "scheduled",
         "failed",
     ]
+
+
+def test_a_failed_notice_fails_the_payment_voids_its_decision_and_tells_the_tenant(
+    api: Api, tmp_path: Path
+) -> None:
+    api.rail = CountsDebits(api)
+    api.use_packs(phase_1_packs(tmp_path))
+    hooks = Hooks(api, rail_token=MockRail.token_whose_notice_fails())
+    hooks.register()
+    payment = paid(hooks)
+    api.clock.advance(NOTICE)
+
+    step(api)
+    step(api)
+
+    failed = status(hooks, payment)
+    assert (failed["status"], failed["failure_code"]) == ("failed", "RAIL_NOTICE_FAILED")
+    assert failed["rail_payment_id"] is None
+    assert hooks.charges(payment["payment_id"]) == 0
+    chain = hooks.chain()
+    assert [r.kind for r in chain].count("void") == 1
+    assert [r.payment.status for r in chain if r.kind == "payment"] == ["scheduled", "failed"]
+    hooks.relay()
+    [sent] = [body for body, _, _ in hooks.received() if body["type"] == "payment.failed"]
+    assert sent["data"]["failure_code"] == "RAIL_NOTICE_FAILED"
 
 
 def test_a_webhook_and_the_debit_step_give_one_transition(api: Api, tmp_path: Path) -> None:

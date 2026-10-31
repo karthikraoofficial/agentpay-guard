@@ -5,6 +5,8 @@ returned when probed:
   includes it.
 - An order's notification sets `payment_after` to 36 h 5 min after the order (ADR-0017).
 - A notification for a token Razorpay doesn't know is a 400 `BAD_REQUEST_ERROR`.
+- A notice can be marked `failed` (seen on a token with many open notices, #85); every
+  recurring payment on that order then fails `pre_debit_notification_failed`.
 - A recurring payment before the notice is delivered fails `pre_debit_notification_failed`;
   after delivery but before `payment_after`, `input_validation_failed` ("Debit can be
   attempted 36 hours after..."). Neither creates a payment.
@@ -41,6 +43,8 @@ class FakeRazorpay:
     now: int = CREATED_AT
     notice_delivered: bool = True
     refuse_debits: bool = False
+    # Tokens whose notices Razorpay marks failed, just after the order is made.
+    failed_notices: set[str] = field(default_factory=set)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def transport(self) -> httpx.MockTransport:
@@ -128,13 +132,17 @@ class FakeRazorpay:
         if self.times_out_after_creating:
             self.times_out_after_creating = False
             raise httpx.ReadTimeout("fake timeout after creating the order")
+        if token in self.failed_notices:  # sent after the answer, then marked failed
+            answer = order | {"notification": order["notification"] | {"status": "pending"}}
+            order["notification"]["status"] = "failed"
+            return httpx.Response(200, json=answer)
         return httpx.Response(200, json=order)
 
     def _debit(self, body: dict[str, Any]) -> httpx.Response:
         order = next((o for o in self.orders if o["id"] == body["order_id"]), None)
         if order is None or order["notification"]["token_id"] != body["token"]:
             return _error(400, "BAD_REQUEST_ERROR", "input_validation_failed")
-        if not self.notice_delivered:
+        if not self.notice_delivered or order["notification"]["status"] == "failed":
             return _error(400, "BAD_REQUEST_ERROR", "pre_debit_notification_failed")
         if self.now < order["notification"]["payment_after"]:
             return _error(
