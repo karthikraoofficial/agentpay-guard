@@ -5,6 +5,7 @@ settles hours later (ADR-0013). Charges are keyed by Payment id (ADR-0014).
 """
 
 import threading
+from datetime import timedelta
 
 from core.domain.money import Money
 from core.domain.parties import TenantId
@@ -21,6 +22,8 @@ _FAILURE_CODE = "BAD_REQUEST_ERROR"  # Razorpay's code for a declined debit
 
 
 class MockRail:
+    lookup_lag = timedelta(0)  # its charges are in a dict, seen at once
+
     def __init__(self) -> None:
         self._charges: dict[tuple[TenantId, PaymentId], RailCharge] = {}
         self._tokens: dict[tuple[TenantId, PaymentId], RailToken] = {}

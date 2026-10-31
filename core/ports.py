@@ -16,7 +16,7 @@ Store. Later PRDs may refine any of them.
 from collections.abc import Mapping
 from collections.abc import Set as AbstractSet
 from contextlib import AbstractContextManager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
@@ -84,6 +84,9 @@ class RailCharge(_Frozen):
     amount: Money
     rail_payment_id: str | None = None
     failure_code: str | None = None
+    # The earliest the rail lets the debit happen, once the Pre-debit notice period ends
+    # (ADR-0017). None when there is no such wait, as on the mock rail.
+    debit_after: datetime | None = None
 
 
 class RailUnavailable(Exception):
@@ -94,6 +97,11 @@ class RailUnavailable(Exception):
 class PaymentRail(Protocol):
     """Moves money. Only reached for a payable Decision. Charges are keyed by our Payment id,
     so scheduling the same Payment again never makes a second charge (ADR-0014)."""
+
+    # How long a new charge may take to show up when the rail is asked about its Payment
+    # again. A rail that finds charges through a search index can miss one made moments
+    # ago and make a second, so nothing asks it about a Payment younger than this.
+    lookup_lag: timedelta
 
     def schedule_charge(
         self,

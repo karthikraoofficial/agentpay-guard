@@ -48,9 +48,37 @@ def test_the_rail_is_the_mock_unless_chosen() -> None:
     assert make_settings().rail == "mock"
 
 
-def test_razorpay_cannot_be_chosen_before_its_adapter_exists() -> None:
-    with pytest.raises(ValidationError, match="AGENTPAY_RAIL=razorpay is not available yet"):
-        make_settings(rail="razorpay")
+RAZORPAY = {
+    "rail": "razorpay",
+    "razorpay_key_id": "rzp_test_AbCdEf123456",
+    "razorpay_key_secret": "rzp-secret-do-not-print",
+    "razorpay_webhook_secret": "whsec-do-not-print",
+}
+
+
+def test_razorpay_runs_with_a_test_key_and_both_secrets() -> None:
+    settings = make_settings(**RAZORPAY)
+
+    assert settings.rail == "razorpay"
+    assert "rzp-secret-do-not-print" not in repr(settings)
+    assert "whsec-do-not-print" not in repr(settings)
+
+
+@pytest.mark.parametrize(
+    "missing", ["razorpay_key_id", "razorpay_key_secret", "razorpay_webhook_secret"]
+)
+def test_razorpay_refuses_to_start_without_each_value(missing: str) -> None:
+    values = {k: v for k, v in RAZORPAY.items() if k != missing}
+
+    with pytest.raises(ValidationError, match=f"AGENTPAY_{missing.upper()}"):
+        make_settings(**values)
+
+
+@pytest.mark.parametrize("rail", ["razorpay", "mock"])
+@pytest.mark.parametrize("key_id", ["rzp_live_AbCdEf123456", "AbCdEf123456"])
+def test_a_key_that_is_not_a_test_key_is_refused_on_any_rail(rail: str, key_id: str) -> None:
+    with pytest.raises(ValidationError, match="test key"):
+        make_settings(**{**RAZORPAY, "rail": rail, "razorpay_key_id": key_id})
 
 
 def test_an_unknown_rail_is_refused() -> None:

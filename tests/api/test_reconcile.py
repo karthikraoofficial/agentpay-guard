@@ -14,7 +14,7 @@ from core.domain.payments import PaymentId
 from core.ports import TenantId
 from core.reconcile import sweep
 from tests.api.conftest import Api
-from tests.api.test_payments import CrashesBeforeCharging, Payments
+from tests.api.test_payments import CrashesBeforeCharging, LagsTwoMinutes, Payments
 from tests.api.test_rail_webhooks import SECRET, Webhooks, event
 from tests.conftest import make_settings
 from tests.packs import phase_1_packs
@@ -217,6 +217,22 @@ def test_a_late_retry_leaves_a_payment_the_rail_never_saw_to_the_sweep(
     assert payments.payment(late.json()["payment_id"]).json()["status"] == "failed"
 
 
+def test_the_sweep_waits_out_the_rails_lookup_lag(api: Api, tmp_path: Path) -> None:
+    api.rail = LagsTwoMinutes()
+    api.use_packs(phase_1_packs(tmp_path))
+    payments = Payments(api)
+    payment = paid(payments)
+    settle(payments, payment)
+    api.clock.advance(timedelta(seconds=90))
+
+    sweep(api.store, api.rail, api.clock, older_than=timedelta(seconds=60))
+
+    assert payments.payment(payment["payment_id"]).json()["status"] == "scheduled"
+    api.clock.advance(timedelta(seconds=31))
+    sweep(api.store, api.rail, api.clock, older_than=timedelta(seconds=60))
+    assert payments.payment(payment["payment_id"]).json()["status"] == "captured"
+
+
 def test_the_sweep_finds_payments_in_every_tenant(payments: Payments) -> None:
     other = Payments(payments.api, "other")
     mine, theirs = paid(payments), paid(other)
@@ -269,3 +285,17 @@ def test_the_worker_does_not_sweep_the_mock_rail() -> None:
     from workflows import worker
 
     assert worker.sweep_rail(make_settings(rail="mock")) is None
+
+
+def test_the_worker_sweeps_razorpay() -> None:
+    from adapters.razorpay.rail import RazorpayRail
+    from workflows import worker
+
+    settings = make_settings(
+        rail="razorpay",
+        razorpay_key_id="rzp_test_AbCdEf123456",
+        razorpay_key_secret="rzp-secret",  # noqa: S106
+        razorpay_webhook_secret="whsec",  # noqa: S106
+    )
+
+    assert isinstance(worker.sweep_rail(settings), RazorpayRail)
