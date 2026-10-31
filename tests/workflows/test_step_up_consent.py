@@ -34,7 +34,7 @@ from api.main import create_app
 from core.domain.consent import ConsentRequestId
 from core.domain.decisions import decision_time
 from core.relay import relay_once
-from tests.api.conftest import NOW, Api, MovableClock
+from tests.api.conftest import NOW, Api, MovableClock, tenant_webhooks
 from tests.api.test_consent_approve import Approvals
 from tests.conftest import make_settings
 from tests.packs import phase_1_packs, release_test_pack
@@ -59,7 +59,7 @@ def approvals(migrated_database_url: str, tmp_path: Path) -> Iterator[Approvals]
     api = Api(TestClient(app), store, clock, workflow=workflow)
     # Other tests' outbox events share this database: deliver them to a fake first, so
     # a worker's relay here starts only this test's workflows.
-    relay_once(store, InMemoryWorkflow(), clock, limit=EVERYTHING)
+    relay_once(store, InMemoryWorkflow(), clock, tenant_webhooks(store, clock), limit=EVERYTHING)
     yield Approvals(api)
     api.assert_evidence_holds()
 
@@ -131,7 +131,7 @@ def live(migrated_database_url: str, tmp_path: Path) -> Iterator[Approvals]:
         make_settings(policy_packs_dir=packs), store=store, clock=clock, workflow=workflow
     )
     api = Api(TestClient(app), store, clock, workflow=workflow, packs=packs)
-    relay_once(store, InMemoryWorkflow(), clock, limit=EVERYTHING)
+    relay_once(store, InMemoryWorkflow(), clock, tenant_webhooks(store, clock), limit=EVERYTHING)
     approvals = Approvals(api)
     now = clock.now()
     approvals.mandate_id = approvals.create(

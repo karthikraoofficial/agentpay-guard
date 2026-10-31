@@ -16,6 +16,7 @@ from core.domain.consent import (
 from core.domain.decisions import AuditRecordId, EngineOutput, PackRef
 from core.domain.parties import new_id
 from core.ports import TenantTransaction
+from core.tenant_events import consent_request_resolved
 
 
 def record_resolution(
@@ -66,4 +67,5 @@ def record_resolution(
     )
     tx.add_consent_resolution(resolution)
     tx.append_audit_record(sealed)
+    tx.publish(consent_request_resolved(resolution))
     return resolution

@@ -19,11 +19,14 @@ from temporalio.worker import Worker
 from adapters.postgres.store import PostgresStore
 from adapters.rails import build_rail
 from adapters.system_clock import SystemClock
+from adapters.webhooks.secret_box import secret_box
+from adapters.webhooks.sender import HttpWebhookSender
 from core.debits import run_debit_step
 from core.ports import Clock, EventBus, PaymentRail, UnitOfWork
 from core.reconcile import SweepStore, sweep
 from core.relay import relay_once
 from core.settings import Settings, get_settings
+from core.tenant_webhooks import TenantWebhooks
 from workflows.activities import ConsentActivities
 from workflows.client import TemporalWorkflow
 from workflows.consent import StepUpConsent
@@ -45,13 +48,19 @@ def consent_worker(
 
 
 async def relay_forever(
-    bus: EventBus, client: Client, task_queue: str, clock: Clock, interval_seconds: float
+    bus: EventBus,
+    client: Client,
+    task_queue: str,
+    clock: Clock,
+    webhooks: TenantWebhooks,
+    interval_seconds: float,
 ) -> None:
-    """Deliver outbox events until cancelled. The relay is synchronous, so each pass runs
-    in a thread and reaches this loop's client through the port."""
+    """Deliver outbox events until cancelled: workflow starts and Tenant webhooks. The
+    relay is synchronous, so each pass runs in a thread and reaches this loop's client
+    through the port."""
     port = TemporalWorkflow.for_client(client, asyncio.get_running_loop(), task_queue)
     while True:
-        delivered = await asyncio.to_thread(relay_once, bus, port, clock)
+        delivered = await asyncio.to_thread(relay_once, bus, port, clock, webhooks)
         if delivered:
             log.info("outbox relay delivered %d event(s)", delivered)
         await asyncio.sleep(interval_seconds)
@@ -103,6 +112,7 @@ async def main() -> None:
                     client,
                     settings.temporal_task_queue,
                     clock,
+                    TenantWebhooks(store, secret_box(settings), HttpWebhookSender(), clock),
                     settings.outbox_poll_interval_ms / 1000,
                 )
             ]

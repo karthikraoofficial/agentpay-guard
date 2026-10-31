@@ -13,7 +13,7 @@ import pytest
 from adapters.memory.clock import FixedClock
 from core.ports import DomainEvent
 from core.relay import relay_once
-from tests.api.conftest import NOW, Api
+from tests.api.conftest import NOW, Api, tenant_webhooks
 from tests.api.test_consent_approve import Approvals, inr
 from tests.packs import phase_1_packs
 
@@ -30,7 +30,8 @@ EVERYTHING = 100_000
 
 
 def _relay(api: Api) -> None:
-    relay_once(api.store, api.workflow, FixedClock(NOW), limit=EVERYTHING)
+    clock = FixedClock(NOW)
+    relay_once(api.store, api.workflow, clock, tenant_webhooks(api.store, clock), limit=EVERYTHING)
 
 
 def _waiting(approvals: Approvals) -> list[DomainEvent]:
@@ -43,9 +44,12 @@ def test_a_step_up_writes_one_consent_requested_event(approvals: Approvals) -> N
 
     events = _waiting(approvals)
 
-    assert [(e.tenant_id, e.event_type) for e in events] == [
-        (approvals.api.tenant_of(approvals.tenant), "consent_requested")
+    tenant = approvals.api.tenant_of(approvals.tenant)
+    assert sorted((e.tenant_id, e.event_type) for e in events) == [
+        (tenant, "consent_request.created"),  # for the Tenant's webhook endpoint
+        (tenant, "consent_requested"),
     ]
+    events = [e for e in events if e.event_type == "consent_requested"]
     assert events[0].payload == {
         "consent_request_id": decision["step_up"]["consent_request_id"],
         "expires_at": "2026-11-02T09:40:00Z",

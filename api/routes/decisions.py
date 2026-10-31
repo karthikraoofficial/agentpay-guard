@@ -48,6 +48,7 @@ from core.domain.voids import VoidVia, void_refusal
 from core.policy.engine import decide
 from core.policy.pack import PolicyPack
 from core.ports import DomainEvent, Telemetry, TenantId, TenantTransaction
+from core.tenant_events import consent_request_created
 from core.voids import record_void
 
 router = APIRouter(prefix="/v1/decisions", tags=["decisions"])
@@ -277,6 +278,7 @@ def create_decision(
                     },
                 )
             )
+            tx.publish(consent_request_created(consent))
         tx.append_audit_record(sealed)
         # Identifiers and codes only: no merchant name, line items or Agent reasoning.
         span.set_attribute("decision_id", decision.decision_id)

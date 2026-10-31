@@ -37,6 +37,7 @@ from adapters.postgres.tables import (
     tenant_chain_heads,
     tenants,
     voids,
+    webhook_endpoints,
 )
 from core.domain.audit import ZERO_HASH, SealedAuditRecord, StoredAuditRow, unseal
 from core.domain.consent import (
@@ -64,6 +65,7 @@ from core.domain.parties import (
 from core.domain.payments import Payment, PaymentId, RailEvent
 from core.domain.rails import RailToken
 from core.domain.voids import Void
+from core.domain.webhooks import WebhookEndpoint
 from core.ports import DomainEvent, EventBus, TenantDirectory, TenantId, UnitOfWork
 
 
@@ -480,6 +482,23 @@ class PostgresTransaction:
             updated_at=row["updated_at"],
         )
 
+    def get_webhook_endpoint(self) -> WebhookEndpoint | None:
+        query = select(webhook_endpoints).where(webhook_endpoints.c.tenant_id == self._tenant_id)
+        row = self._conn.execute(query).mappings().one_or_none()
+        return None if row is None else WebhookEndpoint.model_validate(dict(row))
+
+    def save_webhook_endpoint(self, endpoint: WebhookEndpoint) -> None:
+        self._own(endpoint.tenant_id)
+        values = endpoint.model_dump()
+        self._conn.execute(
+            pg_insert(webhook_endpoints)
+            .values(**values)
+            .on_conflict_do_update(
+                index_elements=[webhook_endpoints.c.tenant_id],
+                set_={k: v for k, v in values.items() if k not in ("tenant_id", "created_at")},
+            )
+        )
+
     def get_decision(self, decision_id: DecisionId) -> Decision | None:
         row = (
             self._conn.execute(
@@ -719,11 +738,18 @@ class PostgresStore:
         # Payment ids are random, so two Tenants never share one; refuse to guess if they do.
         return TenantId(found[0]) if len(found) == 1 else None
 
-    def undelivered(self, limit: int) -> list[DomainEvent]:
+    def undelivered(
+        self,
+        limit: int,
+        now: datetime | None = None,
+        event_types: AbstractSet[str] | None = None,
+    ) -> list[DomainEvent]:
         o = outbox_events.c
+        due = [] if now is None else [or_(o.next_attempt_at.is_(None), o.next_attempt_at <= now)]
+        kinds = [] if event_types is None else [o.event_type.in_(sorted(event_types))]
         query = (
             select(outbox_events)
-            .where(o.delivered_at.is_(None))
+            .where(o.delivered_at.is_(None), *due, *kinds)
             .order_by(o.occurred_at, o.event_id)
             .limit(limit)
         )
@@ -736,6 +762,7 @@ class PostgresStore:
                 event_type=r["event_type"],
                 occurred_at=r["occurred_at"],
                 payload=r["payload"],
+                attempts=r["attempts"],
             )
             for r in rows
         ]
@@ -747,6 +774,24 @@ class PostgresStore:
                 update(outbox_events)
                 .where(o.tenant_id == tenant_id, o.event_id == event_id)
                 .values(delivered_at=at)
+            )
+
+    def retry_later(self, tenant_id: TenantId, event_id: str, at: datetime) -> None:
+        o = outbox_events.c
+        with self._engine.begin() as conn:
+            conn.execute(
+                update(outbox_events)
+                .where(o.tenant_id == tenant_id, o.event_id == event_id)
+                .values(attempts=o.attempts + 1, next_attempt_at=at)
+            )
+
+    def give_up(self, tenant_id: TenantId, event_id: str, at: datetime) -> None:
+        o = outbox_events.c
+        with self._engine.begin() as conn:
+            conn.execute(
+                update(outbox_events)
+                .where(o.tenant_id == tenant_id, o.event_id == event_id)
+                .values(delivered_at=at, gave_up=True)
             )
 
 

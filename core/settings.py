@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     razorpay_key_secret: SecretStr | None = None
     # Signs Razorpay's webhooks (#81). Without it every inbound rail webhook is refused.
     razorpay_webhook_secret: SecretStr | None = None
+    # Encrypts Tenant webhook signing secrets at rest (ADR-0015): a Fernet key, made with
+    # `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+    # Without it no webhook endpoint can be registered and no Tenant webhook is sent.
+    webhook_encryption_key: SecretStr | None = None
     # A registered test card, for the rail contract tests only. Printed by
     # `python -m adapters.razorpay.wizard`; Razorpay expires it within about a day.
     razorpay_test_customer_ref: str | None = None

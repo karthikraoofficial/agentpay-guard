@@ -48,6 +48,7 @@ from core.domain.parties import TenantId as TenantId  # re-exported for adapters
 from core.domain.payments import Payment, PaymentId, RailEvent
 from core.domain.rails import RailToken
 from core.domain.voids import Void
+from core.domain.webhooks import TenantEventType, WebhookEndpoint
 
 AttributeValue = str | int | float | bool
 Attributes = Mapping[str, AttributeValue]
@@ -203,8 +204,9 @@ class ModelGateway(Protocol):
 # --- UnitOfWork ----------------------------------------------------------------
 
 
-# Events the outbox carries. One for now: a step_up created a Consent request.
-EventType = Literal["consent_requested"]
+# Events the outbox carries: a step_up's Consent request, for its workflow, and the
+# Tenant webhook events, for the Tenant's endpoint.
+EventType = Literal["consent_requested"] | TenantEventType
 
 
 class DomainEvent(_Frozen):
@@ -212,8 +214,11 @@ class DomainEvent(_Frozen):
     tenant_id: TenantId
     event_type: EventType
     occurred_at: datetime
-    # Identifiers and timestamps only, as strings: never personal data or free text.
-    payload: Mapping[str, str]
+    # Identifiers, statuses, codes, amounts in minor units and timestamps only: never
+    # personal data, Rail token refs or free text.
+    payload: Mapping[str, str | int | None]
+    # Failed sends so far; only Tenant webhook events are retried with backoff.
+    attempts: int = 0
 
 
 class TenantTransaction(Protocol):
@@ -354,6 +359,14 @@ class TenantTransaction(Protocol):
 
     def get_decision(self, decision_id: DecisionId) -> Decision | None: ...
 
+    def get_webhook_endpoint(self) -> WebhookEndpoint | None:
+        """The Tenant's webhook endpoint, if it registered one."""
+        ...
+
+    def save_webhook_endpoint(self, endpoint: WebhookEndpoint) -> None:
+        """Register the Tenant's endpoint, or replace it: a Tenant has at most one."""
+        ...
+
     def lock_chain_head(self) -> tuple[int, str]:
         """The Tenant's last Audit record (seq, record_hash), held until this transaction
         ends; (0, ZERO_HASH) before the first record."""
@@ -444,11 +457,49 @@ class EventBus(Protocol):
     `undelivered` is the one read here not scoped to a Tenant, like TenantDirectory's key
     lookup, because the relay finds work for every Tenant. Every write is scoped."""
 
-    def undelivered(self, limit: int) -> list[DomainEvent]:
-        """Events not yet delivered, oldest first."""
+    def undelivered(
+        self,
+        limit: int,
+        now: datetime | None = None,
+        event_types: AbstractSet[str] | None = None,
+    ) -> list[DomainEvent]:
+        """Events not yet delivered nor given up, oldest first. With `now`, only those
+        due by then: an event put off by `retry_later` waits until its time. With
+        `event_types`, only events of those types."""
         ...
 
     def mark_delivered(self, tenant_id: TenantId, event_id: str, at: datetime) -> None: ...
+
+    def retry_later(self, tenant_id: TenantId, event_id: str, at: datetime) -> None:
+        """Count a failed send and put the event off until `at`."""
+        ...
+
+    def give_up(self, tenant_id: TenantId, event_id: str, at: datetime) -> None:
+        """Stop trying to deliver the event."""
+        ...
+
+
+# --- Tenant webhooks ----------------------------------------------------------
+
+
+class SecretBox(Protocol):
+    """Encrypts a secret we must use again later, such as a Tenant webhook signing
+    secret, with a key from settings (ADR-0015)."""
+
+    def encrypt(self, secret: str) -> str: ...
+
+    def decrypt(self, ciphertext: str) -> str: ...
+
+
+class WebhookUnreachable(Exception):
+    """The endpoint couldn't be reached: a timeout, refused connection or bad TLS."""
+
+
+class WebhookSender(Protocol):
+    """Posts a Tenant webhook. Returns the HTTP status, or raises `WebhookUnreachable`.
+    Never logs the body or headers."""
+
+    def post(self, url: str, body: bytes, headers: Mapping[str, str]) -> int: ...
 
 
 # --- Workflow ------------------------------------------------------------------

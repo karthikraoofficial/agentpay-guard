@@ -11,6 +11,7 @@ from core.domain.decisions import AuditRecordId
 from core.domain.parties import new_id
 from core.domain.payments import Payment, PaymentId
 from core.ports import RailCharge, TenantTransaction
+from core.tenant_events import payment_settled
 from core.voids import record_void
 
 log = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ def record_charge(
     tx.update_payment(moved)
     if moved.status != payment.status:
         _audit(tx, moved, now)
+        tx.publish(payment_settled(moved, now))
     return moved
 
 
