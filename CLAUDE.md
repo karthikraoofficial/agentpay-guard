@@ -41,6 +41,7 @@ Run from the repo root. These are the same commands CI runs.
 - Consent workflow on Temporal: `uv run pytest -m workflow -o addopts=""` (downloads Temporal's test and dev servers on first use; skipped by the default `pytest` run; CI runs it)
 - Tests: `uv run pytest` (needs local infra up and `.env`; tests create their own `<database>_test`)
 - Contract tests against real vendor APIs: `uv run pytest -m contract -o addopts=""` (not in CI; skip without the vendor key)
+- Register a Razorpay test card for those contract tests (prints the two `AGENTPAY_RAZORPAY_TEST_*` refs for `.env`; test tokens expire within about a day, so re-run before each contract run): `uv run python -m adapters.razorpay.wizard`
 - Web: `cd web && npm ci && npm run lint && npm run typecheck && npm run build` (CI runs the same in its `web` job)
 
 ## How to work

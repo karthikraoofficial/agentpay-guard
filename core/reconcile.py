@@ -37,7 +37,8 @@ class SweepResult:
 
 def sweep(store: SweepStore, rail: PaymentRail, clock: Clock, older_than: timedelta) -> SweepResult:
     now = decision_time(clock.now())
-    due = store.scheduled_payments(created_before=now - older_than)
+    # Never sooner than the rail can see a new charge, or it would fail one it just made.
+    due = store.scheduled_payments(created_before=now - max(older_than, rail.lookup_lag))
     errors = 0
     for tenant_id, payment_id in due:
         try:

@@ -19,6 +19,7 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-http>=1.28",
     "anthropic>=1.0",
     "temporalio>=1.35",
+    "httpx>=0.28",
 ]
 
 [dependency-groups]
@@ -26,7 +27,6 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "pytest>=8.3",
-    "httpx>=0.28",
     "types-pyyaml>=6.0.12.20260906",
 ]
 

@@ -69,13 +69,29 @@ class Settings(BaseSettings):
     reconcile_interval_seconds: int = Field(default=300, gt=0)
     # At least a minute, so the sweep never fails a Payment whose rail call is in flight.
     reconcile_after_seconds: int = Field(default=600, ge=60)
+    # The one Razorpay test-mode account every Tenant charges through (ADR-0012). All three
+    # are required with AGENTPAY_RAIL=razorpay, and only a test key is ever accepted.
+    razorpay_key_id: str | None = None
+    razorpay_key_secret: SecretStr | None = None
     # Signs Razorpay's webhooks (#81). Without it every inbound rail webhook is refused.
     razorpay_webhook_secret: SecretStr | None = None
+    # A registered test card, for the rail contract tests only. Printed by
+    # `python -m adapters.razorpay.wizard`; Razorpay expires it within about a day.
+    razorpay_test_customer_ref: str | None = None
+    razorpay_test_token_ref: str | None = None
 
     @model_validator(mode="after")
-    def _rail_available(self) -> "Settings":
+    def _razorpay_test_mode_only(self) -> "Settings":
+        if self.razorpay_key_id is not None and not self.razorpay_key_id.startswith("rzp_test_"):
+            raise ValueError("AGENTPAY_RAZORPAY_KEY_ID must be a test key (rzp_test_...)")
         if self.rail == "razorpay":
-            raise ValueError("AGENTPAY_RAIL=razorpay is not available yet; use mock")
+            missing = [
+                f"AGENTPAY_{name.upper()}"
+                for name in ("razorpay_key_id", "razorpay_key_secret", "razorpay_webhook_secret")
+                if getattr(self, name) is None
+            ]
+            if missing:
+                raise ValueError(f"AGENTPAY_RAIL=razorpay needs {', '.join(missing)}")
         return self
 
     @model_validator(mode="after")

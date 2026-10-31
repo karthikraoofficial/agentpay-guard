@@ -142,7 +142,7 @@ def create_payment(
         if made:
             payment, rail_token = made[0]
         elif first.headers.get(REPLAYED) and (
-            unanswered := _unanswered(store, tenant, first, clock, settings)
+            unanswered := _unanswered(store, tenant, first, clock, settings, rail)
         ):
             payment, rail_token = unanswered
         else:
@@ -151,12 +151,19 @@ def create_payment(
 
 
 def _unanswered(
-    store: StoreDep, tenant: TenantId, replay: Response, clock: ClockDep, settings: SettingsDep
+    store: StoreDep,
+    tenant: TenantId,
+    replay: Response,
+    clock: ClockDep,
+    settings: SettingsDep,
+    rail: PaymentRail,
 ) -> tuple[Payment, RailToken] | None:
     """The Payment a replayed response is for, if the rail has not answered for it yet and
-    a retry may still ask. Only in the first half of the reconciliation age: after that the
-    sweep owns the Payment, and may fail one the rail never saw, so a retry asking the rail
-    to charge then could charge a Payment the sweep is failing (#82)."""
+    a retry may still ask. Not before the rail's lookup lag: until then the rail might not
+    find the charge it made and make a second. And only in the first half of the
+    reconciliation age: after that the sweep owns the Payment, and may fail one the rail
+    never saw, so a retry asking the rail to charge then could charge a Payment the sweep
+    is failing (#82)."""
     shown = PaymentOut.model_validate_json(bytes(replay.body))
     if shown.status != "scheduled" or shown.rail_payment_id is not None:
         return None
@@ -168,7 +175,7 @@ def _unanswered(
     if payment.status != "scheduled" or payment.rail_payment_id is not None:
         return None  # answered since the response was kept
     retry_until = payment.created_at + timedelta(seconds=settings.reconcile_after_seconds / 2)
-    if clock.now() >= retry_until:
+    if not payment.created_at + rail.lookup_lag <= clock.now() < retry_until:
         return None
     return payment, mandate.rail_token
 

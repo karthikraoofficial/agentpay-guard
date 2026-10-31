@@ -345,6 +345,42 @@ def test_a_retry_after_a_crash_before_the_rail_call_charges_once(api: Api, tmp_p
     assert payments.charges(payment["payment_id"]) == 1
 
 
+class LagsTwoMinutes(MockRail):
+    """A rail whose lookups may miss a charge for two minutes, as Razorpay's order search
+    does, counting every time it is asked to schedule."""
+
+    lookup_lag = timedelta(minutes=2)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.asked = 0
+
+    def schedule_charge(self, *args: Any, **kwargs: Any):  # type: ignore[no-untyped-def]
+        self.asked += 1
+        return super().schedule_charge(*args, **kwargs)
+
+
+def test_a_retry_never_asks_a_rail_again_before_its_lookups_catch_up(
+    api: Api, tmp_path: Path
+) -> None:
+    api.rail = LagsTwoMinutes()
+    api.use_packs(phase_1_packs(tmp_path))
+    payments = Payments(api, rail_token=MockRail.token_that_times_out())
+    decision = payments.allow()
+    first = payments.pay(decision["decision_id"], key="pay-1").json()
+
+    api.clock.advance(timedelta(seconds=119))
+    soon = payments.pay(decision["decision_id"], key="pay-1")
+    api.clock.advance(timedelta(seconds=1))
+    later = payments.pay(decision["decision_id"], key="pay-1").json()
+
+    assert soon.headers["Idempotent-Replayed"] == "true"
+    assert soon.json() == first
+    assert api.rail.asked == 2  # the first call, then once the two minutes had passed
+    assert later["rail_payment_id"].startswith("pay_mock_")
+    assert payments.charges(first["payment_id"]) == 1
+
+
 def test_a_refused_debit_fails_the_payment_with_the_rails_code(api: Api, tmp_path: Path) -> None:
     api.use_packs(phase_1_packs(tmp_path))
     payments = Payments(api, rail_token=MockRail.token_that_is_refused())
@@ -420,3 +456,16 @@ def test_two_concurrent_payments_of_one_decision_give_one_202_and_one_409(
     assert sorted(statuses) == [202, 409]
     assert rail.charges_made == 1
     api.assert_evidence_holds()
+
+
+def test_the_app_charges_through_razorpay_when_it_is_the_rail() -> None:
+    from adapters.razorpay.rail import RazorpayRail
+
+    settings = make_settings(
+        rail="razorpay",
+        razorpay_key_id="rzp_test_AbCdEf123456",
+        razorpay_key_secret="rzp-secret",  # noqa: S106
+        razorpay_webhook_secret="whsec",  # noqa: S106
+    )
+
+    assert isinstance(create_app(settings).state.rail, RazorpayRail)

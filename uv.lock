@@ -10,6 +10,7 @@ dependencies = [
     { name = "alembic" },
     { name = "anthropic" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
@@ -24,7 +25,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "ruff" },
@@ -36,6 +36,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.14" },
     { name = "anthropic", specifier = ">=1.0" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "opentelemetry-api", specifier = ">=1.28" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.28" },
     { name = "opentelemetry-sdk", specifier = ">=1.28" },
@@ -50,7 +51,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.28" },
     { name = "mypy", specifier = ">=1.13" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "ruff", specifier = ">=0.8" },

@@ -17,6 +17,7 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from adapters.postgres.store import PostgresStore
+from adapters.rails import build_rail
 from adapters.system_clock import SystemClock
 from core.ports import Clock, EventBus, PaymentRail, UnitOfWork
 from core.reconcile import SweepStore, sweep
@@ -61,7 +62,7 @@ def sweep_rail(settings: Settings) -> PaymentRail | None:
     and the sweep would wrongly fail every Payment."""
     if settings.rail == "mock":
         return None
-    raise RuntimeError(f"no PaymentRail adapter for {settings.rail} yet (#83)")
+    return build_rail(settings)
 
 
 async def sweep_forever(

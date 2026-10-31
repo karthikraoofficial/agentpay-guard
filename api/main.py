@@ -11,9 +11,9 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from adapters.claude.gateway import ClaudeGateway
 from adapters.memory.model_gateway import UnconfiguredGateway
-from adapters.memory.rail import MockRail
 from adapters.otel.telemetry import OtelTelemetry
 from adapters.postgres.store import PostgresStore
+from adapters.rails import build_rail
 from adapters.system_clock import SystemClock
 from api import errors
 from api.deps import Store
@@ -74,8 +74,7 @@ def create_app(
     app.state.gateway = gateway or _default_gateway(settings, app.state.telemetry)
     # Only resolutions signal from here (best effort); the worker's relay starts workflows.
     app.state.workflow = workflow or TemporalWorkflow.from_settings(settings)
-    # Settings only allow the mock rail until RazorpayRail exists (#83).
-    app.state.rail = rail or MockRail()
+    app.state.rail = rail or build_rail(settings)
     errors.install(app)
     app.include_router(parties.router)
     app.include_router(mandates.router)
