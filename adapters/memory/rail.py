@@ -5,7 +5,8 @@ settles hours later (ADR-0013). Charges are keyed by Payment id (ADR-0014).
 
 By default the debit is made when the charge is scheduled. Given a `notice` period and a
 clock, it behaves like a card debit after a Pre-debit notice (ADR-0017): scheduling only
-books the charge with `debit_after`, and `debit` makes it once the period is over.
+books the charge with `debit_after`, and `debit` makes it once the period is over. A
+notice can fail (`token_whose_notice_fails`): the charge is then failed with no debit.
 """
 
 import threading
@@ -14,7 +15,7 @@ from datetime import datetime, timedelta
 from core.domain.money import Money
 from core.domain.parties import TenantId
 from core.domain.payments import PaymentId
-from core.domain.rails import RailToken
+from core.domain.rails import RAIL_NOTICE_FAILED, RailToken
 from core.ports import Clock, IdempotencyKey, PaymentRail, RailCharge, RailUnavailable
 
 # Token refs that decide how a mock debit ends. Any other ref captures.
@@ -22,6 +23,7 @@ _CAPTURES = "token_mock_captures"
 _FAILS = "token_mock_fails"  # accepted, then the debit fails when it settles
 _REFUSED = "token_mock_refused"  # refused outright: failed, with nothing to settle
 _TIMES_OUT = "token_mock_times_out"  # the charge is made, then the call times out
+_NOTICE_FAILS = "token_mock_notice_fails"  # its Pre-debit notice fails after scheduling
 _FAILURE_CODE = "BAD_REQUEST_ERROR"  # Razorpay's code for a declined debit
 
 
@@ -56,6 +58,11 @@ class MockRail:
     def token_that_times_out() -> RailToken:
         return _token(_TIMES_OUT)
 
+    @staticmethod
+    def token_whose_notice_fails() -> RailToken:
+        """Only with a notice period; without one there is no notice, and it captures."""
+        return _token(_NOTICE_FAILS)
+
     def schedule_charge(
         self,
         tenant_id: TenantId,
@@ -87,7 +94,13 @@ class MockRail:
             )
         else:
             charge = self._debited(key, amount)
-        self._charges[key] = charge
+        notice_fails = self._notice is not None and rail_token.token_ref == _NOTICE_FAILS
+        # A failed notice fails after this answer: every later read sees the charge failed.
+        self._charges[key] = (
+            charge.model_copy(update={"status": "failed", "failure_code": RAIL_NOTICE_FAILED})
+            if notice_fails
+            else charge
+        )
         self._tokens[key] = rail_token
         if rail_token.token_ref == _TIMES_OUT:
             raise RailUnavailable("mock rail timed out after making the charge")

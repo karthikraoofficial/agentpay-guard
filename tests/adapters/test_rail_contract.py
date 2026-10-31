@@ -26,7 +26,7 @@ from adapters.razorpay.rail import RazorpayRail
 from core.domain.money import Money
 from core.domain.parties import TenantId
 from core.domain.payments import PaymentId
-from core.domain.rails import RailToken
+from core.domain.rails import RAIL_NOTICE_FAILED, RailToken
 from core.ports import IdempotencyKey, PaymentRail, RailCharge
 from core.settings import get_settings
 from tests.adapters.fake_razorpay import NOTICE_SECONDS, FakeRazorpay
@@ -51,6 +51,8 @@ class RailHarness:
     # once) or the test can't wait one out (Razorpay).
     end_notice: Callable[[], None] | None = None
     has_notice: bool = False
+    # A token whose Pre-debit notice the rail marks failed; None when it can't be forced.
+    notice_fails: RailToken | None = None
 
     def payment_id(self, name: str) -> PaymentId:
         return PaymentId(f"{name}{self.run}")
@@ -90,6 +92,7 @@ def _mock_notice() -> RailHarness:
         run="",
         end_notice=lambda: clock.advance(notice),
         has_notice=True,
+        notice_fails=MockRail.token_whose_notice_fails(),
     )
 
 
@@ -101,7 +104,11 @@ def _razorpay_fake() -> RailHarness:
         display="visa •••• 4366",
     )
     fails = captures.model_copy(update={"token_ref": "token_fake_fails"})
-    fake = FakeRazorpay(tokens={captures.token_ref, fails.token_ref})
+    notice_fails = captures.model_copy(update={"token_ref": "token_fake_notice_fails"})
+    fake = FakeRazorpay(
+        tokens={captures.token_ref, fails.token_ref, notice_fails.token_ref},
+        failed_notices={notice_fails.token_ref},
+    )
     rail = RazorpayRail("rzp_test_contract", SecretStr("fake"), transport=fake.transport())
 
     def end_notice() -> None:
@@ -127,6 +134,7 @@ def _razorpay_fake() -> RailHarness:
         run="",
         end_notice=end_notice,
         has_notice=True,
+        notice_fails=notice_fails,
     )
 
 
@@ -322,6 +330,26 @@ def test_once_the_notice_period_ends_the_debit_is_made_once(harness: RailHarness
     assert first.rail_payment_id
     assert again.rail_payment_id == first.rail_payment_id
     assert harness.rail.get_charge(TENANT, payment_id) == first
+
+
+def test_a_failed_notice_fails_the_charge_and_no_debit_is_made(harness: RailHarness) -> None:
+    if harness.notice_fails is None:
+        pytest.skip("this rail has no Pre-debit notice, or can't be made to fail one")
+    payment_id = harness.payment_id("pmt_notice_failed")
+    scheduled = _schedule(harness, payment_id, harness.notice_fails)
+    if harness.end_notice is not None:
+        harness.end_notice()
+
+    debited = harness.rail.debit(
+        TENANT, harness.notice_fails, AMOUNT, payment_id, IdempotencyKey(f"d_{payment_id}")
+    )
+    looked_up = harness.rail.get_charge(TENANT, payment_id)
+
+    assert scheduled.status == "scheduled"  # the notice is sent after the order is made
+    for charge in (debited, looked_up):
+        assert charge is not None
+        assert (charge.status, charge.failure_code) == ("failed", RAIL_NOTICE_FAILED)
+        assert (charge.rail_payment_id, charge.amount) == (None, AMOUNT)
 
 
 def test_there_is_nothing_to_debit_for_a_payment_the_rail_never_saw(harness: RailHarness) -> None:

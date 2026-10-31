@@ -5,7 +5,9 @@ A card debit is two steps, 36 h 5 min apart (ADR-0017). `schedule_charge` is the
 it finds or makes the Razorpay order for a Payment, with our Payment id as the order's
 `receipt` and in its notes, and a Pre-debit notice for the Rail token. Until a debit is
 made on the order, the charge is `scheduled`, with `debit_after` set to when the notice
-period ends. `debit` is the second: the recurring payment on that order.
+period ends, or `failed` with `RAIL_NOTICE_FAILED` if Razorpay marked the notice failed.
+`debit` is the second: the recurring payment on that order, never tried after a failed
+notice.
 
 One order per Payment (ADR-0014): Razorpay orders take no idempotency key, so the order is
 looked up by receipt before one is made, and a retry after a lost answer finds it.
@@ -24,7 +26,7 @@ from adapters.razorpay.webhooks import PAYMENT_ID_NOTE
 from core.domain.money import Money
 from core.domain.parties import TenantId
 from core.domain.payments import PaymentId
-from core.domain.rails import RailToken
+from core.domain.rails import RAIL_NOTICE_FAILED, RailToken
 from core.ports import IdempotencyKey, PaymentRail, RailCharge, RailUnavailable
 from core.settings import Settings
 
@@ -107,6 +109,9 @@ class RazorpayRail:
         payments = self._lookup(f"/orders/{found['id']}/payments")
         if payments["items"] or order.get("attempts") or order.get("status") != "created":
             return self._charge(payment_id, order, payments)  # debited already: never twice
+        undebited = _parsed(lambda: _undebited(payment_id, order))
+        if undebited.status == "failed":
+            return undebited  # the notice failed: Razorpay would refuse every debit
         customer = self._lookup(f"/customers/{rail_token.customer_ref}")
         try:
             made = self._api.post(
@@ -194,9 +199,12 @@ class RazorpayRail:
             return _parsed(lambda: _debited(payment_id, settled))
         if "notification" not in order:  # the receipt search leaves the notice out
             order = self._lookup(f"/orders/{order['id']}")
-        scheduled = _parsed(lambda: _scheduled(payment_id, order))
         # A debit made and still in flight.
         made = _parsed(lambda: max(items, key=lambda p: int(p["created_at"]), default=None))
+        if made is None and not order.get("attempts") and order.get("status") == "created":
+            return _parsed(lambda: _undebited(payment_id, order))
+        # Attempted, but the payment isn't listed yet: still in flight, whatever the notice.
+        scheduled = _parsed(lambda: _scheduled(payment_id, order))
         return scheduled.model_copy(update={"rail_payment_id": made["id"]}) if made else scheduled
 
     def _lookup(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
@@ -209,7 +217,8 @@ class RazorpayRail:
 
 def _not_yet(refused: RazorpayRefused) -> bool:
     """Whether Razorpay refused a debit only because the notice period isn't over: before
-    the notice is delivered, and after it until 36 h 5 min have passed (ADR-0017)."""
+    the notice is delivered, and after it until 36 h 5 min have passed (ADR-0017). A notice
+    that failed gives the same refusal, but `debit` reads the order first and stops there."""
     if refused.reason == "pre_debit_notification_failed":
         return True
     return refused.reason == "input_validation_failed" and (
@@ -236,6 +245,15 @@ def _scheduled(payment_id: PaymentId, order: dict[str, Any]) -> RailCharge:
         amount=Money(minor=order["amount"], currency=order["currency"]),
         debit_after=_time(after) if after is not None else None,
     )
+
+
+def _undebited(payment_id: PaymentId, order: dict[str, Any]) -> RailCharge:
+    """A charge with no debit made: scheduled, or failed if Razorpay marked its Pre-debit
+    notice failed, after which it refuses every debit on the order."""
+    scheduled = _scheduled(payment_id, order)
+    if (order.get("notification") or {}).get("status") != "failed":
+        return scheduled
+    return scheduled.model_copy(update={"status": "failed", "failure_code": RAIL_NOTICE_FAILED})
 
 
 def _debited(payment_id: PaymentId, payment: dict[str, Any]) -> RailCharge:

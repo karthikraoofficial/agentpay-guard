@@ -16,7 +16,7 @@ from adapters.razorpay.rail import RazorpayRail
 from core.domain.money import Money
 from core.domain.parties import TenantId
 from core.domain.payments import PaymentId
-from core.domain.rails import RailToken
+from core.domain.rails import RAIL_NOTICE_FAILED, RailToken
 from core.ports import IdempotencyKey, RailUnavailable
 from tests.adapters.fake_razorpay import CREATED_AT, NOTICE_SECONDS, FakeRazorpay
 from tests.conftest import make_settings
@@ -280,6 +280,34 @@ def test_a_debit_before_the_notice_is_delivered_is_not_yet(
 
     assert charge is not None
     assert (charge.status, charge.rail_payment_id) == ("scheduled", None)
+
+
+def test_a_failed_notice_is_never_debited_and_fails_the_charge(
+    rail: RazorpayRail, fake: FakeRazorpay
+) -> None:
+    fake.failed_notices.add(TOKEN.token_ref)
+    _schedule(rail, "pmt_notice_failed")
+    fake.now = CREATED_AT + NOTICE_SECONDS
+
+    charge = _debit(rail, "pmt_notice_failed")
+
+    assert charge is not None
+    assert (charge.status, charge.failure_code) == ("failed", RAIL_NOTICE_FAILED)
+    assert not [r for r in fake.requests if r.url.path.endswith("/payments/create/recurring")]
+
+
+def test_an_attempted_order_is_in_flight_even_if_its_notice_reads_failed(
+    rail: RazorpayRail, fake: FakeRazorpay
+) -> None:
+    fake.failed_notices.add(TOKEN.token_ref)
+    _schedule(rail, "pmt_attempted")
+    [order] = fake.orders
+    order["attempts"] = 1  # a debit Razorpay counts but doesn't list yet
+
+    charge = rail.get_charge(TENANT, PaymentId("pmt_attempted"))
+
+    assert charge is not None
+    assert (charge.status, charge.failure_code) == ("scheduled", None)
 
 
 def test_once_the_notice_period_ends_the_card_is_debited_once(

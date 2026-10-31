@@ -14,6 +14,10 @@ RAIL_CURRENCIES: dict[RailName, frozenset[str] | None] = {
     "mock": None,
 }
 
+# The failure code of a charge whose Pre-debit notice the rail marked failed: the rail
+# refuses any debit after it, so the Payment fails instead of waiting for one (ADR-0017).
+RAIL_NOTICE_FAILED = "RAIL_NOTICE_FAILED"
+
 _Ref = Annotated[str, StringConstraints(min_length=1, max_length=64, pattern=r"^[\w\-]+$")]
 _Display = Annotated[str, StringConstraints(min_length=1, max_length=40)]
 
