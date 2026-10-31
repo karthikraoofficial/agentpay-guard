@@ -51,8 +51,26 @@ class Payment(BaseModel):
     rail_payment_id: str | None = None
     # The rail's code, only on a failed Payment.
     failure_code: str | None = None
+    # When the Pre-debit notice period ends and the card may be debited (ADR-0017). None
+    # until the rail says, and on a rail that debits at once.
+    debit_after: AwareDatetime | None = None
     created_at: AwareDatetime
     updated_at: AwareDatetime
+
+    @property
+    def rail_answered(self) -> bool:
+        """Whether the rail has ever answered for this Payment's charge."""
+        return self.rail_payment_id is not None or self.debit_after is not None
+
+    def debit_due(self, now: datetime) -> bool:
+        """Whether the card is to be debited now: the notice period is over and no debit
+        has been made yet."""
+        return (
+            self.status == "scheduled"
+            and self.rail_payment_id is None
+            and self.debit_after is not None
+            and self.debit_after <= now
+        )
 
     def charged(
         self,
@@ -60,18 +78,24 @@ class Payment(BaseModel):
         rail_payment_id: str | None,
         failure_code: str | None,
         at: datetime,
+        debit_after: datetime | None = None,
     ) -> Self | None:
         """This Payment after the rail reported on its charge, or None when that changes
-        nothing. A settled Payment never reopens, so a late or repeated report is a no-op."""
-        if self.status != "scheduled" or (
-            status == "scheduled" and (rail_payment_id is None or self.rail_payment_id)
-        ):
+        nothing. A settled Payment never reopens, so a late or repeated report is a no-op.
+        While scheduled, only news is applied: a first rail payment id or debit time."""
+        if self.status != "scheduled":
+            return None
+        news = (rail_payment_id is not None and self.rail_payment_id is None) or (
+            debit_after is not None and self.debit_after is None
+        )
+        if status == "scheduled" and not news:
             return None
         return self.model_copy(
             update={
                 "status": status,
-                "rail_payment_id": rail_payment_id or self.rail_payment_id,
+                "rail_payment_id": self.rail_payment_id or rail_payment_id,
                 "failure_code": failure_code if status == "failed" else None,
+                "debit_after": self.debit_after or debit_after,
                 "updated_at": at,
             }
         )
@@ -95,12 +119,20 @@ def payment_refusal(
         return "DECISION_ALREADY_PAID"
     if now >= payable_until:
         return "PAYMENT_WINDOW_CLOSED"
+    if stop := debit_refusal(mandate_status=mandate_status, agent_disabled=agent_disabled):
+        return stop
+    if rail_token is None or rail_token.rail != rail:
+        return "MANDATE_NOT_PAYABLE"
+    return None
+
+
+def debit_refusal(*, mandate_status: MandateStatus, agent_disabled: bool) -> PaymentRefusal | None:
+    """Why the card can't be debited for a Payment now, or None if it can: the Mandate
+    must still be active and the Agent enabled, at payment time and again at the debit."""
     if mandate_status != "active":
         return _MANDATE_REFUSALS[mandate_status]
     if agent_disabled:
         return "AGENT_DISABLED"
-    if rail_token is None or rail_token.rail != rail:
-        return "MANDATE_NOT_PAYABLE"
     return None
 
 

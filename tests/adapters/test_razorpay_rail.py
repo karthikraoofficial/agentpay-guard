@@ -7,6 +7,7 @@ the order it makes, how its errors map, and what never reaches the logs.
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from pydantic import SecretStr
@@ -239,3 +240,110 @@ def test_an_order_for_another_amount_is_never_taken_as_the_payments_charge(
             PaymentId("pmt_amount"),
             IdempotencyKey("idem_pmt_amount"),
         )
+
+
+# --- The debit, once the Pre-debit notice period is over (ADR-0017) -------------------
+
+
+def _debit(rail: RazorpayRail, payment_id: str, token: RailToken = TOKEN):  # type: ignore[no-untyped-def]
+    return rail.debit(
+        TENANT, token, AMOUNT, PaymentId(payment_id), IdempotencyKey(f"debit_{payment_id}")
+    )
+
+
+def _recurring(fake: FakeRazorpay) -> list[dict[str, Any]]:
+    return [json.loads(r.content) for r in fake.requests if r.url.path.endswith("/recurring")]
+
+
+def test_a_debit_before_the_notice_period_ends_is_not_yet(
+    rail: RazorpayRail, fake: FakeRazorpay
+) -> None:
+    _schedule(rail, "pmt_early")
+    fake.now = CREATED_AT + NOTICE_SECONDS - 1
+
+    charge = _debit(rail, "pmt_early")
+
+    assert charge is not None
+    assert (charge.status, charge.rail_payment_id, charge.failure_code) == ("scheduled", None, None)
+    assert charge.debit_after == datetime.fromtimestamp(CREATED_AT + NOTICE_SECONDS, UTC)
+    assert fake.payments == {}
+
+
+def test_a_debit_before_the_notice_is_delivered_is_not_yet(
+    rail: RazorpayRail, fake: FakeRazorpay
+) -> None:
+    _schedule(rail, "pmt_undelivered")
+    fake.now = CREATED_AT + NOTICE_SECONDS
+    fake.notice_delivered = False
+
+    charge = _debit(rail, "pmt_undelivered")
+
+    assert charge is not None
+    assert (charge.status, charge.rail_payment_id) == ("scheduled", None)
+
+
+def test_once_the_notice_period_ends_the_card_is_debited_once(
+    rail: RazorpayRail, fake: FakeRazorpay
+) -> None:
+    _schedule(rail, "pmt_debit")
+    fake.now = CREATED_AT + NOTICE_SECONDS
+
+    first = _debit(rail, "pmt_debit")
+    again = _debit(rail, "pmt_debit")
+
+    [order] = fake.orders
+    [payment] = fake.payments[order["id"]]
+    assert first is not None and again is not None
+    assert (first.status, first.rail_payment_id) == ("scheduled", payment["id"])
+    assert again.rail_payment_id == payment["id"]
+    [made] = _recurring(fake)
+    assert made["order_id"] == order["id"]
+    assert (made["customer_id"], made["token"]) == ("cust_fake001", "token_fake001")
+    assert (made["amount"], made["currency"], made["recurring"]) == (49_900, "INR", "1")
+    assert made["notes"] == {"agentpay_payment_id": "pmt_debit", "agentpay_tenant_id": "ten_rzp"}
+    assert (made["email"], made["contact"]) == (fake.EMAIL, fake.CONTACT)
+
+
+def test_an_order_already_attempted_is_never_debited_again(
+    rail: RazorpayRail, fake: FakeRazorpay
+) -> None:
+    _schedule(rail, "pmt_attempted")
+    fake.now = CREATED_AT + NOTICE_SECONDS
+    fake.orders[0]["attempts"] = 1  # a debit Razorpay counted but doesn't list yet
+
+    charge = _debit(rail, "pmt_attempted")
+
+    assert charge is not None and charge.status == "scheduled"
+    assert _recurring(fake) == []
+
+
+def test_a_debit_razorpay_refuses_fails_with_its_code(
+    rail: RazorpayRail, fake: FakeRazorpay
+) -> None:
+    _schedule(rail, "pmt_debit_refused")
+    fake.now = CREATED_AT + NOTICE_SECONDS
+    fake.refuse_debits = True
+
+    charge = _debit(rail, "pmt_debit_refused")
+
+    assert charge is not None
+    assert (charge.status, charge.failure_code) == ("failed", "BAD_REQUEST_ERROR")
+
+
+def test_there_is_nothing_to_debit_without_an_order(rail: RazorpayRail) -> None:
+    assert _debit(rail, "pmt_no_order") is None
+
+
+def test_the_payers_contact_details_never_reach_the_logs(
+    rail: RazorpayRail, fake: FakeRazorpay, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    _schedule(rail, "pmt_contact")
+    fake.now = CREATED_AT + NOTICE_SECONDS
+    fake.refuse_debits = True
+
+    _debit(rail, "pmt_contact")
+
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert "pmt_contact" in logged
+    assert fake.EMAIL not in logged and fake.CONTACT not in logged

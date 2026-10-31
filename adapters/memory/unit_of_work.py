@@ -388,12 +388,25 @@ class InMemoryUnitOfWork:
                 return data.links[token_hash]
         return None
 
-    def scheduled_payments(self, created_before: datetime) -> list[tuple[TenantId, PaymentId]]:
+    def scheduled_payments(
+        self, created_before: datetime, now: datetime
+    ) -> list[tuple[TenantId, PaymentId]]:
         due = [
             (p.created_at, tenant_id, p.payment_id)
             for tenant_id, data in list(self._tenants.items())
             for p in data.payments.values()
-            if p.status == "scheduled" and p.created_at < created_before
+            if p.status == "scheduled"
+            and p.created_at < created_before
+            and (p.debit_after is None or p.debit_after <= now)
+        ]
+        return [(tenant_id, payment_id) for _, tenant_id, payment_id in sorted(due)]
+
+    def due_debits(self, now: datetime) -> list[tuple[TenantId, PaymentId]]:
+        due = [
+            (p.debit_after, tenant_id, p.payment_id)
+            for tenant_id, data in list(self._tenants.items())
+            for p in data.payments.values()
+            if p.debit_due(now)
         ]
         return [(tenant_id, payment_id) for _, tenant_id, payment_id in sorted(due)]
 

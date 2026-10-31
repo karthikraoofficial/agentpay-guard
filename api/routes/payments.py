@@ -67,6 +67,9 @@ class PaymentOut(BaseModel):
     status: PaymentStatus
     rail_payment_id: str | None
     failure_code: str | None
+    # When the card will be debited, after the Pre-debit notice (ADR-0017). Absent from
+    # replays of Payments made before it existed.
+    debit_after: AwareDatetime | None = None
     created_at: AwareDatetime
     updated_at: AwareDatetime
 
@@ -165,14 +168,14 @@ def _unanswered(
     never saw, so a retry asking the rail to charge then could charge a Payment the sweep
     is failing (#82)."""
     shown = PaymentOut.model_validate_json(bytes(replay.body))
-    if shown.status != "scheduled" or shown.rail_payment_id is not None:
+    if shown.status != "scheduled" or shown.rail_payment_id or shown.debit_after:
         return None
     with store.transaction(tenant) as tx:
         payment = tx.get_payment(shown.payment_id)
         mandate = tx.get_mandate(shown.mandate_id)
     if payment is None or mandate is None or mandate.rail_token is None:
         raise RuntimeError(f"Payment {shown.payment_id} lost its Mandate or Rail token")
-    if payment.status != "scheduled" or payment.rail_payment_id is not None:
+    if payment.status != "scheduled" or payment.rail_answered:
         return None  # answered since the response was kept
     retry_until = payment.created_at + timedelta(seconds=settings.reconcile_after_seconds / 2)
     if not payment.created_at + rail.lookup_lag <= clock.now() < retry_until:

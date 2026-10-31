@@ -19,6 +19,7 @@ from temporalio.worker import Worker
 from adapters.postgres.store import PostgresStore
 from adapters.rails import build_rail
 from adapters.system_clock import SystemClock
+from core.debits import debit_due
 from core.ports import Clock, EventBus, PaymentRail, UnitOfWork
 from core.reconcile import SweepStore, sweep
 from core.relay import relay_once
@@ -68,10 +69,14 @@ def sweep_rail(settings: Settings) -> PaymentRail | None:
 async def sweep_forever(
     store: SweepStore, rail: PaymentRail, clock: Clock, settings: Settings
 ) -> None:
-    """Reconcile scheduled Payments until cancelled. The sweep is synchronous, so each
-    pass runs in a thread."""
+    """Until cancelled, each interval: debit the Payments whose Pre-debit notice period
+    has ended, then reconcile the scheduled ones. Both are synchronous, so each pass runs
+    in a thread."""
     older_than = timedelta(seconds=settings.reconcile_after_seconds)
     while True:
+        debits = await asyncio.to_thread(debit_due, store, rail, clock)
+        if debits.checked:
+            log.info("debit step checked %d Payment(s), %d error(s)", debits.checked, debits.errors)
         result = await asyncio.to_thread(sweep, store, rail, clock, older_than)
         if result.checked:
             log.info(

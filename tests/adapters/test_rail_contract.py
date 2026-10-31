@@ -3,18 +3,20 @@
 Each rail joins through a `RailHarness`: the rail itself, Rail tokens that lead to each
 outcome, and a way to let a scheduled charge settle.
 
-- `mock`: MockRail, which settles on demand.
+- `mock`: MockRail, which debits at once and settles on demand.
+- `mock-notice`: MockRail with a Pre-debit notice period, on a clock the test moves.
 - `razorpay-fake`: RazorpayRail against the fake Razorpay API, which also settles on demand.
 - `razorpay`: RazorpayRail against the real test account, under `-m contract` only. It needs
   the refs `python -m adapters.razorpay.wizard` prints. It cannot settle: a test token
-  expires before Razorpay allows the debit (ADR-0017), so settle cases run on the others.
+  expires before Razorpay allows the debit (ADR-0017), so debit and settle cases run on
+  the others; it does check that a debit made too early is "not yet".
 """
 
 import secrets
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import SecretStr
@@ -27,7 +29,8 @@ from core.domain.payments import PaymentId
 from core.domain.rails import RailToken
 from core.ports import IdempotencyKey, PaymentRail, RailCharge
 from core.settings import get_settings
-from tests.adapters.fake_razorpay import FakeRazorpay
+from tests.adapters.fake_razorpay import NOTICE_SECONDS, FakeRazorpay
+from tests.api.conftest import MovableClock
 
 TENANT = TenantId("ten_rail_contract")
 OTHER_TENANT = TenantId("ten_rail_contract_other")
@@ -44,6 +47,10 @@ class RailHarness:
     settle: Callable[[TenantId, PaymentId], None] | None  # None: this rail can't settle here
     charges_for: Callable[[TenantId, PaymentId], int]  # Rail charges ever made for a Payment
     run: str  # makes Payment ids unique on a rail that keeps them between runs
+    # Moves past every Pre-debit notice period; None when the rail has none (debits at
+    # once) or the test can't wait one out (Razorpay).
+    end_notice: Callable[[], None] | None = None
+    has_notice: bool = False
 
     def payment_id(self, name: str) -> PaymentId:
         return PaymentId(f"{name}{self.run}")
@@ -62,6 +69,30 @@ def _mock() -> RailHarness:
     )
 
 
+def _mock_notice() -> RailHarness:
+    clock = MovableClock(datetime(2026, 10, 31, 6, 0, tzinfo=UTC))
+    notice = timedelta(seconds=NOTICE_SECONDS)
+    rail = MockRail(notice=notice, clock=clock)
+
+    def settle(tenant_id: TenantId, payment_id: PaymentId) -> None:
+        clock.advance(notice)
+        token = rail.token_that_captures()  # the token is only read when scheduling
+        rail.debit(tenant_id, token, AMOUNT, payment_id, IdempotencyKey("settle"))
+        rail.settle(tenant_id, payment_id)
+
+    return RailHarness(
+        rail=rail,
+        captures=MockRail.token_that_captures(),
+        refused=MockRail.token_that_is_refused(),
+        fails=MockRail.token_that_fails(),
+        settle=settle,
+        charges_for=rail.bookings_for,
+        run="",
+        end_notice=lambda: clock.advance(notice),
+        has_notice=True,
+    )
+
+
 def _razorpay_fake() -> RailHarness:
     captures = RailToken(
         rail="razorpay",
@@ -73,8 +104,14 @@ def _razorpay_fake() -> RailHarness:
     fake = FakeRazorpay(tokens={captures.token_ref, fails.token_ref})
     rail = RazorpayRail("rzp_test_contract", SecretStr("fake"), transport=fake.transport())
 
+    def end_notice() -> None:
+        fake.now += NOTICE_SECONDS + 60
+
     def settle(tenant_id: TenantId, payment_id: PaymentId) -> None:
         order = next(o for o in fake.orders if o["receipt"] == payment_id)
+        token = captures.model_copy(update={"token_ref": order["notification"]["token_id"]})
+        end_notice()
+        rail.debit(tenant_id, token, AMOUNT, payment_id, IdempotencyKey("settle"))
         if order["notification"]["token_id"] == fails.token_ref:
             fake.settle(payment_id, "failed", "BAD_REQUEST_ERROR")
         else:
@@ -88,6 +125,8 @@ def _razorpay_fake() -> RailHarness:
         settle=settle,
         charges_for=lambda _t, payment_id: fake.orders_with(payment_id),
         run="",
+        end_notice=end_notice,
+        has_notice=True,
     )
 
 
@@ -115,14 +154,26 @@ def _razorpay() -> RailHarness:
         settle=None,
         charges_for=lambda _t, payment_id: rail.orders_for(payment_id),
         run=f"_{secrets.token_hex(4)}",
+        has_notice=True,
     )
 
 
 @pytest.fixture(
-    params=["mock", "razorpay-fake", pytest.param("razorpay", marks=pytest.mark.contract)]
+    params=[
+        "mock",
+        "mock-notice",
+        "razorpay-fake",
+        pytest.param("razorpay", marks=pytest.mark.contract),
+    ]
 )
 def harness(request: pytest.FixtureRequest) -> Iterator[RailHarness]:
-    yield {"mock": _mock, "razorpay-fake": _razorpay_fake, "razorpay": _razorpay}[request.param]()
+    harnesses = {
+        "mock": _mock,
+        "mock-notice": _mock_notice,
+        "razorpay-fake": _razorpay_fake,
+        "razorpay": _razorpay,
+    }
+    yield harnesses[request.param]()
 
 
 def _settle(h: RailHarness, payment_id: PaymentId) -> None:
@@ -231,3 +282,47 @@ def test_another_tenant_cannot_see_the_charge(harness: RailHarness) -> None:
     _seen(harness, payment_id)
 
     assert harness.rail.get_charge(OTHER_TENANT, payment_id) is None
+
+
+# --- The debit after a Pre-debit notice (ADR-0017) --------------------------------------
+
+
+def _debit(h: RailHarness, payment_id: PaymentId) -> RailCharge | None:
+    return h.rail.debit(TENANT, h.captures, AMOUNT, payment_id, IdempotencyKey(f"d_{payment_id}"))
+
+
+def test_a_debit_before_the_notice_period_ends_is_not_yet(harness: RailHarness) -> None:
+    if not harness.has_notice:
+        pytest.skip("this rail debits when the charge is scheduled")
+    payment_id = harness.payment_id("pmt_too_early")
+    scheduled = _schedule(harness, payment_id)
+    _seen(harness, payment_id)
+
+    charge = _debit(harness, payment_id)
+
+    assert charge is not None
+    assert (charge.status, charge.rail_payment_id, charge.failure_code) == ("scheduled", None, None)
+    assert scheduled.debit_after is not None
+    assert charge.debit_after == scheduled.debit_after
+
+
+def test_once_the_notice_period_ends_the_debit_is_made_once(harness: RailHarness) -> None:
+    if harness.has_notice and harness.end_notice is None:
+        pytest.skip("a test token expires before Razorpay allows the debit (ADR-0017)")
+    payment_id = harness.payment_id("pmt_debited")
+    _schedule(harness, payment_id)
+    if harness.end_notice is not None:
+        harness.end_notice()
+
+    first = _debit(harness, payment_id)
+    again = _debit(harness, payment_id)
+
+    assert first is not None and again is not None
+    assert first.status == "scheduled"
+    assert first.rail_payment_id
+    assert again.rail_payment_id == first.rail_payment_id
+    assert harness.rail.get_charge(TENANT, payment_id) == first
+
+
+def test_there_is_nothing_to_debit_for_a_payment_the_rail_never_saw(harness: RailHarness) -> None:
+    assert _debit(harness, harness.payment_id("pmt_never_debited")) is None

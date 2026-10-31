@@ -38,7 +38,7 @@ class SweepResult:
 def sweep(store: SweepStore, rail: PaymentRail, clock: Clock, older_than: timedelta) -> SweepResult:
     now = decision_time(clock.now())
     # Never sooner than the rail can see a new charge, or it would fail one it just made.
-    due = store.scheduled_payments(created_before=now - max(older_than, rail.lookup_lag))
+    due = store.scheduled_payments(now - max(older_than, rail.lookup_lag), now)
     errors = 0
     for tenant_id, payment_id in due:
         try:
@@ -47,7 +47,7 @@ def sweep(store: SweepStore, rail: PaymentRail, clock: Clock, older_than: timede
                 payment = tx.get_payment(payment_id)
                 if payment is None:
                     continue
-                if charge is None and payment.rail_payment_id is not None:
+                if charge is None and payment.rail_answered:
                     # The rail answered for it once, so this is a lookup fault, not a
                     # charge that never reached the rail: try again next sweep.
                     raise LookupError(f"the rail lost track of Payment {payment_id}")

@@ -14,5 +14,7 @@ The Payment window (15 minutes) limits only step 1, when the Agent may start pay
 
 ## Consequences
 
-- In test mode a card debit can never complete. Test tokens expire at 23:59:59 IST the day after registration (about 22 hours), before step 2 is allowed. Contract tests against Razorpay cover step 1 only, and the full flow runs on MockRail, which debits at once.
-- A Payment can sit in `scheduled` for a day and a half, so `scheduled` means "booked", not "about to settle".
+- In test mode a card debit can never complete. Test tokens expire at 23:59:59 IST the day after registration (about 22 hours), before step 2 is allowed. Contract tests against Razorpay cover step 1, plus Razorpay refusing a debit made too early. The full flow runs on MockRail (with or without a notice period) and on RazorpayRail against a fake Razorpay API.
+- A Payment can sit in `scheduled` for a day and a half, so `scheduled` means "booked", not "about to settle". It carries `debit_after`, and the reconciliation sweep leaves it alone until then.
+- The re-check at step 2 holds the Mandate lock, but the rail call doesn't, so a Revocation landing during the debit call itself doesn't stop it. The window is one rail call long.
+- Razorpay refuses a debit before the notice is delivered (`pre_debit_notification_failed`) and before 36 h 5 min (`input_validation_failed`, "Debit can be attempted 36 hours after..."). Both mean "not yet": the Payment stays scheduled and the debit is tried again.
