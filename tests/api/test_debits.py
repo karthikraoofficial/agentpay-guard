@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from adapters.memory.rail import MockRail
-from core.debits import debit_due
+from core.debits import run_debit_step
 from core.domain.payments import PaymentId
 from core.ports import RailUnavailable
 from core.reconcile import sweep
@@ -31,13 +31,18 @@ class CountsDebits(MockRail):
         super().__init__(notice=NOTICE, clock=api.clock)
         self.calls: list[PaymentId] = []
         self.times_out: set[PaymentId] = set()
+        self.loses_answer: set[PaymentId] = set()  # the debit is made, the answer lost
 
     def debit(self, tenant_id, rail_token, amount, payment_id, idempotency_key):  # type: ignore[no-untyped-def]
         self.calls.append(payment_id)
         if payment_id in self.times_out:
             self.times_out.discard(payment_id)
             raise RailUnavailable("mock debit timed out")
-        return super().debit(tenant_id, rail_token, amount, payment_id, idempotency_key)
+        charge = super().debit(tenant_id, rail_token, amount, payment_id, idempotency_key)
+        if payment_id in self.loses_answer:
+            self.loses_answer.discard(payment_id)
+            raise RailUnavailable("mock debit timed out after debiting")
+        return charge
 
     def debits_asked(self, payment: dict[str, Any]) -> int:
         return self.calls.count(PaymentId(payment["payment_id"]))
@@ -56,7 +61,7 @@ def paid(payments: Payments) -> dict[str, Any]:
 
 
 def step(api: Api) -> None:
-    debit_due(api.store, api.rail, api.clock)
+    run_debit_step(api.store, api.rail, api.clock)
 
 
 def status(payments: Payments, payment: dict[str, Any]) -> dict[str, Any]:
@@ -192,5 +197,24 @@ def test_without_a_notice_period_the_mock_rail_debits_at_once(api: Api, tmp_path
 
     assert payment["debit_after"] is None
     assert payment["rail_payment_id"].startswith("pay_mock_")
-    debit_due(api.store, api.rail, api.clock)
+    run_debit_step(api.store, api.rail, api.clock)
+    assert payments.charges(payment["payment_id"]) == 1
+
+
+def test_a_revocation_after_a_debit_whose_answer_was_lost_never_fails_a_paid_payment(
+    payments: Payments,
+) -> None:
+    api = payments.api
+    payment = paid(payments)
+    api.clock.advance(NOTICE)
+    api.rail.loses_answer.add(PaymentId(payment["payment_id"]))
+    step(api)  # the card was debited, but the step never heard
+    api.post(f"/v1/mandates/{payments.mandate_id}/revoke", payments.tenant, {"revoked_by": "payer"})
+
+    step(api)
+
+    after = status(payments, payment)
+    assert after["status"] == "scheduled"  # it settles as the rail reports, not as stopped
+    assert after["rail_payment_id"].startswith("pay_mock_")
+    assert [r.kind for r in payments.chain()].count("void") == 0
     assert payments.charges(payment["payment_id"]) == 1

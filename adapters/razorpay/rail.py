@@ -195,10 +195,9 @@ class RazorpayRail:
         if "notification" not in order:  # the receipt search leaves the notice out
             order = self._lookup(f"/orders/{order['id']}")
         scheduled = _parsed(lambda: _scheduled(payment_id, order))
-        made = [p for p in items if p.get("id")]  # a debit made and still in flight
-        return (
-            scheduled.model_copy(update={"rail_payment_id": made[-1]["id"]}) if made else scheduled
-        )
+        # A debit made and still in flight.
+        made = _parsed(lambda: max(items, key=lambda p: int(p["created_at"]), default=None))
+        return scheduled.model_copy(update={"rail_payment_id": made["id"]}) if made else scheduled
 
     def _lookup(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
         """A read whose refusal says nothing about the charge, so its outcome is unknown."""

@@ -125,7 +125,9 @@ class PaymentRail(Protocol):
         idempotency_key: IdempotencyKey,
     ) -> RailCharge | None:
         """Debit the card for a scheduled charge once its notice period is over. Never
-        debits twice for one Payment: once a debit was made, this returns its charge.
+        debits twice for one Payment asked one after another: once a debit was made, this
+        returns its charge. A rail without idempotency keys (Razorpay) ignores the key and
+        checks the Payment's own charge instead (ADR-0014).
         `scheduled` with no rail payment id means not yet. None: the rail has no charge
         for the Payment."""
         ...

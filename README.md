@@ -206,6 +206,7 @@ The workflow survives its worker being killed while it waits. CI tests this by k
 - **The expiry record lands after the timer fires,** which can be later than `expires_at` if no worker is running. Status reads `expired` from `expires_at` regardless, and a late approve or decline is refused.
 - **An approved step-up doesn't make its merchant known.** New merchant counts only allowed Decisions, so the next payment to that merchant can step up again.
 - **A Razorpay card debit can't complete in test mode.** With `AGENTPAY_RAIL=razorpay` (test keys only; the app won't start with a live key or without the key secret and webhook secret), a Payment gets its Razorpay order and Pre-debit notice, and the worker debits the card 36 h 5 min later. Test tokens expire after about 22 hours, before that, so the full flow is only exercised on the mock rail and a fake Razorpay API.
+- **Run one worker.** The debit step relies on asking Razorpay for an earlier debit before making one, so two workers could debit the same Payment twice.
 - **A Revocation in the last seconds before a debit can miss it.** The debit step re-checks the Mandate and Agent, then calls the rail without holding the Mandate, so a Revocation that lands during that call doesn't stop the debit.
 - **A debit can be up to one sweep interval late:** the debit step runs every `AGENTPAY_RECONCILE_INTERVAL_SECONDS` (5 minutes).
 - **Mock Payments stay `scheduled` outside tests.** No webhook comes from the mock rail, and the reconciliation sweep is off for it.

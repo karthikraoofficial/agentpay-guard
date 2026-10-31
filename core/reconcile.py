@@ -7,7 +7,8 @@ A Payment the rail has no charge for never reached it (the API stopped between s
 the Payment and calling the rail, and the Agent never retried). It is failed and its
 Decision Voided rather than charged late: no money moved, and the Mandate may have
 changed since (ADR-0016). Only a Payment the rail never answered for is treated so; one
-that has a rail payment id but no charge at the rail is a lookup fault, retried.
+the rail answered for (with a rail payment id or a debit time) but has no charge for is a
+lookup fault, retried. A Payment in its Pre-debit notice period is left alone.
 """
 
 import logging
