@@ -50,7 +50,9 @@ def record_charge(
         raise RuntimeError(f"Payment {payment_id} vanished")
     if charge is None:
         return payment
-    moved = payment.charged(charge.status, charge.rail_payment_id, charge.failure_code, now)
+    moved = payment.charged(
+        charge.status, charge.rail_payment_id, charge.failure_code, now, charge.debit_after
+    )
     if moved is None:
         if payment.status == "failed" and charge.status == "captured":
             # A settled Payment never reopens, but money moved: it needs a refund.

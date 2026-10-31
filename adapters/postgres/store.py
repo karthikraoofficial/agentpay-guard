@@ -451,6 +451,7 @@ class PostgresTransaction:
                 status=row["status"],
                 rail_payment_id=row["rail_payment_id"],
                 failure_code=row["failure_code"],
+                debit_after=row["debit_after"],
                 updated_at=row["updated_at"],
             )
         ).rowcount
@@ -474,6 +475,7 @@ class PostgresTransaction:
             status=row["status"],
             rail_payment_id=row["rail_payment_id"],
             failure_code=row["failure_code"],
+            debit_after=row["debit_after"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -678,12 +680,33 @@ class PostgresStore:
             row = conn.execute(query).mappings().one_or_none()
         return None if row is None else ConsentLink.model_validate(dict(row))
 
-    def scheduled_payments(self, created_before: datetime) -> list[tuple[TenantId, PaymentId]]:
+    def scheduled_payments(
+        self, created_before: datetime, now: datetime
+    ) -> list[tuple[TenantId, PaymentId]]:
         p = payments.c
         query = (
             select(p.tenant_id, p.payment_id)
-            .where(p.status == "scheduled", p.created_at < created_before)
+            .where(
+                p.status == "scheduled",
+                p.created_at < created_before,
+                or_(p.debit_after.is_(None), p.debit_after <= now),
+            )
             .order_by(p.created_at, p.payment_id)
+        )
+        with self._engine.connect() as conn:
+            rows = conn.execute(query).all()
+        return [(TenantId(t), PaymentId(i)) for t, i in rows]
+
+    def due_debits(self, now: datetime) -> list[tuple[TenantId, PaymentId]]:
+        p = payments.c
+        query = (
+            select(p.tenant_id, p.payment_id)
+            .where(
+                p.status == "scheduled",
+                p.rail_payment_id.is_(None),
+                p.debit_after <= now,
+            )
+            .order_by(p.debit_after, p.payment_id)
         )
         with self._engine.connect() as conn:
             rows = conn.execute(query).all()
@@ -857,6 +880,7 @@ def _payment_row(payment: Payment) -> dict[str, object]:
         "status": payment.status,
         "rail_payment_id": payment.rail_payment_id,
         "failure_code": payment.failure_code,
+        "debit_after": payment.debit_after,
         "created_at": payment.created_at,
         "updated_at": payment.updated_at,
     }

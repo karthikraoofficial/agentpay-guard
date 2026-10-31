@@ -24,13 +24,15 @@ _NOT_OURS_TO_JUDGE = frozenset({401, 403, 429})
 
 class RazorpayRefused(Exception):
     """Razorpay refused the request. `code` is its error code (such as
-    BAD_REQUEST_ERROR), `reason` its finer reason when it gives one."""
+    BAD_REQUEST_ERROR), `reason` its finer reason when it gives one, and `description`
+    its sentence, kept out of the message so it never reaches a log."""
 
-    def __init__(self, status: int, code: str, reason: str | None) -> None:
+    def __init__(self, status: int, code: str, reason: str | None, description: str = "") -> None:
         super().__init__(f"HTTP {status} {code} ({reason})")
         self.status = status
         self.code = code
         self.reason = reason
+        self.description = description
 
 
 class RazorpayApi:
@@ -72,5 +74,6 @@ class RazorpayApi:
                 status,
                 str(error.get("code") or "UNKNOWN"),
                 str(reason) if reason and reason != "NA" else None,
+                str(error.get("description") or ""),
             )
         return body

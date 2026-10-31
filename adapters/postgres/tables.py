@@ -278,6 +278,7 @@ payments = Table(
     Column("status", String, nullable=False),
     Column("rail_payment_id", String, nullable=True),
     Column("failure_code", String, nullable=True),
+    Column("debit_after", DateTime(timezone=True), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     ForeignKeyConstraint(
@@ -288,6 +289,8 @@ payments = Table(
     CheckConstraint("status IN ('scheduled', 'captured', 'failed')", name="payments_status"),
     # The reconciliation sweep's lookup (#82).
     Index("ix_payments_status_created", "status", "created_at"),
+    # The debit step's lookup of Payments whose notice period has ended.
+    Index("ix_payments_status_debit_after", "status", "debit_after"),
     CheckConstraint("amount_minor > 0", name="payments_amount_positive"),
 )
 

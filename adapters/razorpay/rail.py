@@ -5,7 +5,7 @@ A card debit is two steps, 36 h 5 min apart (ADR-0017). `schedule_charge` is the
 it finds or makes the Razorpay order for a Payment, with our Payment id as the order's
 `receipt` and in its notes, and a Pre-debit notice for the Rail token. Until a debit is
 made on the order, the charge is `scheduled`, with `debit_after` set to when the notice
-period ends.
+period ends. `debit` is the second: the recurring payment on that order.
 
 One order per Payment (ADR-0014): Razorpay orders take no idempotency key, so the order is
 looked up by receipt before one is made, and a retry after a lost answer finds it.
@@ -91,6 +91,52 @@ class RazorpayRail:
             )
         return _parsed(lambda: _scheduled(payment_id, order))
 
+    def debit(
+        self,
+        tenant_id: TenantId,
+        rail_token: RailToken,
+        amount: Money,
+        payment_id: PaymentId,
+        idempotency_key: IdempotencyKey,
+    ) -> RailCharge | None:
+        found = self._find_order(tenant_id, payment_id)
+        if found is None:
+            return None
+        # By id, not the receipt search: this read is never behind a debit just made.
+        order = self._lookup(f"/orders/{found['id']}")
+        payments = self._lookup(f"/orders/{found['id']}/payments")
+        if payments["items"] or order.get("attempts") or order.get("status") != "created":
+            return self._charge(payment_id, order, payments)  # debited already: never twice
+        customer = self._lookup(f"/customers/{rail_token.customer_ref}")
+        try:
+            made = self._api.post(
+                "/payments/create/recurring",
+                {
+                    # Razorpay requires the Payer's email and contact on every debit; they
+                    # are read from its own customer record, passed on and never kept.
+                    "email": customer["email"],
+                    "contact": customer["contact"],
+                    "amount": amount.minor,
+                    "currency": amount.currency,
+                    "order_id": order["id"],
+                    "customer_id": rail_token.customer_ref,
+                    "token": rail_token.token_ref,
+                    "recurring": "1",
+                    "notes": {PAYMENT_ID_NOTE: payment_id, TENANT_NOTE: tenant_id},
+                },
+            )
+        except RazorpayRefused as refused:
+            if _not_yet(refused):
+                return _parsed(lambda: _scheduled(payment_id, order))
+            log.warning("Razorpay refused the debit for Payment %s: %s", payment_id, refused)
+            return RailCharge(
+                payment_id=payment_id, status="failed", amount=amount, failure_code=refused.code
+            )
+        scheduled = _parsed(lambda: _scheduled(payment_id, order))
+        return scheduled.model_copy(
+            update={"rail_payment_id": _parsed(lambda: str(made["razorpay_payment_id"]))}
+        )
+
     def get_charge(self, tenant_id: TenantId, payment_id: PaymentId) -> RailCharge | None:
         order = self._find_order(tenant_id, payment_id)
         return None if order is None else self._charge(payment_id, order)
@@ -134,13 +180,24 @@ class RazorpayRail:
             )
         return min(ours, key=lambda o: int(o["created_at"])) if ours else None
 
-    def _charge(self, payment_id: PaymentId, order: dict[str, Any]) -> RailCharge:
-        payments = self._lookup(f"/orders/{order['id']}/payments")
-        settled = _parsed(lambda: _settled(payments["items"]))
-        if settled is None:  # no debit yet, or one still in flight
-            full = self._lookup(f"/orders/{order['id']}")  # the receipt lookup omits the notice
-            return _parsed(lambda: _scheduled(payment_id, full))
-        return _parsed(lambda: _debited(payment_id, settled))
+    def _charge(
+        self,
+        payment_id: PaymentId,
+        order: dict[str, Any],
+        payments: dict[str, Any] | None = None,
+    ) -> RailCharge:
+        if payments is None:
+            payments = self._lookup(f"/orders/{order['id']}/payments")
+        items = payments["items"]
+        settled = _parsed(lambda: _settled(items))
+        if settled is not None:
+            return _parsed(lambda: _debited(payment_id, settled))
+        if "notification" not in order:  # the receipt search leaves the notice out
+            order = self._lookup(f"/orders/{order['id']}")
+        scheduled = _parsed(lambda: _scheduled(payment_id, order))
+        # A debit made and still in flight.
+        made = _parsed(lambda: max(items, key=lambda p: int(p["created_at"]), default=None))
+        return scheduled.model_copy(update={"rail_payment_id": made["id"]}) if made else scheduled
 
     def _lookup(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
         """A read whose refusal says nothing about the charge, so its outcome is unknown."""
@@ -148,6 +205,16 @@ class RazorpayRail:
             return self._api.get(path, params)
         except RazorpayRefused as refused:
             raise RailUnavailable(f"Razorpay refused a lookup: {refused}") from None
+
+
+def _not_yet(refused: RazorpayRefused) -> bool:
+    """Whether Razorpay refused a debit only because the notice period isn't over: before
+    the notice is delivered, and after it until 36 h 5 min have passed (ADR-0017)."""
+    if refused.reason == "pre_debit_notification_failed":
+        return True
+    return refused.reason == "input_validation_failed" and (
+        "debit can be attempted" in refused.description.lower()
+    )
 
 
 def _settled(payments: list[dict[str, Any]]) -> dict[str, Any] | None:

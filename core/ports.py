@@ -112,7 +112,24 @@ class PaymentRail(Protocol):
         idempotency_key: IdempotencyKey,
     ) -> RailCharge:
         """Schedule the debit. A final refusal comes back as `failed`; an unknown outcome
-        raises `RailUnavailable`."""
+        raises `RailUnavailable`. A rail with a Pre-debit notice period answers
+        `scheduled` with `debit_after`, and `debit` makes the debit later."""
+        ...
+
+    def debit(
+        self,
+        tenant_id: TenantId,
+        rail_token: RailToken,
+        amount: Money,
+        payment_id: PaymentId,
+        idempotency_key: IdempotencyKey,
+    ) -> RailCharge | None:
+        """Debit the card for a scheduled charge once its notice period is over. Never
+        debits twice for one Payment asked one after another: once a debit was made, this
+        returns its charge. A rail without idempotency keys (Razorpay) ignores the key and
+        checks the Payment's own charge instead (ADR-0014).
+        `scheduled` with no rail payment id means not yet. None: the rail has no charge
+        for the Payment."""
         ...
 
     def get_charge(self, tenant_id: TenantId, payment_id: PaymentId) -> RailCharge | None:
@@ -397,9 +414,17 @@ class TenantDirectory(Protocol):
         public request's Tenant is found."""
         ...
 
-    def scheduled_payments(self, created_before: datetime) -> list[tuple[TenantId, PaymentId]]:
-        """Payments still scheduled that were made before `created_before`, in every
-        Tenant, oldest first: what the reconciliation sweep asks the rail about."""
+    def scheduled_payments(
+        self, created_before: datetime, now: datetime
+    ) -> list[tuple[TenantId, PaymentId]]:
+        """Payments still scheduled that were made before `created_before` and are not in
+        a Pre-debit notice period at `now`, in every Tenant, oldest first: what the
+        reconciliation sweep asks the rail about."""
+        ...
+
+    def due_debits(self, now: datetime) -> list[tuple[TenantId, PaymentId]]:
+        """Payments whose notice period ended by `now` and whose card has not been
+        debited yet, in every Tenant, earliest first: what the debit step debits."""
         ...
 
     def payment_tenant(self, payment_id: PaymentId) -> TenantId | None:
