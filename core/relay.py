@@ -1,5 +1,7 @@
 """The outbox relay: deliver outbox events (ADR-0009).
 
+- `dispute_opened` starts the workflow that builds the Dispute's Evidence pack; its ID is
+  the Dispute ID, so it is started at most once, as below.
 - `consent_requested` starts the Consent request's workflow. While the workflow side is
   down the event waits and is retried on every pass. Starting a workflow twice is a no-op
   (its ID is the Consent request ID), so a pass that dies after starting but before
@@ -17,13 +19,14 @@ import logging
 from datetime import datetime
 
 from core.domain.consent import ConsentRequestId
+from core.domain.disputes import DisputeId
 from core.domain.webhooks import GIVE_UP_AFTER, TENANT_EVENT_TYPES, retry_at
 from core.ports import Clock, DomainEvent, EventBus, Workflow
 from core.tenant_webhooks import TenantWebhooks
 
 log = logging.getLogger(__name__)
 
-WORKFLOW_EVENT_TYPES = frozenset({"consent_requested"})
+WORKFLOW_EVENT_TYPES = frozenset({"consent_requested", "dispute_opened"})
 
 
 def relay_once(
@@ -90,3 +93,5 @@ def _start_workflow(event: DomainEvent, workflow: Workflow) -> None:
             ConsentRequestId(str(event.payload["consent_request_id"])),
             datetime.fromisoformat(str(event.payload["expires_at"])),
         )
+    elif event.event_type == "dispute_opened":
+        workflow.start_dispute_pack(event.tenant_id, DisputeId(str(event.payload["dispute_id"])))

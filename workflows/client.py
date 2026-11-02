@@ -16,9 +16,11 @@ from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from core.domain.consent import ConsentRequestId
+from core.domain.disputes import DisputeId
 from core.ports import TenantId, Workflow
 from core.settings import Settings
 from workflows.consent import ConsentArgs, StepUpConsent
+from workflows.dispute import DisputeArgs, DisputePack
 
 
 class TemporalWorkflow:
@@ -85,6 +87,23 @@ class TemporalWorkflow:
             await handle.signal(StepUpConsent.resolved)
 
         self._call(signal)
+
+    def start_dispute_pack(self, tenant_id: TenantId, dispute_id: DisputeId) -> None:
+        args = DisputeArgs(tenant_id=tenant_id, dispute_id=dispute_id)
+
+        async def start(client: Client) -> None:
+            try:
+                await client.start_workflow(
+                    DisputePack.run,
+                    args,
+                    id=dispute_id,
+                    task_queue=self._task_queue,
+                    id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
+                )
+            except WorkflowAlreadyStartedError:
+                return
+
+        self._call(start)
 
     def _call(self, action: Callable[[Client], Awaitable[None]]) -> None:
         loop = self._ensure_loop()

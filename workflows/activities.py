@@ -1,5 +1,6 @@
-"""Activities for `step_up_consent`. Both are safe to run more than once: Temporal retries
-an activity whose worker died, so a repeat must never write a second record."""
+"""Activities for `step_up_consent` and `dispute_pack`. Each is safe to run more than once:
+Temporal retries an activity whose worker died, so a repeat must never write a second
+record."""
 
 import logging
 
@@ -8,9 +9,12 @@ from temporalio.exceptions import ApplicationError
 
 from core.domain.consent import ConsentRequestId
 from core.domain.decisions import decision_time
+from core.domain.disputes import DisputeId
+from core.evidence import build_evidence_pack
 from core.ports import Clock, TenantId, UnitOfWork
 from core.resolutions import record_resolution
 from workflows.consent import EXPIRE, NOTIFY, ConsentArgs
+from workflows.dispute import BUILD, DisputeArgs
 
 log = logging.getLogger(__name__)
 
@@ -66,3 +70,16 @@ class ConsentActivities:
                 )
             record_resolution(tx, consent, "expired", "timer", None, now)
         return "expired"
+
+
+class DisputeActivities:
+    def __init__(self, store: UnitOfWork, clock: Clock) -> None:
+        self._store = store
+        self._clock = clock
+
+    @activity.defn(name=BUILD)
+    def build(self, args: DisputeArgs) -> str:
+        """Build the Dispute's first Evidence pack; a repeat finds it built."""
+        return build_evidence_pack(
+            self._store, TenantId(args.tenant_id), DisputeId(args.dispute_id), self._clock
+        )

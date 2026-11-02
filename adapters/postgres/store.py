@@ -27,6 +27,8 @@ from adapters.postgres.tables import (
     consent_requests,
     consent_resolutions,
     decisions,
+    disputes,
+    evidence_packs,
     idempotency_keys,
     intent_checks,
     mandates,
@@ -49,6 +51,8 @@ from core.domain.consent import (
     ConsentStatus,
 )
 from core.domain.decisions import AuditRecordId, Decision, DecisionId, PackRef
+from core.domain.disputes import Dispute, DisputeId
+from core.domain.evidence import EvidencePack
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.intents import IntentCheck, IntentContent, IntentId
 from core.domain.mandates import ConsentEvidence, Mandate, MandateId, RevokedBy
@@ -510,24 +514,106 @@ class PostgresTransaction:
             .mappings()
             .one_or_none()
         )
-        if row is None:
-            return None
-        return Decision(
-            decision_id=row["decision_id"],
-            tenant_id=row["tenant_id"],
-            mandate_id=row["mandate_id"],
-            agent_id=row["agent_id"],
-            merchant_id=row["merchant_id"],
-            amount=Money(minor=row["amount_minor"], currency=row["currency"]),
-            outcome=row["outcome"],
-            reason_codes=tuple(row["reason_codes"]),
-            risk_tier=row["risk_tier"],
-            policy_pack=PackRef(
-                id=row["pack_id"], version=row["pack_version"], hash=row["pack_hash"]
-            ),
-            audit_record_id=row["audit_record_id"],
-            decided_at=row["decided_at"],
+        return None if row is None else _decision(row)
+
+    def list_related_decisions(
+        self, mandate_id: MandateId, agent_id: AgentId, merchant_id: str
+    ) -> list[Decision]:
+        rows = self._conn.execute(
+            select(decisions)
+            .where(
+                decisions.c.tenant_id == self._tenant_id,
+                decisions.c.mandate_id == mandate_id,
+                decisions.c.agent_id == agent_id,
+                decisions.c.merchant_id == merchant_id,
+            )
+            .order_by(decisions.c.decided_at, decisions.c.decision_id)
+        ).mappings()
+        return [_decision(r) for r in rows]
+
+    def add_dispute(self, dispute: Dispute) -> None:
+        self._own(dispute.tenant_id)
+        self._conn.execute(insert(disputes).values(**dispute.model_dump()))
+
+    def get_dispute(self, dispute_id: DisputeId) -> Dispute | None:
+        return self._dispute(disputes.c.dispute_id == dispute_id, lock=False)
+
+    def get_dispute_for_payment(self, payment_id: PaymentId) -> Dispute | None:
+        return self._dispute(disputes.c.payment_id == payment_id, lock=False)
+
+    def lock_dispute(self, dispute_id: DisputeId) -> Dispute | None:
+        return self._dispute(disputes.c.dispute_id == dispute_id, lock=True)
+
+    def _dispute(self, where: ColumnElement[bool], *, lock: bool) -> Dispute | None:
+        query = select(disputes).where(disputes.c.tenant_id == self._tenant_id, where)
+        row = (
+            self._conn.execute(query.with_for_update() if lock else query).mappings().one_or_none()
         )
+        return None if row is None else Dispute.model_validate(dict(row))
+
+    def update_dispute(self, dispute: Dispute) -> None:
+        self._own(dispute.tenant_id)
+        changed = self._conn.execute(
+            update(disputes)
+            .where(
+                disputes.c.tenant_id == self._tenant_id,
+                disputes.c.dispute_id == dispute.dispute_id,
+            )
+            .values(status=dispute.status, updated_at=dispute.updated_at)
+        ).rowcount
+        if changed != 1:
+            raise ValueError(f"no Dispute {dispute.dispute_id}")
+
+    def add_evidence_pack(self, pack: EvidencePack) -> None:
+        self._conn.execute(
+            insert(evidence_packs).values(
+                tenant_id=self._tenant_id,
+                dispute_id=pack.dispute_id,
+                version=pack.version,
+                body=pack.body(),
+                bundle_hash=pack.bundle_hash,
+                built_at=pack.built_at,
+            )
+        )
+
+    def get_evidence_pack(self, dispute_id: DisputeId) -> EvidencePack | None:
+        row = self._conn.execute(
+            select(evidence_packs.c.body)
+            .where(
+                evidence_packs.c.tenant_id == self._tenant_id,
+                evidence_packs.c.dispute_id == dispute_id,
+            )
+            .order_by(evidence_packs.c.version.desc())
+            .limit(1)
+        ).one_or_none()
+        return None if row is None else EvidencePack.model_validate_json(bytes(row.body))
+
+    def audit_records_for(
+        self, decision_ids: AbstractSet[DecisionId], up_to_seq: int
+    ) -> list[SealedAuditRecord]:
+        if not decision_ids:
+            return []
+        rows = self._conn.execute(
+            select(audit_records.c.body, audit_records.c.record_hash)
+            .where(
+                audit_records.c.tenant_id == self._tenant_id,
+                audit_records.c.decision_id.in_(sorted(decision_ids)),
+                audit_records.c.seq <= up_to_seq,
+            )
+            .order_by(audit_records.c.seq)
+        )
+        return [unseal(bytes(r.body), r.record_hash) for r in rows]
+
+    def list_rail_events(self, payment_id: PaymentId) -> list[RailEvent]:
+        rows = self._conn.execute(
+            select(rail_events)
+            .where(
+                rail_events.c.tenant_id == self._tenant_id,
+                rail_events.c.payment_id == payment_id,
+            )
+            .order_by(rail_events.c.received_at, rail_events.c.event_id)
+        ).mappings()
+        return [RailEvent.model_validate(dict(r)) for r in rows]
 
     def lock_chain_head(self) -> tuple[int, str]:
         self._conn.execute(
@@ -793,6 +879,23 @@ class PostgresStore:
                 .where(o.tenant_id == tenant_id, o.event_id == event_id)
                 .values(delivered_at=at, gave_up=True)
             )
+
+
+def _decision(row: RowMapping) -> Decision:
+    return Decision(
+        decision_id=row["decision_id"],
+        tenant_id=row["tenant_id"],
+        mandate_id=row["mandate_id"],
+        agent_id=row["agent_id"],
+        merchant_id=row["merchant_id"],
+        amount=Money(minor=row["amount_minor"], currency=row["currency"]),
+        outcome=row["outcome"],
+        reason_codes=tuple(row["reason_codes"]),
+        risk_tier=row["risk_tier"],
+        policy_pack=PackRef(id=row["pack_id"], version=row["pack_version"], hash=row["pack_hash"]),
+        audit_record_id=row["audit_record_id"],
+        decided_at=row["decided_at"],
+    )
 
 
 def _consents(tenant_id: TenantId) -> Select[tuple[object, ...]]:

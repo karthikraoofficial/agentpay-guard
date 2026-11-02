@@ -14,6 +14,8 @@ from core.domain.consent import (
     ConsentStatus,
 )
 from core.domain.decisions import AuditRecordId, Decision, DecisionId
+from core.domain.disputes import Dispute, DisputeId
+from core.domain.evidence import EvidencePack
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.intents import IntentCheck, IntentId
 from core.domain.mandates import Mandate, MandateId, RevokedBy
@@ -50,6 +52,9 @@ class _TenantData:
     voids: dict[DecisionId, Void] = field(default_factory=dict)
     rail_events: dict[str, RailEvent] = field(default_factory=dict)
     webhook: WebhookEndpoint | None = None
+    disputes: dict[DisputeId, Dispute] = field(default_factory=dict)
+    # dispute_id -> pack versions, oldest first
+    packs: dict[DisputeId, tuple[EvidencePack, ...]] = field(default_factory=dict)
 
     def copy(self) -> "_TenantData":
         return _TenantData(
@@ -68,6 +73,8 @@ class _TenantData:
             dict(self.voids),
             dict(self.rail_events),
             self.webhook,
+            dict(self.disputes),
+            dict(self.packs),
         )
 
 
@@ -160,6 +167,63 @@ class InMemoryTransaction:
 
     def get_decision(self, decision_id: DecisionId) -> Decision | None:
         return self._data.decisions.get(decision_id)
+
+    def list_related_decisions(
+        self, mandate_id: MandateId, agent_id: AgentId, merchant_id: str
+    ) -> list[Decision]:
+        found = [
+            d
+            for d in self._data.decisions.values()
+            if (d.mandate_id, d.agent_id, d.merchant_id) == (mandate_id, agent_id, merchant_id)
+        ]
+        return sorted(found, key=lambda d: (d.decided_at, d.decision_id))
+
+    def add_dispute(self, dispute: Dispute) -> None:
+        self._own(dispute.tenant_id)
+        if self.get_dispute_for_payment(dispute.payment_id) is not None:
+            raise ValueError(f"Payment {dispute.payment_id} already has a Dispute")
+        self._data.disputes[dispute.dispute_id] = dispute
+
+    def get_dispute(self, dispute_id: DisputeId) -> Dispute | None:
+        return self._data.disputes.get(dispute_id)
+
+    def get_dispute_for_payment(self, payment_id: PaymentId) -> Dispute | None:
+        return next((d for d in self._data.disputes.values() if d.payment_id == payment_id), None)
+
+    def lock_dispute(self, dispute_id: DisputeId) -> Dispute | None:
+        return self._data.disputes.get(dispute_id)
+
+    def update_dispute(self, dispute: Dispute) -> None:
+        self._own(dispute.tenant_id)
+        if dispute.dispute_id not in self._data.disputes:
+            raise ValueError(f"no Dispute {dispute.dispute_id}")
+        self._data.disputes[dispute.dispute_id] = dispute
+
+    def add_evidence_pack(self, pack: EvidencePack) -> None:
+        versions = self._data.packs.get(pack.dispute_id, ())
+        if pack.dispute_id not in self._data.disputes:
+            raise ValueError(f"no Dispute {pack.dispute_id}")
+        if any(v.version == pack.version for v in versions):
+            raise ValueError(f"pack version {pack.version} of {pack.dispute_id} exists")
+        self._data.packs[pack.dispute_id] = (*versions, pack)
+
+    def get_evidence_pack(self, dispute_id: DisputeId) -> EvidencePack | None:
+        versions = self._data.packs.get(dispute_id, ())
+        return max(versions, key=lambda v: v.version) if versions else None
+
+    def audit_records_for(
+        self, decision_ids: AbstractSet[DecisionId], up_to_seq: int
+    ) -> list[SealedAuditRecord]:
+        found = [
+            s
+            for s in self._data.audit.values()
+            if s.record.decision_id in decision_ids and s.seq <= up_to_seq
+        ]
+        return sorted(found, key=lambda s: s.seq)
+
+    def list_rail_events(self, payment_id: PaymentId) -> list[RailEvent]:
+        found = [e for e in self._data.rail_events.values() if e.payment_id == payment_id]
+        return sorted(found, key=lambda e: (e.received_at, e.event_id))
 
     def get_webhook_endpoint(self) -> WebhookEndpoint | None:
         return self._data.webhook
