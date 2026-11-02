@@ -22,6 +22,7 @@ from api.routes import (
     consent_links,
     consent_requests,
     decisions,
+    disputes,
     intents,
     mandates,
     parties,
@@ -87,6 +88,7 @@ def create_app(
     app.include_router(consent_requests.router)
     app.include_router(consent_links.router)
     app.include_router(payments.router)
+    app.include_router(disputes.router)
     app.include_router(rail_webhooks.router)
     app.include_router(webhook_endpoint.router)
     app.add_middleware(_LinkCors, origin=settings.web_origin)

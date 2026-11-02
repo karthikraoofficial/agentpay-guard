@@ -107,6 +107,8 @@ def replay_record(
             what = f"{record.payment.status} Payment record"
         elif record.void is not None:
             what = "Void record"
+        elif record.dispute is not None:
+            what = "Dispute record"
         else:
             status = record.resolution.status if record.resolution else record.kind
             what = f"{status} Consent resolution"

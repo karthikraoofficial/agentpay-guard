@@ -144,6 +144,8 @@ audit_records = Table(
     Column("body", LargeBinary, nullable=False),
     Column("prev_hash", String, nullable=False),
     Column("record_hash", String, nullable=False),
+    # A Decision's records, for the Evidence bundle (#105).
+    Index("ix_audit_records_tenant_decision", "tenant_id", "decision_id"),
 )
 
 tenant_chain_heads = Table(
@@ -345,4 +347,47 @@ webhook_endpoints = Table(
     Column("secret_ciphertext", String, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("secret_rotated_at", DateTime(timezone=True), nullable=False),
+)
+
+# Disputes (#105): one per Payment. The Payer statement is kept here, never in the Audit
+# chain, which holds only its hash.
+disputes = Table(
+    "disputes",
+    metadata,
+    Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+    Column("dispute_id", String, primary_key=True),
+    Column("payment_id", String, nullable=False),
+    Column("decision_id", String, nullable=False),
+    Column("reason", String, nullable=False),
+    Column("respond_by", DateTime(timezone=True), nullable=False),
+    Column("payer_statement", String, nullable=True),
+    Column("status", String, nullable=False),
+    Column("opened_seq", BigInteger, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    ForeignKeyConstraint(
+        ["tenant_id", "payment_id"], ["payments.tenant_id", "payments.payment_id"]
+    ),
+    # One Dispute per Payment.
+    Index("ux_disputes_tenant_payment", "tenant_id", "payment_id", unique=True),
+    CheckConstraint(
+        "status IN ('open', 'in_review', 'ready', 'expired', 'withdrawn')",
+        name="disputes_status",
+    ),
+)
+
+# Evidence packs: one row per version, never changed once written. The body is the pack's
+# canonical JSON, kept outside the Audit chain (it may quote the Payer instruction).
+evidence_packs = Table(
+    "evidence_packs",
+    metadata,
+    Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+    Column("dispute_id", String, primary_key=True),
+    Column("version", Integer, primary_key=True),
+    Column("body", LargeBinary, nullable=False),
+    Column("bundle_hash", String, nullable=False),
+    Column("built_at", DateTime(timezone=True), nullable=False),
+    ForeignKeyConstraint(
+        ["tenant_id", "dispute_id"], ["disputes.tenant_id", "disputes.dispute_id"]
+    ),
 )

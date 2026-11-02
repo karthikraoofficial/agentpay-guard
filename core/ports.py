@@ -30,6 +30,8 @@ from core.domain.consent import (
     ConsentStatus,
 )
 from core.domain.decisions import AuditRecordId, Decision, DecisionId
+from core.domain.disputes import Dispute, DisputeId
+from core.domain.evidence import EvidencePack
 from core.domain.idempotency import IdempotencyKey as IdempotencyKey  # re-exported
 from core.domain.idempotency import IdempotencyRecord
 from core.domain.intents import IntentCheck, IntentId
@@ -204,9 +206,9 @@ class ModelGateway(Protocol):
 # --- UnitOfWork ----------------------------------------------------------------
 
 
-# Events the outbox carries: a step_up's Consent request, for its workflow, and the
-# Tenant webhook events, for the Tenant's endpoint.
-EventType = Literal["consent_requested"] | TenantEventType
+# Events the outbox carries: a step_up's Consent request and a new Dispute, each for its
+# workflow, and the Tenant webhook events, for the Tenant's endpoint.
+EventType = Literal["consent_requested", "dispute_opened"] | TenantEventType
 
 
 class DomainEvent(_Frozen):
@@ -359,6 +361,48 @@ class TenantTransaction(Protocol):
 
     def get_decision(self, decision_id: DecisionId) -> Decision | None: ...
 
+    def list_related_decisions(
+        self, mandate_id: MandateId, agent_id: AgentId, merchant_id: str
+    ) -> list[Decision]:
+        """Every Decision on a Mandate by one Agent at one merchant, oldest first."""
+        ...
+
+    def add_dispute(self, dispute: Dispute) -> None:
+        """Store a new Dispute. A second Dispute for the same Payment is refused."""
+        ...
+
+    def get_dispute(self, dispute_id: DisputeId) -> Dispute | None: ...
+
+    def get_dispute_for_payment(self, payment_id: PaymentId) -> Dispute | None: ...
+
+    def lock_dispute(self, dispute_id: DisputeId) -> Dispute | None:
+        """Read a Dispute and hold it until this transaction ends, so two builds of its
+        Evidence pack apply one after another."""
+        ...
+
+    def update_dispute(self, dispute: Dispute) -> None:
+        """Store a Dispute's new status."""
+        ...
+
+    def add_evidence_pack(self, pack: EvidencePack) -> None:
+        """Store a pack version. A version is written once and never changed."""
+        ...
+
+    def get_evidence_pack(self, dispute_id: DisputeId) -> EvidencePack | None:
+        """A Dispute's latest pack version, if one has been built."""
+        ...
+
+    def audit_records_for(
+        self, decision_ids: AbstractSet[DecisionId], up_to_seq: int
+    ) -> list[SealedAuditRecord]:
+        """The Audit records of these Decisions with seq at most `up_to_seq`, in seq
+        order."""
+        ...
+
+    def list_rail_events(self, payment_id: PaymentId) -> list[RailEvent]:
+        """The rail events kept for a Payment, oldest first."""
+        ...
+
     def get_webhook_endpoint(self) -> WebhookEndpoint | None:
         """The Tenant's webhook endpoint, if it registered one."""
         ...
@@ -506,7 +550,7 @@ class WebhookSender(Protocol):
 
 
 class Workflow(Protocol):
-    """Durable consent workflows (ADR-0009). MVP and production: Temporal.
+    """Durable consent and Dispute workflows (ADR-0009). MVP and production: Temporal.
 
     The workflow ID is the Consent request ID, so starting one twice does nothing.
     Postgres owns consent state; the workflow only waits, notifies and writes the expiry
@@ -519,6 +563,11 @@ class Workflow(Protocol):
     def signal_resolved(
         self, tenant_id: TenantId, consent_request_id: ConsentRequestId
     ) -> None: ...
+
+    def start_dispute_pack(self, tenant_id: TenantId, dispute_id: DisputeId) -> None:
+        """Start the workflow that builds a Dispute's Evidence pack. Its ID is the Dispute
+        ID, so starting it twice does nothing."""
+        ...
 
 
 # --- Telemetry -----------------------------------------------------------------

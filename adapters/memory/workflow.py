@@ -4,6 +4,7 @@ is wired in."""
 from datetime import datetime
 
 from core.domain.consent import ConsentRequestId
+from core.domain.disputes import DisputeId
 from core.ports import TenantId, Workflow
 
 
@@ -19,6 +20,7 @@ class InMemoryWorkflow:
         self.started: dict[ConsentRequestId, tuple[TenantId, datetime]] = {}
         self.start_calls = 0
         self.signals: list[tuple[TenantId, ConsentRequestId]] = []
+        self.dispute_starts: dict[DisputeId, TenantId] = {}
         self.fail_starts = False
         self.fail_signals = False
 
@@ -35,6 +37,12 @@ class InMemoryWorkflow:
             raise WorkflowUnavailable("signal refused by the test")
         self.signals.append((tenant_id, consent_request_id))
 
+    def start_dispute_pack(self, tenant_id: TenantId, dispute_id: DisputeId) -> None:
+        self.start_calls += 1
+        if self.fail_starts:
+            raise WorkflowUnavailable("start refused by the test")
+        self.dispute_starts.setdefault(dispute_id, tenant_id)
+
 
 class UnconfiguredWorkflow:
     """Used until a Temporal adapter is wired in: signals are dropped, since Postgres owns
@@ -47,6 +55,9 @@ class UnconfiguredWorkflow:
 
     def signal_resolved(self, tenant_id: TenantId, consent_request_id: ConsentRequestId) -> None:
         return None
+
+    def start_dispute_pack(self, tenant_id: TenantId, dispute_id: DisputeId) -> None:
+        raise WorkflowUnavailable("no workflow adapter is configured")
 
 
 _conforms: type[Workflow] = InMemoryWorkflow

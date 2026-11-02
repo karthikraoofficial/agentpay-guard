@@ -1,8 +1,9 @@
 """The consent worker: `uv run python -m workflows.worker`.
 
-One process hosts the `step_up_consent` workflow, its activities, the outbox relay that
-starts a workflow for every committed step_up (ADR-0009), and the reconciliation sweep
-that settles Payments whose rail webhook never came (#82). Stop it with Ctrl+C;
+One process hosts the `step_up_consent` and `dispute_pack` workflows, their activities,
+the outbox relay that starts a workflow for every committed step_up and Dispute
+(ADR-0009), and the reconciliation sweep that settles Payments whose rail webhook never
+came (#82). Stop it with Ctrl+C;
 killing it outright is safe too, since Temporal resumes every waiting workflow on the
 next worker from its history.
 """
@@ -27,9 +28,10 @@ from core.reconcile import SweepStore, sweep
 from core.relay import relay_once
 from core.settings import Settings, get_settings
 from core.tenant_webhooks import TenantWebhooks
-from workflows.activities import ConsentActivities
+from workflows.activities import ConsentActivities, DisputeActivities
 from workflows.client import TemporalWorkflow
 from workflows.consent import StepUpConsent
+from workflows.dispute import DisputePack
 
 log = logging.getLogger(__name__)
 
@@ -38,11 +40,12 @@ def consent_worker(
     client: Client, task_queue: str, store: UnitOfWork, clock: Clock, pool: ThreadPoolExecutor
 ) -> Worker:
     activities = ConsentActivities(store, clock)
+    disputes = DisputeActivities(store, clock)
     return Worker(
         client,
         task_queue=task_queue,
-        workflows=[StepUpConsent],
-        activities=[activities.notify, activities.expire],
+        workflows=[StepUpConsent, DisputePack],
+        activities=[activities.notify, activities.expire, disputes.build],
         activity_executor=pool,
     )
 
