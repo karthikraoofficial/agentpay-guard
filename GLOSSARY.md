@@ -243,3 +243,33 @@ _Avoid_: Tip, last record
 **Audit chain**:
 A Tenant's Audit records linked in sequence, each carrying the hash of the one before, so any edit or gap can be detected.
 _Avoid_: Ledger, blockchain, log
+
+## Disputes
+
+**Dispute**:
+A Tenant's report that the Payer has challenged one captured Payment, usually as a chargeback through their card issuer. A Payment has at most one Dispute. Opening one never changes the Payment or its Decision.
+_Avoid_: Chargeback (that is the network process), complaint, claim
+
+**Dispute reason**:
+Why the Payer says the Payment was wrong, from a small fixed set (such as unauthorised or not as described). Each maps to card network reason codes and names the evidence it needs.
+_Avoid_: Reason code (that is why a rule fired), chargeback code
+
+**Evidence bundle**:
+Every record a Dispute's pack is built from, gathered from the Audit chain and the Payment's rail history by fixed rules, never chosen by a model.
+_Avoid_: Context, trail, case file
+
+**Evidence pack**:
+What the Tenant submits to contest a Dispute: the Evidence bundle, the network reason codes, the Evidence strength and a narrative whose every claim cites an Audit record. A pack is ready only once a person signs it off.
+_Avoid_: Dispute pack (in prose), report, case
+
+**Evidence strength**:
+How well the Evidence bundle supports the charge for the Dispute reason: strong, mixed or weak, worked out by fixed rules, never by a model.
+_Avoid_: Score, confidence, win probability
+
+**Sign-off**:
+A named person at the Tenant approving one exact version of an Evidence pack, which marks it ready. The Tenant attests to who signed; AgentPay Guard does not verify it.
+_Avoid_: Approval (that is for Consent requests), review
+
+**Review link**:
+An expiring link to one Dispute's Evidence pack, which the Tenant mints for a named reviewer. Whoever opens it is treated as that reviewer, and it is used up by Sign-off. A newer link for the same Dispute replaces it.
+_Avoid_: Sign-off link, Consent link (that is for Consent requests)
