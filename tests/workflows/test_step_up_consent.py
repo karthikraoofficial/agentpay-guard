@@ -52,7 +52,7 @@ EVERYTHING = 100_000
 @pytest.fixture
 def approvals(migrated_database_url: str, tmp_path: Path) -> Iterator[Approvals]:
     store = PostgresStore(create_engine(migrated_database_url))
-    clock = MovableClock(NOW)
+    clock = MovableClock(_ahead_of_real_time())
     workflow = InMemoryWorkflow()
     settings = make_settings(policy_packs_dir=phase_1_packs(tmp_path))
     app = create_app(settings, store=store, clock=clock, workflow=workflow)
@@ -62,6 +62,13 @@ def approvals(migrated_database_url: str, tmp_path: Path) -> Iterator[Approvals]
     relay_once(store, InMemoryWorkflow(), clock, tenant_webhooks(store, clock), limit=EVERYTHING)
     yield Approvals(api)
     api.assert_evidence_holds()
+
+
+def _ahead_of_real_time() -> datetime:
+    """The test clock for the time-skipping server. Its timers only run if the expiry the
+    API computes is still ahead of Temporal's clock, which starts at real time, so a fixed
+    date stops working once real time passes it."""
+    return max(NOW, decision_time(datetime.now(UTC) + timedelta(days=1)))
 
 
 def _queue() -> str:
