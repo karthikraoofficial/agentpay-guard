@@ -5,6 +5,7 @@ statuses, codes, amounts in minor units and times only."""
 from datetime import datetime
 
 from core.domain.consent import ConsentRequest, ConsentResolution
+from core.domain.disputes import Dispute
 from core.domain.parties import new_id
 from core.domain.payments import Payment
 from core.domain.webhooks import utc_iso
@@ -59,5 +60,26 @@ def payment_settled(payment: Payment, now: datetime) -> DomainEvent:
             "amount_minor": payment.amount.minor,
             "currency": payment.amount.currency,
             "failure_code": payment.failure_code,
+        },
+    )
+
+
+def dispute_changed(dispute: Dispute, pack_version: int | None, now: datetime) -> DomainEvent:
+    """`dispute.in_review` (a pack version was built), `dispute.ready` (signed off) or
+    `dispute.expired`. Ids and status only: never the Payer statement or the narrative."""
+    if dispute.status not in ("in_review", "ready", "expired"):
+        raise ValueError(f"no Tenant webhook for a Dispute that is {dispute.status}")
+    return DomainEvent(
+        event_id=new_id("evt"),
+        tenant_id=dispute.tenant_id,
+        event_type=f"dispute.{dispute.status}",
+        occurred_at=now,
+        payload={
+            "dispute_id": dispute.dispute_id,
+            "payment_id": dispute.payment_id,
+            "decision_id": dispute.decision_id,
+            "status": dispute.status,
+            "respond_by": utc_iso(dispute.respond_by),
+            "pack_version": pack_version,
         },
     )

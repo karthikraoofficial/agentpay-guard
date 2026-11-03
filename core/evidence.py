@@ -36,6 +36,7 @@ from core.domain.payments import PaymentId
 from core.evidence_strength import assess
 from core.policy.packs import load_active_pack
 from core.ports import Clock, TenantId, TenantTransaction, UnitOfWork
+from core.tenant_events import dispute_changed
 
 # --- The readers ---------------------------------------------------------------------
 
@@ -221,7 +222,9 @@ def build_evidence_pack(
                 narrative_note=note,
             )
         )
-        tx.update_dispute(dispute.model_copy(update={"status": "in_review", "updated_at": now}))
+        in_review = dispute.model_copy(update={"status": "in_review", "updated_at": now})
+        tx.update_dispute(in_review)
+        tx.publish(dispute_changed(in_review, version, now))
     return "built"
 
 

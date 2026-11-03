@@ -204,7 +204,7 @@ The workflow survives its worker being killed while it waits. CI tests this by k
 
 ## Tenant webhooks
 
-Instead of polling, a Tenant can register one HTTPS endpoint (above) and receive four events: `consent_request.created`, `consent_request.resolved`, `payment.captured` and `payment.failed`. Each is written to the outbox in the same transaction as its change, so a rolled-back change sends nothing, and the worker's relay posts it:
+Instead of polling, a Tenant can register one HTTPS endpoint (above) and receive seven events: `consent_request.created`, `consent_request.resolved`, `payment.captured`, `payment.failed`, and for Disputes `dispute.in_review` (a pack version was built: review it, again after each Regenerate), `dispute.ready` (signed off: submit it) and `dispute.expired` (`respond_by` passed unsigned). A Dispute event's `data` is `dispute_id`, `payment_id`, `decision_id`, `status`, `respond_by` and `pack_version`, never the Payer statement or the narrative; a withdrawal sends nothing, since you made it. Each is written to the outbox in the same transaction as its change, so a rolled-back change sends nothing, and the worker's relay posts it:
 
 ```http
 POST <your endpoint>
