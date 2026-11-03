@@ -30,7 +30,7 @@ from core.domain.decisions import (
     EngineOutput,
     PackRef,
 )
-from core.domain.disputes import DisputeId, DisputeReason
+from core.domain.disputes import DisputeId, DisputeReason, Reviewer
 from core.domain.mandates import Mandate
 from core.domain.money import Money
 from core.domain.parties import Agent, TenantId
@@ -39,7 +39,9 @@ from core.domain.rails import RailName
 from core.domain.signals import Signals
 from core.domain.voids import VoidVia
 
-AuditKind = Literal["decision", "consent_resolution", "void", "payment", "dispute_opened"]
+AuditKind = Literal[
+    "decision", "consent_resolution", "void", "payment", "dispute_opened", "dispute_signed_off"
+]
 ZERO_HASH = "sha256:" + "00" * 32
 
 
@@ -99,6 +101,15 @@ class DisputeEvidence(_Frozen):
     payer_statement_hash: str | None
 
 
+class SignOffEvidence(_Frozen):
+    """Who signed off which pack version, and the pack hash that fixes its content."""
+
+    dispute_id: DisputeId
+    pack_version: int
+    pack_hash: str
+    reviewer: Reviewer
+
+
 class AuditRecord(_Frozen):
     audit_record_id: AuditRecordId
     tenant_id: TenantId
@@ -122,6 +133,8 @@ class AuditRecord(_Frozen):
     void: VoidEvidence | None = None
     # Only on a dispute_opened record.
     dispute: DisputeEvidence | None = None
+    # Only on a dispute_signed_off record.
+    sign_off: SignOffEvidence | None = None
 
     @model_validator(mode="after")
     def _matches_kind(self) -> Self:
@@ -132,10 +145,12 @@ class AuditRecord(_Frozen):
             raise ValueError("a void record, and only a void record, has a void")
         if (self.kind == "dispute_opened") != (self.dispute is not None):
             raise ValueError("a dispute_opened record, and only that, has a dispute")
+        if (self.kind == "dispute_signed_off") != (self.sign_off is not None):
+            raise ValueError("a dispute_signed_off record, and only that, has a sign_off")
         if self.kind == "decision":
             if None in ran or self.resolution is not None:
                 raise ValueError("a decision record has inputs, pack and output, no resolution")
-        elif self.kind in ("payment", "void", "dispute_opened"):
+        elif self.kind in ("payment", "void", "dispute_opened", "dispute_signed_off"):
             if ran != (None, None, None) or self.resolution is not None:
                 raise ValueError(f"a {self.kind} record has no engine run and no resolution")
         elif self.kind == "consent_resolution":
@@ -159,7 +174,9 @@ class AuditRecord(_Frozen):
         return {k: v for k, v in data.items() if not (k in _OPTIONAL and v is None)}
 
 
-_OPTIONAL = frozenset({"inputs", "pack", "output", "resolution", "payment", "void", "dispute"})
+_OPTIONAL = frozenset(
+    {"inputs", "pack", "output", "resolution", "payment", "void", "dispute", "sign_off"}
+)
 
 
 class SealedAuditRecord(_Frozen):

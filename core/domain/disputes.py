@@ -3,9 +3,9 @@ GLOSSARY.md). A Payment has at most one Dispute, and opening one never changes t
 Payment, its Decision or Spent this month."""
 
 import hashlib
-from typing import Literal, NewType
+from typing import Annotated, Literal, NewType
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
 from core.domain.decisions import DecisionId
 from core.domain.parties import TenantId
@@ -27,7 +27,32 @@ DisputeStatus = Literal["open", "in_review", "ready", "expired", "withdrawn"]
 
 DisputeRefusal = Literal["PAYMENT_NOT_DISPUTABLE", "PAYMENT_ALREADY_DISPUTED"]
 
+SignOffRefusal = Literal["DISPUTE_NOT_IN_REVIEW", "PACK_VERSION_NOT_CURRENT"]
+
+_Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
 PAYER_STATEMENT_MAX = 2000
+
+
+class Reviewer(BaseModel):
+    """The person at the Tenant who signs off a pack. The Tenant attests who it was;
+    AgentPay Guard does not verify it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: _Name
+    name: _Name
+
+
+class SignOff(BaseModel):
+    """A named person approving one exact pack version, identified by its pack hash."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reviewer: Reviewer
+    pack_version: int = Field(ge=1)
+    pack_hash: str
+    signed_off_at: AwareDatetime
 
 
 class Dispute(BaseModel):
@@ -46,8 +71,22 @@ class Dispute(BaseModel):
     # The seq of the Dispute's `dispute_opened` Audit record. The Evidence bundle reads the
     # chain only up to here, so it is the same however much the chain grows later.
     opened_seq: int = Field(ge=1)
+    # Set once, by Sign-off, which makes the Dispute ready.
+    sign_off: SignOff | None = None
     created_at: AwareDatetime
     updated_at: AwareDatetime
+
+
+def sign_off_refusal(
+    status: DisputeStatus, current_version: int | None, pack_version: int
+) -> SignOffRefusal | None:
+    """Why a pack version can't be signed off, or None if it can: only the latest pack of
+    a Dispute in review."""
+    if status != "in_review" or current_version is None:
+        return "DISPUTE_NOT_IN_REVIEW"
+    if pack_version != current_version:
+        return "PACK_VERSION_NOT_CURRENT"
+    return None
 
 
 def statement_hash(statement: str | None) -> str | None:

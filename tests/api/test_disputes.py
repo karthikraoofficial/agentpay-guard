@@ -4,6 +4,7 @@ reads the Evidence pack built for it (ADR-0018).
 The `api` fixture verifies every chain and replays every Decision when each test ends,
 so `dispute_opened` records must keep the chain intact."""
 
+import hashlib
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,9 @@ from typing import Any
 import pytest
 
 from api.admin import replay_record
+from core.domain.canonical_json import canonical_json
 from core.domain.disputes import DisputeId
+from core.domain.evidence import Claim, EvidencePack
 from core.evidence import build_evidence_pack, gather_bundle
 from core.relay import relay_once
 from tests.api.conftest import NOW, Api, tenant_webhooks
@@ -20,6 +23,7 @@ from tests.api.test_tenants_payers_agents import assert_problem
 from tests.conftest import make_settings
 from tests.packs import phase_1_packs
 
+REVIEWER = {"id": "ops-7", "name": "Meera Iyer"}
 RESPOND_BY = (NOW + timedelta(days=10)).isoformat().replace("+00:00", "Z")
 
 
@@ -48,6 +52,14 @@ class Disputes(Webhooks):
 
     def get(self, dispute_id: str, headers=None):  # type: ignore[no-untyped-def]
         return self.api.client.get(f"/v1/disputes/{dispute_id}", headers=headers or self.manage)
+
+    def sign_off(self, dispute_id: str, *, headers=None, key: str | None = None, **body: Any):  # type: ignore[no-untyped-def]
+        sent: dict[str, Any] = {"pack_version": 1, "reviewer": REVIEWER} | body
+        path = f"/v1/disputes/{dispute_id}/sign-off"
+        headers = headers or self.manage
+        if key is None:
+            return self.api.post(path, headers, sent)
+        return self.api.client.post(path, headers={**headers, "Idempotency-Key": key}, json=sent)
 
     def relay(self) -> None:
         api = self.api
@@ -306,3 +318,127 @@ def test_a_dispute_another_tenant_owns_is_not_built(disputes: Disputes) -> None:
     other = Disputes(disputes.api, "globex")
 
     assert other.build(dispute["dispute_id"]) == "missing"
+
+
+# --- Sign-off ---------------------------------------------------------------------------
+
+
+def test_signing_off_the_current_pack_makes_the_dispute_ready(disputes: Disputes) -> None:
+    dispute = disputes.built(disputes.captured())
+    disputes.api.clock.advance(timedelta(hours=2))
+
+    response = disputes.sign_off(dispute["dispute_id"])
+
+    assert response.status_code == 200, response.text
+    ready = response.json()
+    assert ready["status"] == "ready"
+    assert ready["sign_off"] == {
+        "reviewer": REVIEWER,
+        "pack_version": 1,
+        "pack_hash": dispute["pack_hash"],
+        "signed_off_at": "2026-11-02T11:30:00Z",
+    }
+    assert disputes.get(dispute["dispute_id"]).json() == ready
+
+
+def test_the_pack_hash_is_the_hash_of_the_pack_as_shown(disputes: Disputes) -> None:
+    dispute = disputes.built(disputes.captured())
+
+    shown = EvidencePack.model_validate(dispute["pack"])
+
+    assert dispute["pack_hash"] == "sha256:" + hashlib.sha256(canonical_json(shown)).hexdigest()
+
+
+def test_sign_off_writes_the_pack_hash_into_the_audit_chain(disputes: Disputes) -> None:
+    dispute = disputes.built(disputes.captured())
+
+    disputes.sign_off(dispute["dispute_id"])
+
+    record = disputes.chain()[-1]
+    assert (record.kind, record.decision_id) == ("dispute_signed_off", dispute["decision_id"])
+    assert record.sign_off.model_dump() == {
+        "dispute_id": dispute["dispute_id"],
+        "pack_version": 1,
+        "pack_hash": dispute["pack_hash"],
+        "reviewer": REVIEWER,
+    }
+
+
+def test_a_pack_version_that_isnt_current_cannot_be_signed(disputes: Disputes) -> None:
+    dispute = disputes.built(disputes.captured())
+
+    assert_problem(
+        disputes.sign_off(dispute["dispute_id"], pack_version=2), 409, "PACK_VERSION_NOT_CURRENT"
+    )
+
+
+def test_a_dispute_whose_pack_isnt_built_cannot_be_signed(disputes: Disputes) -> None:
+    dispute = disputes.open(disputes.captured()["payment_id"]).json()
+
+    assert_problem(disputes.sign_off(dispute["dispute_id"]), 409, "DISPUTE_NOT_IN_REVIEW")
+
+
+def test_a_signed_off_dispute_cannot_be_signed_again(disputes: Disputes) -> None:
+    dispute = disputes.built(disputes.captured())
+    disputes.sign_off(dispute["dispute_id"])
+
+    again = disputes.sign_off(dispute["dispute_id"], reviewer={"id": "ops-8", "name": "Ravi"})
+
+    assert_problem(again, 409, "DISPUTE_NOT_IN_REVIEW")
+    assert [r.kind for r in disputes.chain()].count("dispute_signed_off") == 1
+
+
+def test_a_retry_with_the_same_key_signs_off_once(disputes: Disputes) -> None:
+    dispute = disputes.built(disputes.captured())
+
+    first = disputes.sign_off(dispute["dispute_id"], key="so-1")
+    again = disputes.sign_off(dispute["dispute_id"], key="so-1")
+
+    assert (first.status_code, again.status_code) == (200, 200)
+    assert first.json() == again.json()
+    assert [r.kind for r in disputes.chain()].count("dispute_signed_off") == 1
+
+
+@pytest.mark.parametrize(
+    "reviewer", [{"id": "", "name": "Meera"}, {"id": "ops-7"}, {"id": "ops-7", "name": " "}]
+)
+def test_sign_off_needs_a_named_reviewer(disputes: Disputes, reviewer: dict[str, str]) -> None:
+    dispute = disputes.built(disputes.captured())
+
+    assert_problem(
+        disputes.sign_off(dispute["dispute_id"], reviewer=reviewer), 422, "VALIDATION_FAILED"
+    )
+
+
+def test_sign_off_needs_a_manage_key_and_the_tenants_dispute(disputes: Disputes) -> None:
+    dispute = disputes.built(disputes.captured())
+    other = Disputes(disputes.api, "globex")
+
+    for key in (disputes.decide, disputes.consent):
+        assert_problem(
+            disputes.sign_off(dispute["dispute_id"], headers=key), 403, "INSUFFICIENT_SCOPE"
+        )
+    assert_problem(other.sign_off(dispute["dispute_id"]), 404, "DISPUTE_NOT_FOUND")
+
+
+def test_a_stored_pack_that_differs_from_the_signed_hash_is_detectable(disputes: Disputes) -> None:
+    dispute = disputes.built(disputes.captured())
+    disputes.sign_off(dispute["dispute_id"])
+    signed = disputes.chain()[-1].sign_off.pack_hash
+
+    tampered = EvidencePack.model_validate(dispute["pack"]).model_copy(
+        update={
+            "narrative": (
+                Claim(
+                    text="The Payer asked for this.",
+                    cites=(dispute["pack"]["narrative"][0]["cites"][0],),
+                ),
+            )
+        }
+    )
+
+    assert tampered.hash() != signed
+    assert (
+        EvidencePack.model_validate(disputes.get(dispute["dispute_id"]).json()["pack"]).hash()
+        == signed
+    )

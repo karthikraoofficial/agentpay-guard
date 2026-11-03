@@ -109,6 +109,8 @@ def replay_record(
             what = "Void record"
         elif record.dispute is not None:
             what = "Dispute record"
+        elif record.sign_off is not None:
+            what = "Sign-off record"
         else:
             status = record.resolution.status if record.resolution else record.kind
             what = f"{status} Consent resolution"

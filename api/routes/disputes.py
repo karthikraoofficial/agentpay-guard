@@ -13,7 +13,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from api.deps import ClockDep, IdemKey, ManageTenant, StoreDep
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
-from core.disputes import dispute_refusal, open_dispute
+from core.disputes import dispute_refusal, open_dispute, sign_off
 from core.domain.decisions import DecisionId, decision_time
 from core.domain.disputes import (
     PAYER_STATEMENT_MAX,
@@ -21,6 +21,9 @@ from core.domain.disputes import (
     DisputeId,
     DisputeReason,
     DisputeStatus,
+    Reviewer,
+    SignOff,
+    sign_off_refusal,
 )
 from core.domain.evidence import EvidencePack
 from core.domain.payments import Payment, PaymentId
@@ -49,13 +52,26 @@ class DisputeOut(BaseModel):
     respond_by: AwareDatetime
     created_at: AwareDatetime
     updated_at: AwareDatetime
-    # The latest Evidence pack, once one is built.
+    # Who signed off which pack version, once the Dispute is ready.
+    sign_off: SignOff | None
+    # The latest Evidence pack, once one is built, and its pack hash: what a Sign-off
+    # approves.
     pack: EvidencePack | None
+    pack_hash: str | None
+
+
+class SignOffBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # The version the reviewer read; refused unless it is still the latest.
+    pack_version: int = Field(ge=1)
+    reviewer: Reviewer
 
 
 def _out(dispute: Dispute, pack: EvidencePack | None) -> DisputeOut:
     return DisputeOut.model_validate(
-        dispute.model_dump(include=set(DisputeOut.model_fields)) | {"pack": pack}
+        dispute.model_dump(include=set(DisputeOut.model_fields))
+        | {"pack": pack, "pack_hash": None if pack is None else pack.hash()}
     )
 
 
@@ -92,6 +108,39 @@ def create_dispute(
         return run_idempotent(tx, key, fingerprint, clock, write)
 
 
+@router.post("/{dispute_id}/sign-off", response_model=DisputeOut)
+def sign_off_dispute(
+    request: Request,
+    dispute_id: str,
+    body: SignOffBody,
+    tenant: ManageTenant,
+    store: StoreDep,
+    clock: ClockDep,
+    key: IdemKey,
+) -> Response:
+    """A named person at the Tenant approves the current pack version: its pack hash goes
+    into the Audit chain and the Dispute becomes ready."""
+    fingerprint = request_hash(request, body)
+
+    def write(read_at: datetime) -> tuple[int, DisputeOut]:
+        now = decision_time(read_at)
+        dispute = tx.lock_dispute(DisputeId(dispute_id))
+        if dispute is None:
+            raise ApiError(404, "DISPUTE_NOT_FOUND", f"No Dispute {dispute_id}.")
+        pack = tx.get_evidence_pack(dispute.dispute_id)
+        refusal = sign_off_refusal(
+            dispute.status, None if pack is None else pack.version, body.pack_version
+        )
+        if refusal is not None:
+            raise ApiError(409, refusal, _REFUSAL_TEXT[refusal])
+        if pack is None:  # sign_off_refusal refuses this; keeps mypy sure
+            raise RuntimeError("a Dispute in review has a pack")
+        return 200, _out(sign_off(tx, dispute, pack, body.reviewer, now), pack)
+
+    with store.transaction(tenant) as tx:
+        return run_idempotent(tx, key, fingerprint, clock, write)
+
+
 @router.get("/{dispute_id}")
 def get_dispute(dispute_id: str, tenant: ManageTenant, store: StoreDep) -> DisputeOut:
     with store.transaction(tenant) as tx:
@@ -112,4 +161,7 @@ def _locked(tx: TenantTransaction, payment_id: PaymentId) -> Payment:
 _REFUSAL_TEXT = {
     "PAYMENT_NOT_DISPUTABLE": "Only a captured Payment can be disputed.",
     "PAYMENT_ALREADY_DISPUTED": "This Payment already has a Dispute.",
+    "DISPUTE_NOT_IN_REVIEW": "Only a Dispute whose pack is built and not yet signed off "
+    "can be signed off.",
+    "PACK_VERSION_NOT_CURRENT": "That pack version is not the latest; review the latest one.",
 }

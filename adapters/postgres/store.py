@@ -51,7 +51,7 @@ from core.domain.consent import (
     ConsentStatus,
 )
 from core.domain.decisions import AuditRecordId, Decision, DecisionId, PackRef
-from core.domain.disputes import Dispute, DisputeId
+from core.domain.disputes import Dispute, DisputeId, Reviewer, SignOff
 from core.domain.evidence import EvidencePack
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.intents import IntentCheck, IntentContent, IntentId
@@ -533,7 +533,7 @@ class PostgresTransaction:
 
     def add_dispute(self, dispute: Dispute) -> None:
         self._own(dispute.tenant_id)
-        self._conn.execute(insert(disputes).values(**dispute.model_dump()))
+        self._conn.execute(insert(disputes).values(**_dispute_row(dispute)))
 
     def get_dispute(self, dispute_id: DisputeId) -> Dispute | None:
         return self._dispute(disputes.c.dispute_id == dispute_id, lock=False)
@@ -549,17 +549,22 @@ class PostgresTransaction:
         row = (
             self._conn.execute(query.with_for_update() if lock else query).mappings().one_or_none()
         )
-        return None if row is None else Dispute.model_validate(dict(row))
+        return None if row is None else _dispute(row)
 
     def update_dispute(self, dispute: Dispute) -> None:
         self._own(dispute.tenant_id)
+        row = _dispute_row(dispute)
         changed = self._conn.execute(
             update(disputes)
             .where(
                 disputes.c.tenant_id == self._tenant_id,
                 disputes.c.dispute_id == dispute.dispute_id,
             )
-            .values(status=dispute.status, updated_at=dispute.updated_at)
+            .values(
+                status=row["status"],
+                updated_at=row["updated_at"],
+                **{column: row[column] for column in _SIGN_OFF_COLUMNS},
+            )
         ).rowcount
         if changed != 1:
             raise ValueError(f"no Dispute {dispute.dispute_id}")
@@ -879,6 +884,40 @@ class PostgresStore:
                 .where(o.tenant_id == tenant_id, o.event_id == event_id)
                 .values(delivered_at=at, gave_up=True)
             )
+
+
+_SIGN_OFF_COLUMNS = (
+    "reviewer_id",
+    "reviewer_name",
+    "signed_off_version",
+    "signed_off_pack_hash",
+    "signed_off_at",
+)
+
+
+def _dispute_row(dispute: Dispute) -> dict[str, object]:
+    row = dispute.model_dump(exclude={"sign_off"})
+    signed = dispute.sign_off
+    return row | {
+        "reviewer_id": signed.reviewer.id if signed else None,
+        "reviewer_name": signed.reviewer.name if signed else None,
+        "signed_off_version": signed.pack_version if signed else None,
+        "signed_off_pack_hash": signed.pack_hash if signed else None,
+        "signed_off_at": signed.signed_off_at if signed else None,
+    }
+
+
+def _dispute(row: RowMapping) -> Dispute:
+    fields = {k: v for k, v in row.items() if k in Dispute.model_fields}
+    sign_off = None
+    if row["signed_off_at"] is not None:
+        sign_off = SignOff(
+            reviewer=Reviewer(id=row["reviewer_id"], name=row["reviewer_name"]),
+            pack_version=row["signed_off_version"],
+            pack_hash=row["signed_off_pack_hash"],
+            signed_off_at=row["signed_off_at"],
+        )
+    return Dispute.model_validate(fields | {"sign_off": sign_off})
 
 
 def _decision(row: RowMapping) -> Decision:
