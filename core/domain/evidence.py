@@ -12,8 +12,8 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validato
 from core.domain.audit import AuditKind, AuditRecord
 from core.domain.canonical_json import canonical_json
 from core.domain.consent import ConsentRequestId
-from core.domain.decisions import AuditRecordId
-from core.domain.disputes import DisputeId
+from core.domain.decisions import AuditRecordId, PackRef
+from core.domain.disputes import DisputeId, DisputeReason, EvidenceFact, EvidenceStrength
 from core.domain.mandates import Mandate
 
 
@@ -63,13 +63,34 @@ class EvidenceBundle(_Frozen):
     # Other Decisions by the same Agent at the same merchant under the Mandate, made
     # before the Dispute was opened: context, such as an earlier attempt that was blocked.
     related: tuple[BundleRecord, ...]
+    # When the Mandate was revoked, if that happened before the Dispute was opened. The
+    # snapshot shows the Mandate as the Decision saw it, so a later Revocation is here.
+    mandate_revoked_at: AwareDatetime | None = None
+    # The `captured` payment records of the Payer's other Decisions at this merchant,
+    # under any Mandate, before the Dispute was opened: what a duplicate is checked against.
+    payer_payments: tuple[BundleRecord, ...] = ()
 
     def cites(self) -> frozenset[AuditRecordId]:
         """Every Audit record a claim may cite."""
-        return frozenset(r.audit_record_id for r in (*self.trail, *self.related))
+        records = (*self.trail, *self.related, *self.payer_payments)
+        return frozenset(r.audit_record_id for r in records)
 
     def hash(self) -> str:
         return "sha256:" + hashlib.sha256(canonical_json(self)).hexdigest()
+
+
+class Assessment(_Frozen):
+    """What the Policy pack's Dispute rules make of the bundle: worked out by code, never
+    by a model."""
+
+    reason: DisputeReason
+    visa_code: str
+    mastercard_code: str
+    strength: EvidenceStrength
+    # The facts that hold, and the facts the reason needs for strong evidence that don't.
+    facts: tuple[EvidenceFact, ...]
+    missing: tuple[EvidenceFact, ...]
+    notes: tuple[str, ...] = ()
 
 
 class Claim(_Frozen):
@@ -88,6 +109,10 @@ class EvidencePack(_Frozen):
     narrative: tuple[Claim, ...]
     narrative_source: NarrativeSource
     built_at: AwareDatetime
+    # The Policy pack active when this version was built, and what its Dispute rules made
+    # of the bundle. No assessment from a pack without Dispute rules.
+    policy_pack: PackRef | None = None
+    assessment: Assessment | None = None
 
     @model_validator(mode="after")
     def _cited_from_the_bundle(self) -> Self:

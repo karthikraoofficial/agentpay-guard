@@ -531,6 +531,23 @@ class PostgresTransaction:
         ).mappings()
         return [_decision(r) for r in rows]
 
+    def list_payer_decisions(self, payer_id: PayerId, merchant_id: str) -> list[Decision]:
+        rows = self._conn.execute(
+            select(decisions)
+            .join(
+                mandates,
+                (mandates.c.tenant_id == decisions.c.tenant_id)
+                & (mandates.c.mandate_id == decisions.c.mandate_id),
+            )
+            .where(
+                decisions.c.tenant_id == self._tenant_id,
+                decisions.c.merchant_id == merchant_id,
+                mandates.c.payer_id == payer_id,
+            )
+            .order_by(decisions.c.decided_at, decisions.c.decision_id)
+        ).mappings()
+        return [_decision(r) for r in rows]
+
     def add_dispute(self, dispute: Dispute) -> None:
         self._own(dispute.tenant_id)
         self._conn.execute(insert(disputes).values(**_dispute_row(dispute)))

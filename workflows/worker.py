@@ -12,6 +12,7 @@ import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from temporalio.client import Client
@@ -36,11 +37,20 @@ from workflows.dispute import DisputePack
 log = logging.getLogger(__name__)
 
 
+# The released Policy packs, for workers that aren't given a directory (tests).
+PACKS = Path(__file__).resolve().parents[1] / "policy_packs"
+
+
 def consent_worker(
-    client: Client, task_queue: str, store: UnitOfWork, clock: Clock, pool: ThreadPoolExecutor
+    client: Client,
+    task_queue: str,
+    store: UnitOfWork,
+    clock: Clock,
+    pool: ThreadPoolExecutor,
+    packs_dir: Path = PACKS,
 ) -> Worker:
     activities = ConsentActivities(store, clock)
-    disputes = DisputeActivities(store, clock)
+    disputes = DisputeActivities(store, clock, packs_dir)
     return Worker(
         client,
         task_queue=task_queue,
@@ -106,7 +116,9 @@ async def main() -> None:
     clock = SystemClock()
     client = await Client.connect(settings.temporal_address, namespace=settings.temporal_namespace)
     with ThreadPoolExecutor(max_workers=8) as pool:
-        worker = consent_worker(client, settings.temporal_task_queue, store, clock, pool)
+        worker = consent_worker(
+            client, settings.temporal_task_queue, store, clock, pool, settings.policy_packs_dir
+        )
         async with worker:
             log.info("consent worker polling task queue %s", settings.temporal_task_queue)
             loops = [

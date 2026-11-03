@@ -12,7 +12,7 @@ from tests.api.test_mandates import Setup, _iso
 from tests.api.test_tenants_payers_agents import assert_problem
 from tests.packs import release_test_pack
 
-PACK_HASH = "sha256:38a24d444876c4356ed32a314ea3c8758b3667f7c4768e72647dab29d79dc420"  # 1.3.0
+PACK_HASH = "sha256:95072d21ff7003e1e4d584545aa741155223352bd694ac888f90a54e22055a48"  # 1.4.0
 
 
 class Pay(Setup):
@@ -57,7 +57,7 @@ def test_an_allowed_decision_returns_the_full_envelope(pay: Pay) -> None:
     assert body["outcome"] == "allow"
     assert body["reason_codes"] == []
     assert body["risk_tier"] == "low"
-    assert body["policy_pack"] == {"id": "default", "version": "1.3.0", "hash": PACK_HASH}
+    assert body["policy_pack"] == {"id": "default", "version": "1.4.0", "hash": PACK_HASH}
     assert body["decided_at"] == "2026-11-02T09:30:00Z"
     assert body["payable_until"] == "2026-11-02T09:45:00Z"
     assert body["step_up"] is None

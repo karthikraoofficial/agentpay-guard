@@ -22,6 +22,25 @@ DisputeReason = Literal[
     "cancelled_recurring",
 ]
 
+# Facts about an Evidence bundle that fixed code works out and the Policy pack weighs per
+# Dispute reason (ADR-0002): which make the evidence strong, and which make it weak.
+EvidenceFact = Literal[
+    "decision_within_mandate",  # allowed, or a step-up the Payer approved
+    "payer_intent_confirmed",  # an Intent match, or an approval with an Attestation
+    "intent_mismatch_approved",  # the Payer approved a step-up whose Intent check said mismatch
+    "mandate_revoked_before_capture",  # revoked after the Decision, before the capture
+    "mandate_active_at_decision",
+    "mandate_revoked_before_decision",
+    "amount_matches_decision",  # the captured amount is the Decision's
+    "amount_differs_from_decision",
+    "within_quoted_total",  # at or below the Quoted total of the Intent check cited
+    "no_duplicate_payment",
+    "duplicate_payment_found",  # same Payer, merchant and amount captured within the window
+    "fulfilment_evidence",  # never in a bundle: only the merchant holds it
+]
+
+EvidenceStrength = Literal["strong", "mixed", "weak"]
+
 # open: the Evidence pack is being built. in_review: built, waiting for Sign-off.
 DisputeStatus = Literal["open", "in_review", "ready", "expired", "withdrawn"]
 

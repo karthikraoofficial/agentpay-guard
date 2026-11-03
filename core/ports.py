@@ -375,6 +375,11 @@ class TenantTransaction(Protocol):
         """Every Decision on a Mandate by one Agent at one merchant, oldest first."""
         ...
 
+    def list_payer_decisions(self, payer_id: PayerId, merchant_id: str) -> list[Decision]:
+        """Every Decision at one merchant under any of the Payer's Mandates, oldest
+        first."""
+        ...
+
     def add_dispute(self, dispute: Dispute) -> None:
         """Store a new Dispute. A second Dispute for the same Payment is refused."""
         ...

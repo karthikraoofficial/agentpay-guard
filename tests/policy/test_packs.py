@@ -19,17 +19,29 @@ RELEASED = {
 }
 
 
-def test_the_active_default_pack_is_1_3_0_which_only_adds_the_payment_window() -> None:
+def test_the_active_default_pack_is_1_4_0_which_only_adds_the_dispute_rules() -> None:
     loaded = load_active_pack(PACKS, "default")
+    phase_4 = load_pack(PACKS, "default", "1.3.0").pack
+
+    assert (loaded.pack.id, loaded.pack.version) == ("default", "1.4.0")
+    assert loaded.pack.disputes is not None
+    assert loaded.pack.model_dump(exclude={"version", "disputes"}) == (
+        phase_4.model_dump(exclude={"version", "disputes"})
+    )
+    assert loaded.hash.startswith("sha256:") and len(loaded.hash) == len("sha256:") + 64
+
+
+def test_1_3_0_only_adds_the_payment_window() -> None:
+    loaded = load_pack(PACKS, "default", "1.3.0")
     phase_3 = load_pack(PACKS, "default", "1.2.0").pack
 
-    assert (loaded.pack.id, loaded.pack.version) == ("default", "1.3.0")
     assert loaded.pack.payment_window_seconds == 900
     assert loaded.pack.payment_window == timedelta(minutes=15)
     assert loaded.pack.model_dump(exclude={"version", "payment_window_seconds"}) == (
         phase_3.model_dump(exclude={"version", "payment_window_seconds"})
     )
-    assert loaded.hash.startswith("sha256:") and len(loaded.hash) == len("sha256:") + 64
+    # Released before 1.4.0 became active; its hash never changes.
+    assert loaded.hash == "sha256:38a24d444876c4356ed32a314ea3c8758b3667f7c4768e72647dab29d79dc420"
 
 
 @pytest.mark.parametrize(("version", "released_hash"), RELEASED.items())
