@@ -397,3 +397,23 @@ evidence_packs = Table(
         ["tenant_id", "dispute_id"], ["disputes.tenant_id", "disputes.dispute_id"]
     ),
 )
+
+# Review links (#111): only the token's hash is kept. A newer link for the same Dispute
+# revokes the earlier ones; Sign-off through a link uses it up.
+review_links = Table(
+    "review_links",
+    metadata,
+    Column("token_hash", String, primary_key=True),
+    Column("tenant_id", String, nullable=False),
+    Column("dispute_id", String, nullable=False),
+    Column("reviewer_id", String, nullable=False),
+    Column("reviewer_name", String, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("revoked_at", DateTime(timezone=True), nullable=True),
+    Column("used_at", DateTime(timezone=True), nullable=True),
+    ForeignKeyConstraint(
+        ["tenant_id", "dispute_id"], ["disputes.tenant_id", "disputes.dispute_id"]
+    ),
+    Index("ix_review_links_dispute", "tenant_id", "dispute_id"),
+)
