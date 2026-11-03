@@ -412,6 +412,11 @@ class TenantTransaction(Protocol):
         """Mark a Review link used: Sign-off through it uses it up."""
         ...
 
+    def evidence_pack_bodies(self, dispute_id: DisputeId) -> list[tuple[int, bytes]]:
+        """Every stored version of a Dispute's pack as its exact stored bytes, oldest
+        first, for checking: read raw, so an altered pack is reported, not refused."""
+        ...
+
     def get_evidence_pack(self, dispute_id: DisputeId) -> EvidencePack | None:
         """A Dispute's latest pack version, if one has been built."""
         ...
