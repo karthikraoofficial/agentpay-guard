@@ -40,7 +40,7 @@ cp .env.example .env                              # the app refuses to start wit
 docker compose -f infra/docker-compose.yml up -d  # Postgres 16, Temporal dev server, OTel collector
 uv run uvicorn api.main:asgi_app --factory --reload
 uv run python -m workflows.worker                 # in a second terminal: the consent worker
-cd web && npm ci && npm run dev                   # in a third: the consent screen on :3000
+cd web && npm ci && npm run dev                   # in a third: the consent screen and dispute viewer on :3000
 ```
 
 Then open http://localhost:8000/healthz (liveness) and http://localhost:8000/docs (OpenAPI).
@@ -264,7 +264,7 @@ The run for #85, with ids and timings, is posted on the Phase 4 PRD (#74).
 - **A Revocation in the last seconds before a debit can miss it.** The debit step re-checks the Mandate and Agent, then calls the rail without holding the Mandate, so a Revocation that lands during that call doesn't stop the debit.
 - **A debit can be up to one sweep interval late:** the debit step runs every `AGENTPAY_RECONCILE_INTERVAL_SECONDS` (5 minutes).
 - **Mock Payments stay `scheduled` outside tests.** No webhook comes from the mock rail, and the reconciliation sweep is off for it.
-- **Disputes are reported by the Tenant,** never by the rail. The dispute viewer that opens a Review link comes with the web app's next release, and no pack holds the merchant's own fulfilment evidence, so `not_received` and `not_as_described` are never better than mixed.
+- **Disputes are reported by the Tenant,** never by the rail. No pack holds the merchant's own fulfilment evidence, so `not_received` and `not_as_described` are never better than mixed.
 - **Only INR and USD,** and one Policy pack for every Tenant.
 - **Scopes only help if the Agent gets only the agent key.** A Tenant that hands an Agent its tenant key, or a key with every scope, gives it back the power to grant Mandates and read Intent verdicts.
 - **New merchant has a harmless race.** Two parallel first payments to the same merchant under different Mandates can both see it as new. Both just step up.
