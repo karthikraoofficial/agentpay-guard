@@ -1,5 +1,5 @@
 """Score the live dispute evidence agent against labelled bundles. Calls the real model,
-so it costs money (about $0.50 a run on Claude Sonnet 5.5) and is never part of CI.
+so it costs money (about $0.12 a run on Claude Sonnet 5.5) and is never part of CI.
 
     uv run python -m evals.run_dispute_evals
 
@@ -151,7 +151,7 @@ def main(argv: list[str] | None = None, gateway: ModelGateway | None = None) -> 
         if settings.anthropic_api_key is None:
             print(
                 "Set AGENTPAY_ANTHROPIC_API_KEY to run the live dispute narrative eval; it "
-                "calls the real model and costs about $0.50.",
+                "calls the real model and costs about $0.12.",
                 file=sys.stderr,
             )
             return 2

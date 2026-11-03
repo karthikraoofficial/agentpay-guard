@@ -41,7 +41,7 @@ Run from the repo root. These are the same commands CI runs.
 - Latency budgets: `uv run pytest -m perf -s -o addopts=""` (skipped by the default `pytest` run; CI runs them)
 - Consent workflow on Temporal: `uv run pytest -m workflow -o addopts=""` (downloads Temporal's test and dev servers on first use; skipped by the default `pytest` run; CI runs it)
 - Tests: `uv run pytest` (needs local infra up and `.env`; tests create their own `<database>_test`)
-- End-to-end Payment, allow to captured (mock rail, part of `pytest`): `uv run pytest tests/api/test_end_to_end.py`; the real Razorpay half is the runbook in the README
+- End to end on the mock rail (part of `pytest`), an allow to a captured Payment, and that Payment disputed to a signed-off Evidence pack that passes `verify-pack`: `uv run pytest tests/api/test_end_to_end.py`; the real Razorpay half is the runbook in the README
 - Contract tests against real vendor APIs: `uv run pytest -m contract -o addopts=""` (not in CI; skip without the vendor key)
 - Register a Razorpay test card for those contract tests (prints the two `AGENTPAY_RAZORPAY_TEST_*` refs for `.env`; test tokens expire within about a day, so re-run before each contract run): `uv run python -m adapters.razorpay.wizard`
 - Web: `cd web && npm ci && npm run lint && npm run typecheck && npm run build` (CI runs the same in its `web` job)

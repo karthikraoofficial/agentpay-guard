@@ -221,7 +221,7 @@ Check the signature over the raw body before parsing it, and reject an old `t` t
 
 ## End to end on Razorpay test mode
 
-One Payment from allow to `scheduled` on the real rail, by hand. Razorpay won't debit for 36 h 5 min and a test token expires sooner (ADR-0017), so the rest of the path, from the debit to `captured` and the Tenant's `payment.captured` webhook, is `tests/api/test_end_to_end.py` on the mock rail with the same notice period.
+One Payment from allow to `scheduled` on the real rail, by hand. Razorpay won't debit for 36 h 5 min and a test token expires sooner (ADR-0017), so the rest of the path, from the debit to `captured` and the Tenant's `payment.captured` webhook, is `tests/api/test_end_to_end.py` on the mock rail with the same notice period. The same file runs demo journey 3: that captured Payment is disputed as `unauthorised`, its Evidence pack is built with a cited narrative, signed off through a Review link, and passes `verify-pack`.
 
 1. **Set up.** Put the test key id, key secret and webhook secret in `.env` and register a test card with `uv run python -m adapters.razorpay.wizard`, which prints a `cust_…` and a `token_…`. Run the API with `AGENTPAY_RAIL=razorpay uv run uvicorn api.main:asgi_app --factory`. Create a Tenant with `uv run python -m api.admin create-tenant "E2E"` and keep its agent key in `$AGENT` and its tenant key in `$TENANT`.
 2. **Register a Payer and an Agent,** and grant an INR Mandate with that test card as its Rail token. Fill in the ids each call returns, and times as ISO 8601 (`valid_from` now, `expires_at` within a year, `captured_at` in the past):
@@ -267,6 +267,8 @@ The run for #85, with ids and timings, is posted on the Phase 4 PRD (#74).
 - **A debit can be up to one sweep interval late:** the debit step runs every `AGENTPAY_RECONCILE_INTERVAL_SECONDS` (5 minutes).
 - **Mock Payments stay `scheduled` outside tests.** No webhook comes from the mock rail, and the reconciliation sweep is off for it.
 - **Disputes are reported by the Tenant,** never by the rail. No pack holds the merchant's own fulfilment evidence, so `not_received` and `not_as_described` are never better than mixed.
+- **A Dispute runs end to end only on the mock rail.** A Dispute needs a captured Payment, and a Razorpay test-mode debit can't complete (above), so demo journey 3 is `tests/api/test_end_to_end.py`.
+- **No refunds.** A Dispute is evidence only: it never moves money or changes the Payment, and `PaymentRail.refund` is not implemented.
 - **Only INR and USD,** and one Policy pack for every Tenant.
 - **Scopes only help if the Agent gets only the agent key.** A Tenant that hands an Agent its tenant key, or a key with every scope, gives it back the power to grant Mandates and read Intent verdicts.
 - **New merchant has a harmless race.** Two parallel first payments to the same merchant under different Mandates can both see it as new. Both just step up.
