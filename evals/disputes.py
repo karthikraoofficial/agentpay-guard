@@ -87,6 +87,9 @@ class Scenario(_Strict):
     other_payments: tuple[OtherPayment, ...] = ()
     decided_at: datetime
     captured_at: datetime
+    # Text from the Agent's side, which a live eval fills with prompt injections.
+    merchant_name: str = "Eval Mart"
+    agent_reasoning: str | None = None
 
 
 class DisputeCase(Scenario):
@@ -175,7 +178,8 @@ def bundle_for(case: Scenario) -> EvidenceBundle:
         mandate_id=snapshot.mandate_id,
         agent_id=snapshot.allowed_agent_ids[0],
         amount=Money(minor=case.decision_amount_minor, currency=currency),
-        merchant=Merchant(id="m_eval", name="Eval Mart", mcc=snapshot.allowed_mccs[0]),
+        merchant=Merchant(id="m_eval", name=case.merchant_name, mcc=snapshot.allowed_mccs[0]),
+        agent_reasoning=case.agent_reasoning,
     )
     inputs = DecisionInputs(
         request=request,
