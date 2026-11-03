@@ -7,6 +7,7 @@ import logging
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from core.disputes import NotYetDue, expire_dispute
 from core.domain.consent import ConsentRequestId
 from core.domain.decisions import decision_time
 from core.domain.disputes import DisputeId
@@ -15,6 +16,7 @@ from core.ports import Clock, TenantId, UnitOfWork
 from core.resolutions import record_resolution
 from workflows.consent import EXPIRE, NOTIFY, ConsentArgs
 from workflows.dispute import BUILD, DisputeArgs
+from workflows.dispute import EXPIRE as EXPIRE_DISPUTE
 
 log = logging.getLogger(__name__)
 
@@ -79,7 +81,19 @@ class DisputeActivities:
 
     @activity.defn(name=BUILD)
     def build(self, args: DisputeArgs) -> str:
-        """Build the Dispute's first Evidence pack; a repeat finds it built."""
+        """Build the Dispute's next Evidence pack version if it is open; a repeat finds it
+        in review, and a closed Dispute gets nothing."""
         return build_evidence_pack(
             self._store, TenantId(args.tenant_id), DisputeId(args.dispute_id), self._clock
         )
+
+    @activity.defn(name=EXPIRE_DISPUTE)
+    def expire(self, args: DisputeArgs) -> str:
+        """Expire the Dispute unless it was closed first. Before `respond_by` by this
+        clock it raises, so Temporal retries it once the Dispute is due."""
+        try:
+            return expire_dispute(
+                self._store, TenantId(args.tenant_id), DisputeId(args.dispute_id), self._clock
+            )
+        except NotYetDue as exc:
+            raise ApplicationError(str(exc), type="NotYetDue") from exc

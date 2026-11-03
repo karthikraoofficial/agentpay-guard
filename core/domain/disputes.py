@@ -29,6 +29,11 @@ DisputeRefusal = Literal["PAYMENT_NOT_DISPUTABLE", "PAYMENT_ALREADY_DISPUTED"]
 
 SignOffRefusal = Literal["DISPUTE_NOT_IN_REVIEW", "PACK_VERSION_NOT_CURRENT"]
 
+LifecycleRefusal = Literal["DISPUTE_CLOSED", "DISPUTE_NOT_IN_REVIEW", "PACK_VERSION_LIMIT"]
+
+# A closed Dispute changes no more: signed off, past its deadline, or withdrawn.
+CLOSED: frozenset[DisputeStatus] = frozenset({"ready", "expired", "withdrawn"})
+
 _Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
 PAYER_STATEMENT_MAX = 2000
@@ -86,6 +91,24 @@ def sign_off_refusal(
         return "DISPUTE_NOT_IN_REVIEW"
     if pack_version != current_version:
         return "PACK_VERSION_NOT_CURRENT"
+    return None
+
+
+def withdraw_refusal(status: DisputeStatus) -> LifecycleRefusal | None:
+    return "DISPUTE_CLOSED" if status in CLOSED else None
+
+
+def regenerate_refusal(
+    status: DisputeStatus, current_version: int | None, versions_max: int
+) -> LifecycleRefusal | None:
+    """Why a pack can't be built again, or None if it can: only from review, so a build in
+    progress is never doubled, and only up to `versions_max` versions."""
+    if status in CLOSED:
+        return "DISPUTE_CLOSED"
+    if status != "in_review" or current_version is None:
+        return "DISPUTE_NOT_IN_REVIEW"
+    if current_version >= versions_max:
+        return "PACK_VERSION_LIMIT"
     return None
 
 

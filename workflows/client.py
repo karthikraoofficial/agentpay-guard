@@ -14,10 +14,11 @@ from datetime import UTC, datetime
 from temporalio.client import Client, WorkflowHandle
 from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
+from temporalio.service import RPCError, RPCStatusCode
 
 from core.domain.consent import ConsentRequestId
 from core.domain.disputes import DisputeId
-from core.ports import TenantId, Workflow
+from core.ports import DisputeSignal, TenantId, Workflow
 from core.settings import Settings
 from workflows.consent import ConsentArgs, StepUpConsent
 from workflows.dispute import DisputeArgs, DisputePack
@@ -88,8 +89,14 @@ class TemporalWorkflow:
 
         self._call(signal)
 
-    def start_dispute_pack(self, tenant_id: TenantId, dispute_id: DisputeId) -> None:
-        args = DisputeArgs(tenant_id=tenant_id, dispute_id=dispute_id)
+    def start_dispute_pack(
+        self, tenant_id: TenantId, dispute_id: DisputeId, respond_by: datetime
+    ) -> None:
+        args = DisputeArgs(
+            tenant_id=tenant_id,
+            dispute_id=dispute_id,
+            respond_by=respond_by.astimezone(UTC).isoformat(),
+        )
 
         async def start(client: Client) -> None:
             try:
@@ -104,6 +111,25 @@ class TemporalWorkflow:
                 return
 
         self._call(start)
+
+    def signal_dispute(
+        self, tenant_id: TenantId, dispute_id: DisputeId, signal: DisputeSignal
+    ) -> None:
+        async def send(client: Client) -> None:
+            handle: WorkflowHandle[DisputePack, str] = client.get_workflow_handle_for(
+                DisputePack.run, dispute_id
+            )
+            try:
+                if signal == "regenerate":
+                    await handle.signal(DisputePack.regenerate)
+                else:
+                    await handle.signal(DisputePack.closed)
+            except RPCError as exc:
+                # A finished workflow needs no nudge: Postgres holds the change.
+                if exc.status != RPCStatusCode.NOT_FOUND:
+                    raise
+
+        self._call(send)
 
     def _call(self, action: Callable[[Client], Awaitable[None]]) -> None:
         loop = self._ensure_loop()

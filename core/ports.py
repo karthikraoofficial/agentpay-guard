@@ -207,8 +207,16 @@ class ModelGateway(Protocol):
 
 
 # Events the outbox carries: a step_up's Consent request and a new Dispute, each for its
-# workflow, and the Tenant webhook events, for the Tenant's endpoint.
-EventType = Literal["consent_requested", "dispute_opened"] | TenantEventType
+# workflow; a Regenerate or close of a Dispute, to nudge its workflow; and the Tenant
+# webhook events, for the Tenant's endpoint.
+EventType = (
+    Literal["consent_requested", "dispute_opened", "dispute_regenerate", "dispute_closed"]
+    | TenantEventType
+)
+
+# What the API tells a waiting `dispute_pack` workflow: build the next pack version, or
+# stop waiting because the Dispute was signed off or withdrawn.
+DisputeSignal = Literal["regenerate", "closed"]
 
 
 class DomainEvent(_Frozen):
@@ -564,9 +572,18 @@ class Workflow(Protocol):
         self, tenant_id: TenantId, consent_request_id: ConsentRequestId
     ) -> None: ...
 
-    def start_dispute_pack(self, tenant_id: TenantId, dispute_id: DisputeId) -> None:
-        """Start the workflow that builds a Dispute's Evidence pack. Its ID is the Dispute
-        ID, so starting it twice does nothing."""
+    def start_dispute_pack(
+        self, tenant_id: TenantId, dispute_id: DisputeId, respond_by: datetime
+    ) -> None:
+        """Start the workflow that builds a Dispute's Evidence pack and expires the Dispute
+        at `respond_by`. Its ID is the Dispute ID, so starting it twice does nothing."""
+        ...
+
+    def signal_dispute(
+        self, tenant_id: TenantId, dispute_id: DisputeId, signal: DisputeSignal
+    ) -> None:
+        """Nudge the Dispute's workflow. Postgres owns Dispute state, so a workflow that
+        has already finished needs nothing and the call does nothing."""
         ...
 
 
