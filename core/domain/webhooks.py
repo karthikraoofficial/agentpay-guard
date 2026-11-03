@@ -38,6 +38,9 @@ TenantEventType = Literal[
     "consent_request.resolved",
     "payment.captured",
     "payment.failed",
+    "dispute.in_review",
+    "dispute.ready",
+    "dispute.expired",
 ]
 TENANT_EVENT_TYPES: frozenset[str] = frozenset(get_args(TenantEventType))
 

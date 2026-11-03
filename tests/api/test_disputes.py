@@ -6,6 +6,7 @@ so `dispute_opened` records must keep the chain intact."""
 
 import hashlib
 import json
+import uuid
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -24,8 +25,9 @@ from core.evidence import build_evidence_pack, gather_bundle
 from core.narrative_check import check_narrative
 from core.ports import ModelGatewayError, ModelTimeout, ModelUnavailable
 from core.relay import relay_once
-from tests.api.conftest import NOW, Api, tenant_webhooks
+from tests.api.conftest import NOW, Api, RecordingSender, tenant_webhooks
 from tests.api.test_rail_webhooks import SECRET, Webhooks, event
+from tests.api.test_tenant_webhooks import verifies
 from tests.api.test_tenants_payers_agents import assert_problem
 from tests.conftest import make_settings
 from tests.packs import phase_1_packs, release_test_pack
@@ -1235,3 +1237,108 @@ def test_the_viewer_origin_may_call_the_link_endpoints(reviews: Reviews) -> None
     )
 
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
+# --- Tenant webhooks ----------------------------------------------------------------------
+
+
+class DisputeHooks(Disputes):
+    """A Tenant with a registered webhook endpoint and a relay sending to a recorder."""
+
+    def __init__(self, api: Api) -> None:
+        super().__init__(api)
+        self.url = f"https://hooks.example/{uuid.uuid4().hex}"
+        self.sender = RecordingSender()
+        self.secret: str = api.post("/v1/webhook-endpoint", self.tenant, {"url": self.url}).json()[
+            "secret"
+        ]
+
+    def relay(self) -> None:
+        webhooks = tenant_webhooks(self.api.store, self.api.clock, self.sender)
+        relay_once(self.api.store, self.api.workflow, self.api.clock, webhooks, limit=100_000)
+
+    def dispute_events(self) -> list[tuple[dict[str, Any], bytes, dict[str, str]]]:
+        received = [(json.loads(b), b, h) for url, b, h in self.sender.sent if url == self.url]
+        return [r for r in received if r[0]["type"].startswith("dispute.")]
+
+
+@pytest.fixture
+def dispute_hooks(api: Api, tmp_path: Path) -> DisputeHooks:
+    api.use_packs(release_test_pack(tmp_path, "1.0.1", {"disputes": DISPUTE_RULES}))
+    api.use_settings(make_settings(razorpay_webhook_secret=SECRET))
+    return DisputeHooks(api)
+
+
+def test_a_built_pack_and_a_sign_off_reach_the_tenant_signed(dispute_hooks: DisputeHooks) -> None:
+    hooks = dispute_hooks
+    dispute = hooks.built(hooks.captured())
+    # Tenant webhooks carry no ordering guarantee; a minute apart, the relay sends in order.
+    hooks.api.clock.advance(timedelta(minutes=1))
+    hooks.sign_off(dispute["dispute_id"])
+
+    hooks.relay()
+
+    events = hooks.dispute_events()
+    assert [body["type"] for body, _, _ in events] == ["dispute.in_review", "dispute.ready"]
+    for body, raw, headers in events:
+        assert verifies(raw, headers["X-AgentPay-Signature"], hooks.secret)
+        assert headers["X-AgentPay-Event-Id"] == body["id"]
+    expected = {
+        "dispute_id": dispute["dispute_id"],
+        "payment_id": dispute["payment_id"],
+        "decision_id": dispute["decision_id"],
+        "respond_by": "2026-11-12T09:30:00Z",
+        "pack_version": 1,
+    }
+    assert events[0][0]["data"] == expected | {"status": "in_review"}
+    assert events[1][0]["data"] == expected | {"status": "ready"}
+
+
+def test_each_regenerated_version_is_announced(dispute_hooks: DisputeHooks) -> None:
+    hooks = dispute_hooks
+    dispute_id = hooks.built(hooks.captured())["dispute_id"]
+    hooks.api.clock.advance(timedelta(minutes=1))
+    hooks.act(dispute_id, "regenerate")
+    hooks.build(dispute_id)
+
+    hooks.relay()
+
+    versions = [b["data"]["pack_version"] for b, _, _ in hooks.dispute_events()]
+    assert versions == [1, 2]
+
+
+def test_an_expired_dispute_is_announced_and_a_withdrawn_one_is_not(
+    dispute_hooks: DisputeHooks,
+) -> None:
+    hooks = dispute_hooks
+    expiring = hooks.built(hooks.captured())["dispute_id"]
+    withdrawn = hooks.open(hooks.captured()["payment_id"]).json()["dispute_id"]
+    hooks.act(withdrawn, "withdraw")
+    hooks.api.clock.advance(timedelta(days=10))
+    assert hooks.expire(expiring) == "expired"
+
+    hooks.relay()
+
+    sent = [(b["type"], b["data"]["dispute_id"]) for b, _, _ in hooks.dispute_events()]
+    assert sent == [("dispute.in_review", expiring), ("dispute.expired", expiring)]
+    expired = hooks.dispute_events()[-1][0]["data"]
+    assert (expired["status"], expired["pack_version"]) == ("expired", 1)
+
+
+def test_dispute_webhooks_hold_no_statement_or_narrative(dispute_hooks: DisputeHooks) -> None:
+    hooks = dispute_hooks
+    payment = hooks.captured()
+    dispute_id = hooks.open(payment["payment_id"], payer_statement="I never asked").json()[
+        "dispute_id"
+    ]
+    hooks.build(dispute_id)
+    hooks.sign_off(dispute_id)
+
+    hooks.relay()
+
+    allowed = {"dispute_id", "payment_id", "decision_id", "status", "respond_by", "pack_version"}
+    assert len(hooks.dispute_events()) == 2
+    for body, raw, _ in hooks.dispute_events():
+        assert set(body["data"]) <= allowed
+        for leak in (b"I never asked", b"FreshMart", b"Meera", b"ops-7", b"aud_"):
+            assert leak not in raw

@@ -27,6 +27,7 @@ from core.domain.parties import new_id
 from core.domain.payments import Payment, PaymentStatus
 from core.domain.webhooks import utc_iso
 from core.ports import Clock, DomainEvent, EventType, TenantId, TenantTransaction, UnitOfWork
+from core.tenant_events import dispute_changed
 
 
 def dispute_refusal(status: PaymentStatus, already_disputed: bool) -> DisputeRefusal | None:
@@ -137,6 +138,7 @@ def sign_off(
     )
     tx.update_dispute(ready)
     _nudge(tx, ready, "dispute_closed", now)
+    tx.publish(dispute_changed(ready, pack.version, now))
     return ready
 
 
@@ -176,7 +178,10 @@ def expire_dispute(
             return "already_closed"
         if now < dispute.respond_by:
             raise NotYetDue(f"Dispute {dispute_id} is not due yet")
-        tx.update_dispute(dispute.model_copy(update={"status": "expired", "updated_at": now}))
+        expired = dispute.model_copy(update={"status": "expired", "updated_at": now})
+        tx.update_dispute(expired)
+        latest = tx.get_evidence_pack(dispute_id)
+        tx.publish(dispute_changed(expired, None if latest is None else latest.version, now))
     return "expired"
 
 
