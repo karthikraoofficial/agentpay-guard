@@ -277,15 +277,17 @@ The production go-live checklist is at the end of [docs/BUILD-PLAN.md](docs/BUIL
 
 ## Proving a Decision
 
-Every Decision, and every Consent resolution, writes an Audit record into its Tenant's hash chain. Two commands check the evidence:
+Every Decision, and every Consent resolution, writes an Audit record into its Tenant's hash chain. Three commands check the evidence:
 
 ```bash
 uv run python -m api.admin replay <audit_record_id> --tenant <tenant_id>
 uv run python -m api.admin verify --tenant <tenant_id>
+uv run python -m api.admin verify-pack <dispute_id> --tenant <tenant_id>
 ```
 
 - **`replay`** re-runs the engine on the recorded inputs with the recorded Policy pack and compares bytes. That covers Decisions and approved or blocked Consent resolutions. A declined or expired resolution has no engine run, so it reports nothing to re-run and exits `0`. Exit codes: `0` identical, `1` different (prints a diff), `2` the recorded pack is missing or its hash doesn't match, `3` no such record for that Tenant.
 - **`verify`** walks the chain and prints the first broken `seq` if any record was edited, removed or added. Exit codes: `0` clean, `1` broken.
+- **`verify-pack`** gathers a Dispute's Evidence bundle from the chain again and checks every stored pack version against it: the bundle hash, the assessment re-derived with the recorded Policy pack, a narrative written by code written again, and, for a signed-off version, the stored pack's bytes against the pack hash in its `dispute_signed_off` record. A model's narrative can't be written again, so the Sign-off's pack hash is what fixes it. Then it walks the chain. Exit codes: `0` clean, `1` different (each difference is printed per version), `2` a recorded Policy pack can't be loaded, `3` no such Dispute for that Tenant.
 
 The test suite replays every Decision it makes and verifies every chain it touches.
 

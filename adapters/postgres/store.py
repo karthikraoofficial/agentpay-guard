@@ -636,6 +636,17 @@ class PostgresTransaction:
             .values(used_at=at)
         )
 
+    def evidence_pack_bodies(self, dispute_id: DisputeId) -> list[tuple[int, bytes]]:
+        rows = self._conn.execute(
+            select(evidence_packs.c.version, evidence_packs.c.body)
+            .where(
+                evidence_packs.c.tenant_id == self._tenant_id,
+                evidence_packs.c.dispute_id == dispute_id,
+            )
+            .order_by(evidence_packs.c.version)
+        )
+        return [(int(r.version), bytes(r.body)) for r in rows]
+
     def get_evidence_pack(self, dispute_id: DisputeId) -> EvidencePack | None:
         row = self._conn.execute(
             select(evidence_packs.c.body)

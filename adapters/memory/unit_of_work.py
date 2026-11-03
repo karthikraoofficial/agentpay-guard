@@ -233,6 +233,9 @@ class InMemoryTransaction:
         link = self._data.review_links[token_hash]
         self._data.review_links[token_hash] = link.model_copy(update={"used_at": at})
 
+    def evidence_pack_bodies(self, dispute_id: DisputeId) -> list[tuple[int, bytes]]:
+        return [(v.version, v.body()) for v in self._data.packs.get(dispute_id, ())]
+
     def get_evidence_pack(self, dispute_id: DisputeId) -> EvidencePack | None:
         versions = self._data.packs.get(dispute_id, ())
         return max(versions, key=lambda v: v.version) if versions else None

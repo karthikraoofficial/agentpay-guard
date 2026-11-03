@@ -33,7 +33,7 @@ Run from the repo root. These are the same commands CI runs.
 - Migrations: `uv run alembic upgrade head`
 - Create a Tenant (prints an agent key and a tenant key once): `uv run python -m api.admin create-tenant <name>`
 - Issue another API key: `uv run python -m api.admin create-key --tenant <id> --scopes decide,consent,manage` (any subset; ADR-0011)
-- Replay a Decision / verify a Tenant's Audit chain: `uv run python -m api.admin replay <audit_record_id> --tenant <id>` and `uv run python -m api.admin verify --tenant <id>`
+- Replay a Decision / verify a Tenant's Audit chain: `uv run python -m api.admin replay <audit_record_id> --tenant <id>` and `uv run python -m api.admin verify --tenant <id>`; check a Dispute's Evidence packs: `uv run python -m api.admin verify-pack <dispute_id> --tenant <id>`
 - Policy pack hash / schema: `uv run python -m core.policy.packs --hash <pack.yaml>` and `--write-schema`
 - Evals: `uv run python -m evals.run_evals` (every golden file in `evals/golden/`, each on its pinned pack; fails on any false-allow, false-block or wrong reason code, and on any Dispute case with the wrong network codes, Evidence strength or missing evidence, or any model reply the citation checker judges wrongly)
 - Live Intent eval (real model, ~$0.002 a run, by hand and before each release, not CI): `uv run python -m evals.run_intent_evals` (exit 1 on any injection false-match)

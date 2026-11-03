@@ -12,6 +12,10 @@
   record for that Tenant.
 - `verify --tenant <id>`: walks the Tenant's Audit chain. Exit 0 clean, 1 broken (the
   first broken seq is printed).
+- `verify-pack <dispute_id> --tenant <id>`: rebuilds the Dispute's Evidence bundle from
+  the Audit chain and checks every stored pack version against it, its recorded Policy
+  pack and its Sign-off (core.pack_verify), then walks the chain. Exit 0 clean,
+  1 different, 2 a recorded Policy pack can't be loaded, 3 no such Dispute.
 """
 
 import argparse
@@ -26,6 +30,7 @@ from adapters.postgres.store import PostgresStore
 from adapters.system_clock import SystemClock
 from core.domain.audit import first_broken_seq
 from core.domain.decisions import AuditRecordId
+from core.domain.disputes import DisputeId
 from core.domain.parties import (
     ALL_SCOPES,
     ApiKeyScope,
@@ -34,6 +39,7 @@ from core.domain.parties import (
     new_api_key,
     new_id,
 )
+from core.pack_verify import verify_pack
 from core.policy.packs import PackError, load_pack
 from core.policy.replay import PackMismatch, replay
 from core.ports import Clock, TenantDirectory, TenantId, UnitOfWork
@@ -150,6 +156,30 @@ def verify_chain(store: UnitOfWork, tenant_id: TenantId, out: Out) -> int:
     return DIFFERENT
 
 
+def verify_pack_command(
+    store: UnitOfWork, tenant_id: TenantId, dispute_id: str, packs_dir: Path, out: Out
+) -> int:
+    report = verify_pack(store, tenant_id, DisputeId(dispute_id), packs_dir)
+    if report is None:
+        out(f"No Dispute {dispute_id} for Tenant {tenant_id}.")
+        return NOT_FOUND
+    if not report.versions:
+        out(f"Dispute {dispute_id}: no pack built yet.")
+    for check in report.versions:
+        for problem in check.problems:
+            out(f"Pack v{check.version}: {problem}.")
+        if not check.problems:
+            out(f"Pack v{check.version}: matches the Audit chain.")
+            if check.signed_off:
+                out(f"Pack v{check.version}: matches its Sign-off.")
+    for problem in report.pack_problems:
+        out(problem)
+    chain = verify_chain(store, tenant_id, out)
+    if not report.clean or chain != IDENTICAL:
+        return DIFFERENT
+    return PACK_PROBLEM if report.pack_problems else IDENTICAL
+
+
 def _lines(canonical: bytes) -> list[str]:
     return (json.dumps(json.loads(canonical), indent=2, sort_keys=True) + "\n").splitlines(True)
 
@@ -167,6 +197,9 @@ def main(argv: list[str] | None = None) -> int:
     rep.add_argument("--tenant", required=True)
     ver = commands.add_parser("verify", help="check a Tenant's Audit chain")
     ver.add_argument("--tenant", required=True)
+    vp = commands.add_parser("verify-pack", help="check a Dispute's Evidence packs")
+    vp.add_argument("dispute_id")
+    vp.add_argument("--tenant", required=True)
     args = parser.parse_args(argv)
 
     settings = get_settings()
@@ -177,6 +210,10 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "verify":
         return verify_chain(store, TenantId(args.tenant), print)
+    if args.command == "verify-pack":
+        return verify_pack_command(
+            store, TenantId(args.tenant), args.dispute_id, settings.policy_packs_dir, print
+        )
     live = settings.env == "production"
     if args.command == "create-key":
         issued = create_key(
