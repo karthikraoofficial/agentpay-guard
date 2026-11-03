@@ -14,7 +14,7 @@ from datetime import datetime
 
 from core.domain.audit import AuditRecord, SealedAuditRecord
 from core.domain.decisions import DecisionId, decision_time
-from core.domain.disputes import Dispute, DisputeId
+from core.domain.disputes import CLOSED, Dispute, DisputeId
 from core.domain.evidence import (
     BundleRecord,
     Claim,
@@ -120,20 +120,25 @@ def gather_bundle(tx: TenantTransaction, dispute: Dispute) -> EvidenceBundle:
 def build_evidence_pack(
     store: UnitOfWork, tenant_id: TenantId, dispute_id: DisputeId, clock: Clock
 ) -> str:
-    """Build the Dispute's first pack and put it in review. Safe to run more than once:
-    returns `built`, `already_built` or `missing`."""
+    """Build the next pack version of an open Dispute and put it in review. Driven by the
+    Dispute's status, so it is safe to run more than once: returns `built`,
+    `already_built` (in review), `closed` (signed off, expired or withdrawn, so a build
+    in progress writes nothing) or `missing`."""
     now = decision_time(clock.now())
     with store.transaction(tenant_id) as tx:
         dispute = tx.lock_dispute(dispute_id)
         if dispute is None:
             return "missing"
-        if tx.get_evidence_pack(dispute_id) is not None:
+        if dispute.status in CLOSED:
+            return "closed"
+        if dispute.status == "in_review":
             return "already_built"
+        latest = tx.get_evidence_pack(dispute_id)
         bundle = gather_bundle(tx, dispute)
         tx.add_evidence_pack(
             EvidencePack(
                 dispute_id=dispute_id,
-                version=1,
+                version=1 if latest is None else latest.version + 1,
                 bundle=bundle,
                 bundle_hash=bundle.hash(),
                 narrative=template_narrative(bundle),
@@ -141,8 +146,7 @@ def build_evidence_pack(
                 built_at=now,
             )
         )
-        if dispute.status == "open":
-            tx.update_dispute(dispute.model_copy(update={"status": "in_review", "updated_at": now}))
+        tx.update_dispute(dispute.model_copy(update={"status": "in_review", "updated_at": now}))
     return "built"
 
 

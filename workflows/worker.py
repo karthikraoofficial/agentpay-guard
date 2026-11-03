@@ -45,7 +45,7 @@ def consent_worker(
         client,
         task_queue=task_queue,
         workflows=[StepUpConsent, DisputePack],
-        activities=[activities.notify, activities.expire, disputes.build],
+        activities=[activities.notify, activities.expire, disputes.build, disputes.expire],
         activity_executor=pool,
     )
 

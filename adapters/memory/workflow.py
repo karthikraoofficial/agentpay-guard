@@ -5,7 +5,7 @@ from datetime import datetime
 
 from core.domain.consent import ConsentRequestId
 from core.domain.disputes import DisputeId
-from core.ports import TenantId, Workflow
+from core.ports import DisputeSignal, TenantId, Workflow
 
 
 class WorkflowUnavailable(Exception):
@@ -21,6 +21,7 @@ class InMemoryWorkflow:
         self.start_calls = 0
         self.signals: list[tuple[TenantId, ConsentRequestId]] = []
         self.dispute_starts: dict[DisputeId, TenantId] = {}
+        self.dispute_signals: list[tuple[TenantId, DisputeId, DisputeSignal]] = []
         self.fail_starts = False
         self.fail_signals = False
 
@@ -37,11 +38,20 @@ class InMemoryWorkflow:
             raise WorkflowUnavailable("signal refused by the test")
         self.signals.append((tenant_id, consent_request_id))
 
-    def start_dispute_pack(self, tenant_id: TenantId, dispute_id: DisputeId) -> None:
+    def start_dispute_pack(
+        self, tenant_id: TenantId, dispute_id: DisputeId, respond_by: datetime
+    ) -> None:
         self.start_calls += 1
         if self.fail_starts:
             raise WorkflowUnavailable("start refused by the test")
         self.dispute_starts.setdefault(dispute_id, tenant_id)
+
+    def signal_dispute(
+        self, tenant_id: TenantId, dispute_id: DisputeId, signal: DisputeSignal
+    ) -> None:
+        if self.fail_signals:
+            raise WorkflowUnavailable("signal refused by the test")
+        self.dispute_signals.append((tenant_id, dispute_id, signal))
 
 
 class UnconfiguredWorkflow:
@@ -56,7 +66,14 @@ class UnconfiguredWorkflow:
     def signal_resolved(self, tenant_id: TenantId, consent_request_id: ConsentRequestId) -> None:
         return None
 
-    def start_dispute_pack(self, tenant_id: TenantId, dispute_id: DisputeId) -> None:
+    def start_dispute_pack(
+        self, tenant_id: TenantId, dispute_id: DisputeId, respond_by: datetime
+    ) -> None:
+        raise WorkflowUnavailable("no workflow adapter is configured")
+
+    def signal_dispute(
+        self, tenant_id: TenantId, dispute_id: DisputeId, signal: DisputeSignal
+    ) -> None:
         raise WorkflowUnavailable("no workflow adapter is configured")
 
 

@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     # call the Consent link endpoints from a browser (CORS).
     web_origin: str = Field(default="http://localhost:3000", pattern=r"^https?://[^/\s]+$")
 
+    # The most Evidence pack versions one Dispute may have: each Regenerate is a new one,
+    # and a paid model call once the narrative is model-written.
+    dispute_pack_versions_max: int = Field(default=3, ge=1, le=10)
+
     # The outbox relay: how often it looks for undelivered events (ADR-0009).
     outbox_poll_interval_ms: int = Field(default=1000, gt=0, le=60_000)
 

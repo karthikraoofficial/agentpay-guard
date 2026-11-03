@@ -10,10 +10,16 @@ from datetime import datetime
 from fastapi import APIRouter, Request, Response
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
-from api.deps import ClockDep, IdemKey, ManageTenant, StoreDep
+from api.deps import ClockDep, IdemKey, ManageTenant, SettingsDep, StoreDep
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
-from core.disputes import dispute_refusal, open_dispute, sign_off
+from core.disputes import (
+    dispute_refusal,
+    open_dispute,
+    request_regenerate,
+    sign_off,
+    withdraw,
+)
 from core.domain.decisions import DecisionId, decision_time
 from core.domain.disputes import (
     PAYER_STATEMENT_MAX,
@@ -23,7 +29,9 @@ from core.domain.disputes import (
     DisputeStatus,
     Reviewer,
     SignOff,
+    regenerate_refusal,
     sign_off_refusal,
+    withdraw_refusal,
 )
 from core.domain.evidence import EvidencePack
 from core.domain.payments import Payment, PaymentId
@@ -124,9 +132,7 @@ def sign_off_dispute(
 
     def write(read_at: datetime) -> tuple[int, DisputeOut]:
         now = decision_time(read_at)
-        dispute = tx.lock_dispute(DisputeId(dispute_id))
-        if dispute is None:
-            raise ApiError(404, "DISPUTE_NOT_FOUND", f"No Dispute {dispute_id}.")
+        dispute = _locked_dispute(tx, dispute_id)
         pack = tx.get_evidence_pack(dispute.dispute_id)
         refusal = sign_off_refusal(
             dispute.status, None if pack is None else pack.version, body.pack_version
@@ -141,6 +147,59 @@ def sign_off_dispute(
         return run_idempotent(tx, key, fingerprint, clock, write)
 
 
+@router.post("/{dispute_id}/withdraw", response_model=DisputeOut)
+def withdraw_dispute(
+    request: Request,
+    dispute_id: str,
+    tenant: ManageTenant,
+    store: StoreDep,
+    clock: ClockDep,
+    key: IdemKey,
+) -> Response:
+    """Close a Dispute the Tenant no longer needs, such as one the Payer dropped."""
+
+    def write(read_at: datetime) -> tuple[int, DisputeOut]:
+        now = decision_time(read_at)
+        dispute = _locked_dispute(tx, dispute_id)
+        refusal = withdraw_refusal(dispute.status)
+        if refusal is not None:
+            raise ApiError(409, refusal, _REFUSAL_TEXT[refusal])
+        return 200, _out(withdraw(tx, dispute, now), tx.get_evidence_pack(dispute.dispute_id))
+
+    with store.transaction(tenant) as tx:
+        return run_idempotent(tx, key, request_hash(request, None), clock, write)
+
+
+@router.post("/{dispute_id}/regenerate", response_model=DisputeOut)
+def regenerate_pack(
+    request: Request,
+    dispute_id: str,
+    tenant: ManageTenant,
+    store: StoreDep,
+    clock: ClockDep,
+    settings: SettingsDep,
+    key: IdemKey,
+) -> Response:
+    """Ask for the next pack version: the Dispute is `open` until it is built, and that
+    version needs its own Sign-off."""
+
+    def write(read_at: datetime) -> tuple[int, DisputeOut]:
+        now = decision_time(read_at)
+        dispute = _locked_dispute(tx, dispute_id)
+        pack = tx.get_evidence_pack(dispute.dispute_id)
+        refusal = regenerate_refusal(
+            dispute.status,
+            None if pack is None else pack.version,
+            settings.dispute_pack_versions_max,
+        )
+        if refusal is not None:
+            raise ApiError(409, refusal, _REFUSAL_TEXT[refusal])
+        return 200, _out(request_regenerate(tx, dispute, now), pack)
+
+    with store.transaction(tenant) as tx:
+        return run_idempotent(tx, key, request_hash(request, None), clock, write)
+
+
 @router.get("/{dispute_id}")
 def get_dispute(dispute_id: str, tenant: ManageTenant, store: StoreDep) -> DisputeOut:
     with store.transaction(tenant) as tx:
@@ -149,6 +208,13 @@ def get_dispute(dispute_id: str, tenant: ManageTenant, store: StoreDep) -> Dispu
     if dispute is None:
         raise ApiError(404, "DISPUTE_NOT_FOUND", f"No Dispute {dispute_id}.")
     return _out(dispute, pack)
+
+
+def _locked_dispute(tx: TenantTransaction, dispute_id: str) -> Dispute:
+    dispute = tx.lock_dispute(DisputeId(dispute_id))
+    if dispute is None:
+        raise ApiError(404, "DISPUTE_NOT_FOUND", f"No Dispute {dispute_id}.")
+    return dispute
 
 
 def _locked(tx: TenantTransaction, payment_id: PaymentId) -> Payment:
@@ -164,4 +230,6 @@ _REFUSAL_TEXT = {
     "DISPUTE_NOT_IN_REVIEW": "Only a Dispute whose pack is built and not yet signed off "
     "can be signed off.",
     "PACK_VERSION_NOT_CURRENT": "That pack version is not the latest; review the latest one.",
+    "DISPUTE_CLOSED": "The Dispute is signed off, expired or withdrawn.",
+    "PACK_VERSION_LIMIT": "This Dispute has as many pack versions as it may have.",
 }

@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from api.admin import replay_record
+from core.disputes import NotYetDue, expire_dispute
 from core.domain.canonical_json import canonical_json
 from core.domain.disputes import DisputeId
 from core.domain.evidence import Claim, EvidencePack
@@ -41,7 +42,9 @@ class Disputes(Webhooks):
         return payment
 
     def open(self, payment_id: str, *, headers=None, key: str | None = None, **body: Any):  # type: ignore[no-untyped-def]
-        sent = {"payment_id": payment_id, "reason": "unauthorised", "respond_by": RESPOND_BY}
+        # Ten days after the test clock: RESPOND_BY while the clock is at NOW.
+        respond_by = (self.api.clock.now() + timedelta(days=10)).isoformat()
+        sent = {"payment_id": payment_id, "reason": "unauthorised", "respond_by": respond_by}
         sent |= body
         headers = headers or self.manage
         if key is None:
@@ -60,6 +63,20 @@ class Disputes(Webhooks):
         if key is None:
             return self.api.post(path, headers, sent)
         return self.api.client.post(path, headers={**headers, "Idempotency-Key": key}, json=sent)
+
+    def act(self, dispute_id: str, action: str, *, headers=None, key: str | None = None):  # type: ignore[no-untyped-def]
+        """POST withdraw or regenerate, which take no body."""
+        path = f"/v1/disputes/{dispute_id}/{action}"
+        headers = headers or self.manage
+        if key is None:
+            return self.api.post(path, headers)
+        return self.api.client.post(path, headers={**headers, "Idempotency-Key": key})
+
+    def expire(self, dispute_id: str) -> str:
+        """What the workflow's expiry activity does, run here without Temporal."""
+        return expire_dispute(
+            self.api.store, self.tenant_id(), DisputeId(dispute_id), self.api.clock
+        )
 
     def relay(self) -> None:
         api = self.api
@@ -442,3 +459,167 @@ def test_a_stored_pack_that_differs_from_the_signed_hash_is_detectable(disputes:
         EvidencePack.model_validate(disputes.get(dispute["dispute_id"]).json()["pack"]).hash()
         == signed
     )
+
+
+# --- Lifecycle: withdraw, Regenerate, expiry --------------------------------------------
+
+
+@pytest.mark.parametrize("built", [False, True])
+def test_a_tenant_can_withdraw_an_open_or_in_review_dispute(
+    disputes: Disputes, built: bool
+) -> None:
+    payment = disputes.captured()
+    if built:
+        dispute_id = disputes.built(payment)["dispute_id"]
+    else:
+        dispute_id = disputes.open(payment["payment_id"]).json()["dispute_id"]
+
+    response = disputes.act(dispute_id, "withdraw")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "withdrawn"
+    assert disputes.get(dispute_id).json()["status"] == "withdrawn"
+
+
+def test_a_build_after_a_withdrawal_writes_nothing(disputes: Disputes) -> None:
+    dispute_id = disputes.open(disputes.captured()["payment_id"]).json()["dispute_id"]
+    disputes.act(dispute_id, "withdraw")
+
+    assert disputes.build(dispute_id) == "closed"
+    assert disputes.get(dispute_id).json()["pack"] is None
+
+
+@pytest.mark.parametrize("ending", ["sign-off", "withdraw", "expiry"])
+def test_a_closed_dispute_cannot_be_withdrawn_or_regenerated(
+    disputes: Disputes, ending: str
+) -> None:
+    dispute_id = disputes.built(disputes.captured())["dispute_id"]
+    if ending == "sign-off":
+        disputes.sign_off(dispute_id)
+    elif ending == "withdraw":
+        disputes.act(dispute_id, "withdraw")
+    else:
+        disputes.api.clock.advance(timedelta(days=10))
+        assert disputes.expire(dispute_id) == "expired"
+
+    assert_problem(disputes.act(dispute_id, "withdraw"), 409, "DISPUTE_CLOSED")
+    assert_problem(disputes.act(dispute_id, "regenerate"), 409, "DISPUTE_CLOSED")
+
+
+def test_regenerate_builds_a_new_version_that_needs_its_own_sign_off(disputes: Disputes) -> None:
+    first = disputes.built(disputes.captured())
+    dispute_id = first["dispute_id"]
+
+    asked = disputes.act(dispute_id, "regenerate")
+
+    assert asked.status_code == 200, asked.text
+    assert asked.json()["status"] == "open"
+    assert_problem(disputes.sign_off(dispute_id), 409, "DISPUTE_NOT_IN_REVIEW")
+    assert disputes.build(dispute_id) == "built"
+    second = disputes.get(dispute_id).json()
+    assert (second["status"], second["pack"]["version"]) == ("in_review", 2)
+    assert second["pack"]["bundle_hash"] == first["pack"]["bundle_hash"]
+    assert_problem(disputes.sign_off(dispute_id, pack_version=1), 409, "PACK_VERSION_NOT_CURRENT")
+    assert disputes.sign_off(dispute_id, pack_version=2).json()["status"] == "ready"
+
+
+def test_regenerate_waits_for_the_build_in_progress(disputes: Disputes) -> None:
+    dispute_id = disputes.open(disputes.captured()["payment_id"]).json()["dispute_id"]
+
+    assert_problem(disputes.act(dispute_id, "regenerate"), 409, "DISPUTE_NOT_IN_REVIEW")
+
+
+def test_a_dispute_has_at_most_three_pack_versions(disputes: Disputes) -> None:
+    dispute_id = disputes.built(disputes.captured())["dispute_id"]
+    for _ in range(2):
+        disputes.act(dispute_id, "regenerate")
+        disputes.build(dispute_id)
+
+    assert_problem(disputes.act(dispute_id, "regenerate"), 409, "PACK_VERSION_LIMIT")
+    assert disputes.get(dispute_id).json()["pack"]["version"] == 3
+
+
+def test_the_version_cap_comes_from_settings(api: Api, tmp_path: Path) -> None:
+    api.use_packs(phase_1_packs(tmp_path))
+    api.use_settings(make_settings(razorpay_webhook_secret=SECRET, dispute_pack_versions_max=1))
+    disputes = Disputes(api)
+    dispute_id = disputes.built(disputes.captured())["dispute_id"]
+
+    assert_problem(disputes.act(dispute_id, "regenerate"), 409, "PACK_VERSION_LIMIT")
+
+
+def test_withdraw_and_regenerate_signal_the_workflow_through_the_outbox(
+    disputes: Disputes,
+) -> None:
+    dispute_id = disputes.built(disputes.captured())["dispute_id"]
+    disputes.act(dispute_id, "regenerate")
+    disputes.build(dispute_id)
+    # Events at the same instant relay in either order, which is harmless: the workflow
+    # acts on the Dispute's stored status, not on the order of its nudges.
+    disputes.api.clock.advance(timedelta(seconds=1))
+    disputes.act(dispute_id, "withdraw")
+
+    disputes.relay()
+
+    ours = [s for s in disputes.api.workflow.dispute_signals if s[0] == disputes.tenant_id()]
+    assert ours == [
+        (disputes.tenant_id(), dispute_id, "regenerate"),
+        (disputes.tenant_id(), dispute_id, "closed"),
+    ]
+
+
+def test_sign_off_tells_the_workflow_to_stop_waiting(disputes: Disputes) -> None:
+    dispute_id = disputes.built(disputes.captured())["dispute_id"]
+    disputes.sign_off(dispute_id)
+
+    disputes.relay()
+
+    ours = [s for s in disputes.api.workflow.dispute_signals if s[0] == disputes.tenant_id()]
+    assert ours == [(disputes.tenant_id(), dispute_id, "closed")]
+
+
+def test_a_dispute_expires_once_respond_by_passes(disputes: Disputes) -> None:
+    dispute_id = disputes.built(disputes.captured())["dispute_id"]
+
+    disputes.api.clock.advance(timedelta(days=10) - timedelta(milliseconds=1))
+    with pytest.raises(NotYetDue):
+        disputes.expire(dispute_id)
+    disputes.api.clock.advance(timedelta(milliseconds=1))
+
+    assert disputes.expire(dispute_id) == "expired"
+    assert disputes.expire(dispute_id) == "already_closed"
+    assert disputes.get(dispute_id).json()["status"] == "expired"
+    assert_problem(disputes.sign_off(dispute_id), 409, "DISPUTE_NOT_IN_REVIEW")
+
+
+def test_a_signed_off_dispute_never_expires(disputes: Disputes) -> None:
+    dispute_id = disputes.built(disputes.captured())["dispute_id"]
+    disputes.sign_off(dispute_id)
+    disputes.api.clock.advance(timedelta(days=30))
+
+    assert disputes.expire(dispute_id) == "already_closed"
+    assert disputes.get(dispute_id).json()["status"] == "ready"
+
+
+def test_withdraw_and_regenerate_need_a_manage_key_and_the_tenants_dispute(
+    disputes: Disputes,
+) -> None:
+    dispute_id = disputes.built(disputes.captured())["dispute_id"]
+    other = Disputes(disputes.api, "globex")
+
+    for action in ("withdraw", "regenerate"):
+        assert_problem(
+            disputes.act(dispute_id, action, headers=disputes.decide), 403, "INSUFFICIENT_SCOPE"
+        )
+        assert_problem(other.act(dispute_id, action), 404, "DISPUTE_NOT_FOUND")
+
+
+def test_a_retried_regenerate_asks_once(disputes: Disputes) -> None:
+    dispute_id = disputes.built(disputes.captured())["dispute_id"]
+
+    first = disputes.act(dispute_id, "regenerate", key="rg-1")
+    again = disputes.act(dispute_id, "regenerate", key="rg-1")
+
+    assert first.json() == again.json()
+    disputes.build(dispute_id)
+    assert disputes.get(dispute_id).json()["pack"]["version"] == 2

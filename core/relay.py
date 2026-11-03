@@ -1,7 +1,8 @@
 """The outbox relay: deliver outbox events (ADR-0009).
 
 - `dispute_opened` starts the workflow that builds the Dispute's Evidence pack; its ID is
-  the Dispute ID, so it is started at most once, as below.
+  the Dispute ID, so it is started at most once, as below. `dispute_regenerate` and
+  `dispute_closed` signal it, through the outbox so that a Regenerate is never lost.
 - `consent_requested` starts the Consent request's workflow. While the workflow side is
   down the event waits and is retried on every pass. Starting a workflow twice is a no-op
   (its ID is the Consent request ID), so a pass that dies after starting but before
@@ -26,7 +27,9 @@ from core.tenant_webhooks import TenantWebhooks
 
 log = logging.getLogger(__name__)
 
-WORKFLOW_EVENT_TYPES = frozenset({"consent_requested", "dispute_opened"})
+WORKFLOW_EVENT_TYPES = frozenset(
+    {"consent_requested", "dispute_opened", "dispute_regenerate", "dispute_closed"}
+)
 
 
 def relay_once(
@@ -94,4 +97,14 @@ def _start_workflow(event: DomainEvent, workflow: Workflow) -> None:
             datetime.fromisoformat(str(event.payload["expires_at"])),
         )
     elif event.event_type == "dispute_opened":
-        workflow.start_dispute_pack(event.tenant_id, DisputeId(str(event.payload["dispute_id"])))
+        workflow.start_dispute_pack(
+            event.tenant_id,
+            DisputeId(str(event.payload["dispute_id"])),
+            datetime.fromisoformat(str(event.payload["respond_by"])),
+        )
+    elif event.event_type in ("dispute_regenerate", "dispute_closed"):
+        workflow.signal_dispute(
+            event.tenant_id,
+            DisputeId(str(event.payload["dispute_id"])),
+            "regenerate" if event.event_type == "dispute_regenerate" else "closed",
+        )
