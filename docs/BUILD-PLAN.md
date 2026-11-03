@@ -10,7 +10,7 @@ The MVP is done when a reviewer at Stripe or Razorpay can watch three journeys r
 
 | Criterion | Target for MVP |
 | --- | --- |
-| Demo journeys | 3 run end to end: clean allow, step-up consent, block + dispute pack |
+| Demo journeys | 3 run end to end: clean allow, step-up consent, a disputed captured Payment with a signed-off Evidence pack |
 | Decision latency (hot path) | p95 under 150 ms, no LLM call on this path |
 | Eval set | 200+ labelled agent transactions, run in CI on every PR |
 | Decision quality | False-allow rate and false-block rate published per release |
@@ -272,6 +272,8 @@ sandbox keys are present). Never log keys or full payloads.
 
 **Phase 5 — dispute evidence agent** (`/clear` first)
 
+> Superseded in detail by the Phase 5 PRD (#104) and ADR-0018. The Tenant reports a Dispute on a captured Payment through `POST /v1/disputes`; rail-driven disputes are out of scope. Code gathers the Evidence bundle and the Policy pack sets the network codes and Evidence strength; the model only writes the cited narrative, with a checker, one retry and a fallback written by code. A named reviewer signs off one exact pack version, by API or a Review link in the web dispute viewer. Demo journey 3 is a captured Payment that is disputed, not a block. No refunds. The Langfuse exporter moves to Phase 6.
+
 ```text
 Read CLAUDE.md, SPEC-06. Build the dispute_pack workflow and a single agent with read-only tools:
 get_audit_trail, get_mandate, get_consent_record, get_rail_events. Reason-code mapping is deterministic
@@ -286,7 +288,8 @@ is marked ready. Add the dispute viewer page in Next.js.
 Read CLAUDE.md, SPEC-07, SPEC-08. Generate 200+ golden cases in evals/golden/ covering clean allows,
 over-cap, wrong category, intent mismatch, velocity spikes, price drift, expired mandates and prompt-
 injected merchant text. Score false-allow, false-block, step-up rate and p95 latency; fail CI on the SPEC-07
-thresholds. Add an ops console page with these metrics. Then write infra/render.yaml and Vercel config
+thresholds. Add an ops console page with these metrics, and the Langfuse exporter to the OTel
+collector. Then write infra/render.yaml and Vercel config
 for deployment, and a README with architecture, how to run, and the eval results table.
 ```
 
@@ -307,4 +310,4 @@ None of these need a rewrite if the seams hold; each is a swap or an addition. L
 - [ ] Runbooks: rail outage (fail to step\_up or block, never allow), model outage, stuck consent workflows.
 - [ ] Rail: live Razorpay keys (the code refuses them today, ADR-0012), and UPI Reserve Pay alongside card recurring payments (the later swap ADR-0013 names).
 - [ ] Rail: Razorpay Route, a connected account per Tenant, so each Tenant is the Merchant of record instead of our one account (ADR-0012).
-- [ ] Rail: refunds. `PaymentRail.refund` is declared but not implemented; it comes with disputes in Phase 5.
+- [ ] Rail: refunds. `PaymentRail.refund` is declared but not implemented. Phase 5 Disputes are evidence only and move no money (#104).
