@@ -363,6 +363,12 @@ disputes = Table(
     Column("payer_statement", String, nullable=True),
     Column("status", String, nullable=False),
     Column("opened_seq", BigInteger, nullable=False),
+    # Sign-off (#108): all set together, or none.
+    Column("reviewer_id", String, nullable=True),
+    Column("reviewer_name", String, nullable=True),
+    Column("signed_off_version", Integer, nullable=True),
+    Column("signed_off_pack_hash", String, nullable=True),
+    Column("signed_off_at", DateTime(timezone=True), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     ForeignKeyConstraint(

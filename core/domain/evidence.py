@@ -102,3 +102,7 @@ class EvidencePack(_Frozen):
 
     def body(self) -> bytes:
         return canonical_json(self)
+
+    def hash(self) -> str:
+        """The pack hash: what a Sign-off approves and the Audit chain records."""
+        return "sha256:" + hashlib.sha256(self.body()).hexdigest()
