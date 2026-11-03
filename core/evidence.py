@@ -6,22 +6,28 @@ a model would use (`get_audit_trail`, `get_mandate`, `get_consent_record`,
 the pack. The bundle reads the Audit chain only up to the Dispute's `dispute_opened`
 record, so it is the same however much the chain grows.
 
-The narrative here is written by code from the bundle: one sentence per fact, each
-citing the Audit records it rests on.
+The dispute evidence agent (agents.dispute_narrative) writes the narrative from the
+bundle when it can; the citation checker refuses anything it can't trace to the bundle.
+Otherwise the narrative here is written by code: one sentence per fact, each citing the
+Audit records it rests on.
 """
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from core.domain.audit import AuditRecord, SealedAuditRecord
+from core.domain.audit import AuditKind, AuditRecord, SealedAuditRecord
 from core.domain.decisions import DecisionId, PackRef, decision_time
 from core.domain.disputes import CLOSED, Dispute, DisputeId
 from core.domain.evidence import (
     BundleRecord,
     Claim,
+    ClaimKind,
     ConsentRecord,
     EvidenceBundle,
     EvidencePack,
+    NarrativeAttempt,
     RailEventRecord,
 )
 from core.domain.mandates import Mandate
@@ -135,16 +141,38 @@ def gather_bundle(tx: TenantTransaction, dispute: Dispute) -> EvidenceBundle:
 # --- Building --------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class ModelNarrative:
+    """What a narrative writer gives back: claims the checker accepted, or None, and
+    every model call it made."""
+
+    claims: tuple[Claim, ...] | None
+    attempts: tuple[NarrativeAttempt, ...]
+
+
+# Writes a model narrative for a bundle (agents.dispute_narrative). Given a bundle that
+# code gathered, it never chooses what to read (ADR-0018).
+NarrativeWriter = Callable[[TenantId, EvidenceBundle], ModelNarrative]
+
+UNAVAILABLE = "model narrative unavailable"
+
+
 def build_evidence_pack(
-    store: UnitOfWork, tenant_id: TenantId, dispute_id: DisputeId, clock: Clock, packs_dir: Path
+    store: UnitOfWork,
+    tenant_id: TenantId,
+    dispute_id: DisputeId,
+    clock: Clock,
+    packs_dir: Path,
+    writer: NarrativeWriter | None = None,
 ) -> str:
     """Build the next pack version of an open Dispute and put it in review, assessed with
     the Policy pack active now. Driven by the Dispute's status, so it is safe to run more
     than once: returns `built`, `already_built` (in review), `closed` (signed off, expired
-    or withdrawn, so a build in progress writes nothing) or `missing`."""
-    now = decision_time(clock.now())
-    policy = load_active_pack(packs_dir, "default")
-    rules = policy.pack.disputes
+    or withdrawn, so a build in progress writes nothing) or `missing`.
+
+    The bundle is gathered in one transaction and the pack written in another, so no
+    database connection is held while the model writes. The second transaction writes
+    only if the Dispute is still open with no newer pack."""
     with store.transaction(tenant_id) as tx:
         dispute = tx.lock_dispute(dispute_id)
         if dispute is None:
@@ -154,20 +182,43 @@ def build_evidence_pack(
         if dispute.status == "in_review":
             return "already_built"
         latest = tx.get_evidence_pack(dispute_id)
+        version = 1 if latest is None else latest.version + 1
         bundle = gather_bundle(tx, dispute)
+
+    written = None if writer is None else writer(tenant_id, bundle)
+    if written is not None and written.claims is not None:
+        narrative, source, note = written.claims, "model", None
+    else:
+        narrative, source = template_narrative(bundle), "template"
+        note = UNAVAILABLE if written is not None else None
+    policy = load_active_pack(packs_dir, "default")
+    rules = policy.pack.disputes
+    now = decision_time(clock.now())
+
+    with store.transaction(tenant_id) as tx:
+        dispute = tx.lock_dispute(dispute_id)
+        if dispute is None:
+            return "missing"
+        if dispute.status in CLOSED:
+            return "closed"
+        current = tx.get_evidence_pack(dispute_id)
+        if dispute.status == "in_review" or (current and current.version >= version):
+            return "already_built"
         tx.add_evidence_pack(
             EvidencePack(
                 dispute_id=dispute_id,
-                version=1 if latest is None else latest.version + 1,
+                version=version,
                 bundle=bundle,
                 bundle_hash=bundle.hash(),
-                narrative=template_narrative(bundle),
-                narrative_source="template",
+                narrative=narrative,
+                narrative_source=source,
                 built_at=now,
                 policy_pack=PackRef(
                     id=policy.pack.id, version=policy.pack.version, hash=policy.hash
                 ),
                 assessment=None if rules is None else assess(bundle, dispute.reason, rules),
+                narrative_attempts=() if written is None else written.attempts,
+                narrative_note=note,
             )
         )
         tx.update_dispute(dispute.model_copy(update={"status": "in_review", "updated_at": now}))
@@ -201,12 +252,13 @@ def _mandate_claim(mandate: Mandate, decision: BundleRecord) -> Claim:
             f"on {_at(evidence.captured_at)}."
         ),
         cites=(decision.audit_record_id,),
+        kind="mandate",
     )
 
 
 def _claim(item: BundleRecord) -> Claim:
     record = item.record
-    return Claim(text=_sentence(record), cites=(item.audit_record_id,))
+    return Claim(text=_sentence(record), cites=(item.audit_record_id,), kind=_KIND[item.kind])
 
 
 def _sentence(record: AuditRecord) -> str:
@@ -249,6 +301,16 @@ def _sentence(record: AuditRecord) -> str:
     raise ValueError(f"no sentence for a {record.kind} record")
 
 
+_KIND: dict[AuditKind, ClaimKind] = {
+    "decision": "decision",
+    "consent_resolution": "payer_approval",
+    "payment": "payment",
+    "void": "void",
+    "dispute_opened": "dispute",
+    "dispute_signed_off": "dispute",
+}
+
+
 def _related_claim(item: BundleRecord) -> Claim:
     record = item.record
     if record.inputs is None or record.output is None:
@@ -263,6 +325,7 @@ def _related_claim(item: BundleRecord) -> Claim:
             + (f" (reason codes {', '.join(reasons)})." if reasons else ".")
         ),
         cites=(item.audit_record_id,),
+        kind="context",
     )
 
 
@@ -276,6 +339,7 @@ def _payer_payment_claim(item: BundleRecord) -> Claim:
             f"merchant, {payment.payment_id} for {_money(payment.amount)}, was captured."
         ),
         cites=(item.audit_record_id,),
+        kind="context",
     )
 
 

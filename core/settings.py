@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     # Measured ~900 ms round trip from a dev machine; the check is off the decision path.
     intent_check_timeout_ms: int = Field(default=2500, gt=0, le=30_000)
 
+    # The dispute narrative: one model call, and at most one retry, per Evidence pack
+    # version, off every request path. Without a key, or on failure, the narrative is
+    # written by code. Off: always written by code, no model call.
+    dispute_narrative_enabled: bool = True
+    dispute_narrative_model: str = "claude-sonnet-5-5"
+    dispute_narrative_timeout_ms: int = Field(default=45_000, gt=0, le=120_000)
+
     # The consent screen's origin: Consent links point here, and only this origin may
     # call the Consent link endpoints from a browser (CORS).
     web_origin: str = Field(default="http://localhost:3000", pattern=r"^https?://[^/\s]+$")

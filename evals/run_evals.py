@@ -4,7 +4,8 @@
 `--cases`) through `decide()` and prints the false-allow and false-block counts per
 file. It exits 1 on any mismatch, including a wrong Reason code, so CI fails. Files named
 `disputes*.jsonl` are scored by evals.disputes instead: network codes, Evidence strength
-and missing evidence.
+and missing evidence; and `narrative_checks*.jsonl` by the citation checker's verdict on
+labelled model replies.
 
 A false-allow is an allow where the label says step_up or block; a false-block is a block
 where the label says allow or step_up. Each case lists only what it changes from the
@@ -35,7 +36,12 @@ from core.domain.parties import Agent, AgentStatus
 from core.domain.signals import Signals
 from core.policy.engine import decide
 from core.policy.packs import load_pack
-from evals.disputes import load_dispute_cases, run_dispute_cases
+from evals.disputes import (
+    load_dispute_cases,
+    load_narrative_cases,
+    run_dispute_cases,
+    run_narrative_cases,
+)
 
 GOLDEN = Path(__file__).resolve().parent / "golden"
 PACKS = Path(__file__).resolve().parents[1] / "policy_packs"
@@ -162,6 +168,9 @@ def main(argv: list[str] | None = None) -> int:
         if path.stem.startswith("disputes"):
             failed |= _disputes(path, args.packs)
             continue
+        if path.stem.startswith("narrative_checks"):
+            failed |= _narratives(path)
+            continue
         cases = load_cases(path)
         report = run_cases(cases, args.packs)
         pack = f"{cases[0].pack.id}@{cases[0].pack.version}" if cases else "-"
@@ -194,6 +203,20 @@ def _disputes(path: Path, packs: Path) -> bool:
             f"{m.expected.visa_code}/{m.expected.mastercard_code} missing "
             f"{list(m.expected.missing)}, got {m.actual.strength} "
             f"{m.actual.visa_code}/{m.actual.mastercard_code} missing {list(m.actual.missing)}"
+        )
+    return bool(report.mismatches)
+
+
+def _narratives(path: Path) -> bool:
+    """Score one citation-checker golden file; True if the checker gets any case wrong."""
+    report = run_narrative_cases(load_narrative_cases(path))
+    print(f"{path.name} (citation checker)")
+    print(f"  cases: {report.total}")
+    print(f"  mismatches: {len(report.mismatches)}")
+    for m in report.mismatches:
+        print(
+            f"    {m.case_id} ({m.description}): expected accepted={m.expected.accepted} "
+            f"{list(m.expected.codes)}, got accepted={m.actual.accepted} {list(m.actual.codes)}"
         )
     return bool(report.mismatches)
 

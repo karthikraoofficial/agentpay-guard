@@ -7,7 +7,13 @@ import pytest
 
 from core.domain.decisions import ReasonCode
 from core.domain.disputes import DisputeReason
-from evals.disputes import load_dispute_cases, run_dispute_cases
+from core.domain.evidence import CheckCode
+from evals.disputes import (
+    load_dispute_cases,
+    load_narrative_cases,
+    run_dispute_cases,
+    run_narrative_cases,
+)
 from evals.run_evals import GOLDEN, PackPin, load_cases, main, run_cases
 from tests.packs import release_test_pack
 
@@ -199,4 +205,26 @@ def test_a_wrong_dispute_label_fails_the_run(
     (tmp_path / "disputes.jsonl").write_text(json.dumps(first), encoding="utf-8")
 
     assert main(["--cases", str(tmp_path / "disputes.jsonl")]) == 1
+    assert "mismatches: 1" in capsys.readouterr().out
+
+
+def test_the_narrative_set_covers_every_refusal_and_acceptance() -> None:
+    cases = load_narrative_cases(GOLDEN / "narrative_checks.jsonl")
+
+    assert len({c.id for c in cases}) == len(cases)
+    assert {code for c in cases for code in c.expected.codes} == set(get_args(CheckCode))
+    assert {c.expected.accepted for c in cases} == {True, False}
+    assert run_narrative_cases(cases).mismatches == []
+
+
+def test_a_wrong_narrative_label_fails_the_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    shutil.copy(GOLDEN / "narrative_checks_base.json", tmp_path / "narrative_checks_base.json")
+    lines = (GOLDEN / "narrative_checks.jsonl").read_text(encoding="utf-8").splitlines()
+    good = json.loads(lines[0])
+    good["expected"] = {"accepted": False, "codes": ["uncited"]}
+    (tmp_path / "narrative_checks.jsonl").write_text(json.dumps(good), encoding="utf-8")
+
+    assert main(["--cases", str(tmp_path / "narrative_checks.jsonl")]) == 1
     assert "mismatches: 1" in capsys.readouterr().out
