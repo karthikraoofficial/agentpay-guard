@@ -6,6 +6,8 @@ from typing import get_args
 import pytest
 
 from core.domain.decisions import ReasonCode
+from core.domain.disputes import DisputeReason
+from evals.disputes import load_dispute_cases, run_dispute_cases
 from evals.run_evals import GOLDEN, PackPin, load_cases, main, run_cases
 from tests.packs import release_test_pack
 
@@ -153,20 +155,48 @@ def test_an_approval_labelled_blocked_that_goes_through_is_a_false_allow(tmp_pat
     assert [m.case_id for m in report.mismatches] == ["approve-unchanged"]
 
 
-def test_the_approval_set_is_pinned_to_the_active_pack_1_3_0() -> None:
+def test_the_approval_set_is_pinned_to_1_3_0() -> None:
     cases = load_cases(GOLDEN / "approval.jsonl")
 
     assert {(c.pack.id, c.pack.version) for c in cases} == {("default", "1.3.0")}
 
 
+@pytest.mark.parametrize("version", ["1.3.0", "1.4.0"])
 @pytest.mark.parametrize("name", ["phase2", "approval"])
-def test_default_1_3_0_decides_every_signal_era_case_as_its_own_pack_does(name: str) -> None:
-    # 1.3.0 only adds the Payment window, which no rule reads. phase1 is left out: it is
-    # labelled for 1.0.0, before the Signals, so 1.3.0 is meant to decide some of it apart.
+def test_later_packs_decide_every_signal_era_case_as_its_own_pack_does(
+    name: str, version: str
+) -> None:
+    # 1.3.0 only adds the Payment window and 1.4.0 the Dispute rules, which no rule reads.
+    # phase1 is left out: it is labelled for 1.0.0, before the Signals, so later packs are
+    # meant to decide some of it apart.
     cases = load_cases(GOLDEN / f"{name}.jsonl")
-    on_1_3_0 = [
-        c.model_copy(update={"pack": PackPin(id="default", version="1.3.0")}) for c in cases
-    ]
+    later = [c.model_copy(update={"pack": PackPin(id="default", version=version)}) for c in cases]
 
     assert run_cases(cases, PACKS).mismatches == []
-    assert run_cases(on_1_3_0, PACKS) == run_cases(cases, PACKS)
+    assert run_cases(later, PACKS) == run_cases(cases, PACKS)
+
+
+# --- Disputes -------------------------------------------------------------------------
+
+
+def test_the_dispute_set_covers_every_reason_and_strength_on_1_4_0() -> None:
+    cases = load_dispute_cases(GOLDEN / "disputes.jsonl")
+
+    assert len({c.id for c in cases}) == len(cases)
+    assert {(c.pack.id, c.pack.version) for c in cases} == {("default", "1.4.0")}
+    assert {c.reason for c in cases} == set(get_args(DisputeReason))
+    assert {c.expected.strength for c in cases} == {"strong", "mixed", "weak"}
+    assert run_dispute_cases(cases, PACKS).mismatches == []
+
+
+def test_a_wrong_dispute_label_fails_the_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    shutil.copy(GOLDEN / "disputes_base.json", tmp_path / "disputes_base.json")
+    lines = (GOLDEN / "disputes.jsonl").read_text(encoding="utf-8").splitlines()
+    first = json.loads(lines[0])
+    first["expected"]["strength"] = "weak"
+    (tmp_path / "disputes.jsonl").write_text(json.dumps(first), encoding="utf-8")
+
+    assert main(["--cases", str(tmp_path / "disputes.jsonl")]) == 1
+    assert "mismatches: 1" in capsys.readouterr().out

@@ -2,7 +2,9 @@
 
 `uv run python -m evals.run_evals` runs every golden file in evals/golden/ (or one, with
 `--cases`) through `decide()` and prints the false-allow and false-block counts per
-file. It exits 1 on any mismatch, including a wrong Reason code, so CI fails.
+file. It exits 1 on any mismatch, including a wrong Reason code, so CI fails. Files named
+`disputes*.jsonl` are scored by evals.disputes instead: network codes, Evidence strength
+and missing evidence.
 
 A false-allow is an allow where the label says step_up or block; a false-block is a block
 where the label says allow or step_up. Each case lists only what it changes from the
@@ -33,6 +35,7 @@ from core.domain.parties import Agent, AgentStatus
 from core.domain.signals import Signals
 from core.policy.engine import decide
 from core.policy.packs import load_pack
+from evals.disputes import load_dispute_cases, run_dispute_cases
 
 GOLDEN = Path(__file__).resolve().parent / "golden"
 PACKS = Path(__file__).resolve().parents[1] / "policy_packs"
@@ -156,6 +159,9 @@ def main(argv: list[str] | None = None) -> int:
     files = [args.cases] if args.cases else sorted(GOLDEN.glob("*.jsonl"))
     failed = False
     for path in files:
+        if path.stem.startswith("disputes"):
+            failed |= _disputes(path, args.packs)
+            continue
         cases = load_cases(path)
         report = run_cases(cases, args.packs)
         pack = f"{cases[0].pack.id}@{cases[0].pack.version}" if cases else "-"
@@ -172,6 +178,24 @@ def main(argv: list[str] | None = None) -> int:
             )
         failed |= bool(report.mismatches)
     return 1 if failed else 0
+
+
+def _disputes(path: Path, packs: Path) -> bool:
+    """Score one Dispute golden file; True if any case is mislabelled by the code."""
+    cases = load_dispute_cases(path)
+    report = run_dispute_cases(cases, packs)
+    pack = f"{cases[0].pack.id}@{cases[0].pack.version}" if cases else "-"
+    print(f"{path.name} ({pack})")
+    print(f"  cases: {report.total}")
+    print(f"  mismatches: {len(report.mismatches)}")
+    for m in report.mismatches:
+        print(
+            f"    {m.case_id} ({m.description}): expected {m.expected.strength} "
+            f"{m.expected.visa_code}/{m.expected.mastercard_code} missing "
+            f"{list(m.expected.missing)}, got {m.actual.strength} "
+            f"{m.actual.visa_code}/{m.actual.mastercard_code} missing {list(m.actual.missing)}"
+        )
+    return bool(report.mismatches)
 
 
 if __name__ == "__main__":

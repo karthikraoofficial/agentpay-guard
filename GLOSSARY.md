@@ -263,7 +263,7 @@ What the Tenant submits to contest a Dispute: the Evidence bundle, the network r
 _Avoid_: Dispute pack (in prose), report, case
 
 **Evidence strength**:
-How well the Evidence bundle supports the charge for the Dispute reason: strong, mixed or weak, worked out by fixed rules, never by a model.
+How well the Evidence bundle supports the charge for the Dispute reason: strong, mixed or weak. The Policy pack says, for each Dispute reason, which facts about the bundle make it strong and which make it weak; it is never judged by a model.
 _Avoid_: Score, confidence, win probability
 
 **Sign-off**:

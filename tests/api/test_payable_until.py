@@ -40,7 +40,7 @@ def test_an_allow_is_payable_for_the_packs_window_from_the_decision_time(links: 
 def test_the_active_default_pack_gives_fifteen_minutes(api: Api) -> None:
     body = Pay(api).ask().json()
 
-    assert body["policy_pack"]["version"] == "1.3.0"
+    assert body["policy_pack"]["version"] == "1.4.0"
     assert body["payable_until"] == "2026-11-02T09:45:00Z"
 
 

@@ -5,11 +5,13 @@ The `api` fixture verifies every chain and replays every Decision when each test
 so `dispute_opened` records must keep the chain intact."""
 
 import hashlib
+import json
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from api.admin import replay_record
 from core.disputes import NotYetDue, expire_dispute
@@ -22,8 +24,13 @@ from tests.api.conftest import NOW, Api, tenant_webhooks
 from tests.api.test_rail_webhooks import SECRET, Webhooks, event
 from tests.api.test_tenants_payers_agents import assert_problem
 from tests.conftest import make_settings
-from tests.packs import phase_1_packs
+from tests.packs import phase_1_packs, release_test_pack
 
+DISPUTE_RULES = yaml.safe_load(
+    (Path(__file__).resolve().parents[2] / "policy_packs" / "default" / "1.4.0.yaml").read_text(
+        encoding="utf-8"
+    )
+)["disputes"]
 REVIEWER = {"id": "ops-7", "name": "Meera Iyer"}
 RESPOND_BY = (NOW + timedelta(days=10)).isoformat().replace("+00:00", "Z")
 
@@ -85,7 +92,7 @@ class Disputes(Webhooks):
     def build(self, dispute_id: str) -> str:
         """What the workflow's build activity does, run here without Temporal."""
         return build_evidence_pack(
-            self.api.store, self.tenant_id(), DisputeId(dispute_id), self.api.clock
+            self.api.store, self.tenant_id(), DisputeId(dispute_id), self.api.clock, self.api.packs
         )
 
     def built(self, payment: dict[str, Any]) -> dict[str, Any]:
@@ -97,7 +104,8 @@ class Disputes(Webhooks):
 
 @pytest.fixture
 def disputes(api: Api, tmp_path: Path) -> Disputes:
-    api.use_packs(phase_1_packs(tmp_path))
+    # The Phase 1 decision rules, with default@1.4.0's Dispute rules.
+    api.use_packs(release_test_pack(tmp_path, "1.0.1", {"disputes": DISPUTE_RULES}))
     api.use_settings(make_settings(razorpay_webhook_secret=SECRET))
     return Disputes(api)
 
@@ -623,3 +631,149 @@ def test_a_retried_regenerate_asks_once(disputes: Disputes) -> None:
     assert first.json() == again.json()
     disputes.build(dispute_id)
     assert disputes.get(dispute_id).json()["pack"]["version"] == 2
+
+
+# --- Network codes and Evidence strength (default@1.4.0's Dispute rules) ----------------
+
+
+def _assessed(disputes: Disputes, payment: dict[str, Any], reason: str) -> dict[str, Any]:
+    dispute_id = disputes.open(payment["payment_id"], reason=reason).json()["dispute_id"]
+    assert disputes.build(dispute_id) == "built"
+    pack: dict[str, Any] = disputes.get(dispute_id).json()["pack"]
+    return pack
+
+
+def test_a_pack_records_the_policy_pack_it_was_assessed_with(disputes: Disputes) -> None:
+    pack = _assessed(disputes, disputes.captured(), "unauthorised")
+
+    manifest = json.loads((disputes.api.packs / "manifest.json").read_text(encoding="utf-8"))
+    assert pack["policy_pack"] == {
+        "id": "default",
+        "version": "1.0.1",
+        "hash": manifest["packs"]["default"]["versions"]["1.0.1"],
+    }
+
+
+def test_an_allow_with_no_intent_check_is_mixed_evidence_of_authorisation(
+    disputes: Disputes,
+) -> None:
+    pack = _assessed(disputes, disputes.captured(), "unauthorised")
+
+    assert pack["assessment"] == {
+        "reason": "unauthorised",
+        "visa_code": "10.4",
+        "mastercard_code": "4837",
+        "strength": "mixed",
+        "facts": [
+            "amount_matches_decision",
+            "decision_within_mandate",
+            "mandate_active_at_decision",
+            "no_duplicate_payment",
+        ],
+        "missing": ["payer_intent_confirmed"],
+        "notes": ["No Intent match and no attested approval show the Payer wanted this purchase."],
+    }
+
+
+def test_an_attested_approval_is_strong_evidence_of_authorisation(disputes: Disputes) -> None:
+    decision = disputes.step_up()
+    assert disputes.approve(decision["step_up"]["consent_request_id"]).status_code == 200
+    payment = disputes.pay(decision["decision_id"]).json()
+    disputes.deliver(event(payment), "evt_approved")
+
+    assessment = _assessed(disputes, payment, "unauthorised")["assessment"]
+
+    assert (assessment["strength"], assessment["missing"]) == ("strong", [])
+    assert "payer_intent_confirmed" in assessment["facts"]
+
+
+def test_the_same_payment_captured_twice_in_a_day_is_weak_against_a_duplicate_claim(
+    disputes: Disputes,
+) -> None:
+    first = disputes.captured()
+    alone = _assessed(disputes, first, "duplicate")["assessment"]
+    disputes.api.clock.advance(timedelta(hours=23))
+    second = disputes.captured()
+
+    again = _assessed(disputes, second, "duplicate")
+
+    assert (alone["strength"], alone["visa_code"], alone["mastercard_code"]) == (
+        "strong",
+        "12.6",
+        "4834",
+    )
+    assert again["assessment"]["strength"] == "weak"
+    assert "duplicate_payment_found" in again["assessment"]["facts"]
+    cited = {c for claim in again["narrative"] for c in claim["cites"]}
+    first_capture = again["bundle"]["payer_payments"][0]
+    assert first_capture["record"]["payment"]["payment_id"] == first["payment_id"]
+    assert first_capture["audit_record_id"] in cited
+
+
+def test_a_payment_more_than_a_day_apart_is_not_a_duplicate(disputes: Disputes) -> None:
+    disputes.captured()
+    disputes.api.clock.advance(timedelta(hours=25))
+
+    assert _assessed(disputes, disputes.captured(), "duplicate")["assessment"]["strength"] == (
+        "strong"
+    )
+
+
+@pytest.mark.parametrize(
+    ("reason", "codes", "strength", "missing"),
+    [
+        ("cancelled_recurring", ("13.2", "4841"), "strong", []),
+        ("amount_differs", ("12.5", "4834"), "mixed", ["within_quoted_total"]),
+        ("not_received", ("13.1", "4855"), "mixed", ["fulfilment_evidence"]),
+        ("not_as_described", ("13.3", "4853"), "mixed", ["fulfilment_evidence"]),
+    ],
+)
+def test_each_reason_has_its_codes_and_strength(
+    disputes: Disputes, reason: str, codes: tuple[str, str], strength: str, missing: list[str]
+) -> None:
+    assessment = _assessed(disputes, disputes.captured(), reason)["assessment"]
+
+    assert (assessment["visa_code"], assessment["mastercard_code"]) == codes
+    assert (assessment["strength"], assessment["missing"]) == (strength, missing)
+
+
+def test_a_revocation_after_the_capture_is_shown_but_weakens_nothing(disputes: Disputes) -> None:
+    payment = disputes.captured()
+    disputes.api.clock.advance(timedelta(hours=1))
+    revoke = f"/v1/mandates/{disputes.mandate_id}/revoke"
+    assert disputes.api.post(revoke, disputes.tenant, {"revoked_by": "payer"}).status_code == 200
+
+    pack = _assessed(disputes, payment, "cancelled_recurring")
+
+    assert pack["bundle"]["mandate_revoked_at"] == "2026-11-02T10:30:00Z"
+    assert pack["assessment"]["strength"] == "strong"
+
+
+def test_a_pack_without_dispute_rules_has_no_assessment(api: Api, tmp_path: Path) -> None:
+    api.use_packs(phase_1_packs(tmp_path))
+    api.use_settings(make_settings(razorpay_webhook_secret=SECRET))
+    disputes = Disputes(api)
+
+    pack = _assessed(disputes, disputes.captured(), "unauthorised")
+
+    assert pack["assessment"] is None
+    assert pack["policy_pack"]["version"] == "1.0.0"
+
+
+def test_a_regenerate_after_a_release_is_assessed_with_the_new_pack(
+    disputes: Disputes, tmp_path: Path
+) -> None:
+    dispute_id = disputes.built(disputes.captured())["dispute_id"]
+    stricter = {**DISPUTE_RULES, "reasons": {**DISPUTE_RULES["reasons"]}}
+    stricter["reasons"]["unauthorised"] = {
+        **DISPUTE_RULES["reasons"]["unauthorised"],
+        "weak_when": ["mandate_active_at_decision"],
+    }
+    release_test_pack(tmp_path, "1.0.2", {"disputes": stricter})
+
+    disputes.act(dispute_id, "regenerate")
+    disputes.build(dispute_id)
+
+    pack = disputes.get(dispute_id).json()["pack"]
+    assert (pack["version"], pack["policy_pack"]["version"]) == (2, "1.0.2")
+    assert pack["assessment"]["strength"] == "weak"

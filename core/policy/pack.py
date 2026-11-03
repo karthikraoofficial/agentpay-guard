@@ -6,7 +6,7 @@ The policy engine imports only this module, so it never touches files.
 
 import hashlib
 from datetime import timedelta
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 from pydantic import (
     BaseModel,
@@ -19,6 +19,7 @@ from pydantic import (
 )
 
 from core.domain.canonical_json import canonical_json
+from core.domain.disputes import DisputeReason, EvidenceFact
 from core.domain.mandates import Mcc
 from core.domain.money import CurrencyCode
 
@@ -93,6 +94,39 @@ class PriceDriftParams(_Strict):
     max_above_bps: StrictInt = Field(ge=0, le=10_000)
 
 
+class NetworkCodes(_Strict):
+    """The card network reason codes a Dispute reason is filed under."""
+
+    visa: Annotated[str, StringConstraints(pattern=r"^\d{2}(\.\d+)+$", strict=True)]
+    mastercard: Annotated[str, StringConstraints(pattern=r"^\d{4}$", strict=True)]
+
+
+class DisputeReasonRules(_Strict):
+    """How one Dispute reason is filed and weighed. Evidence strength is weak if any
+    `weak_when` fact holds, strong if every `strong_when` fact holds, and mixed otherwise.
+    `strong_when` is also the evidence the reason needs: what is missing from it is shown."""
+
+    network_codes: NetworkCodes
+    strong_when: tuple[EvidenceFact, ...] = Field(min_length=1)
+    weak_when: tuple[EvidenceFact, ...] = ()
+
+
+class DisputeRules(_Strict):
+    """Network codes and Evidence strength for Disputes, one entry per Dispute reason."""
+
+    # How close in time another captured Payment by the same Payer, to the same merchant
+    # for the same amount, must be to count as a duplicate.
+    duplicate_window_seconds: StrictInt = Field(gt=0)
+    reasons: dict[DisputeReason, DisputeReasonRules]
+
+    @model_validator(mode="after")
+    def _every_reason(self) -> "DisputeRules":
+        missing = set(get_args(DisputeReason)) - set(self.reasons)
+        if missing:
+            raise ValueError(f"every Dispute reason needs rules; missing {sorted(missing)}")
+        return self
+
+
 class RuleSetting(_Strict):
     rule_id: RuleId
     enabled: StrictBool
@@ -117,6 +151,9 @@ class PolicyPack(_Strict):
     # How long an allow, or an approved step-up, can be paid. No rule reads it: the API
     # derives `payable_until` from it. Unset means LEGACY_PAYMENT_WINDOW_SECONDS.
     payment_window_seconds: StrictInt | None = Field(default=None, gt=0)
+    # Network codes and Evidence strength for Disputes (#106). Optional: a pack without it
+    # builds Evidence packs with no codes or strength.
+    disputes: DisputeRules | None = None
 
     @property
     def consent_ttl(self) -> timedelta:

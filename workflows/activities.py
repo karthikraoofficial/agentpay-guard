@@ -3,6 +3,7 @@ Temporal retries an activity whose worker died, so a repeat must never write a s
 record."""
 
 import logging
+from pathlib import Path
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -75,16 +76,21 @@ class ConsentActivities:
 
 
 class DisputeActivities:
-    def __init__(self, store: UnitOfWork, clock: Clock) -> None:
+    def __init__(self, store: UnitOfWork, clock: Clock, packs_dir: Path) -> None:
         self._store = store
         self._clock = clock
+        self._packs_dir = packs_dir
 
     @activity.defn(name=BUILD)
     def build(self, args: DisputeArgs) -> str:
         """Build the Dispute's next Evidence pack version if it is open; a repeat finds it
         in review, and a closed Dispute gets nothing."""
         return build_evidence_pack(
-            self._store, TenantId(args.tenant_id), DisputeId(args.dispute_id), self._clock
+            self._store,
+            TenantId(args.tenant_id),
+            DisputeId(args.dispute_id),
+            self._clock,
+            self._packs_dir,
         )
 
     @activity.defn(name=EXPIRE_DISPUTE)

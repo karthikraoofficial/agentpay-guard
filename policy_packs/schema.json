@@ -22,6 +22,99 @@
       "title": "CurrencyBands",
       "type": "object"
     },
+    "DisputeReasonRules": {
+      "additionalProperties": false,
+      "description": "How one Dispute reason is filed and weighed. Evidence strength is weak if any\n`weak_when` fact holds, strong if every `strong_when` fact holds, and mixed otherwise.\n`strong_when` is also the evidence the reason needs: what is missing from it is shown.",
+      "properties": {
+        "network_codes": {
+          "$ref": "#/$defs/NetworkCodes"
+        },
+        "strong_when": {
+          "items": {
+            "enum": [
+              "decision_within_mandate",
+              "payer_intent_confirmed",
+              "intent_mismatch_approved",
+              "mandate_revoked_before_capture",
+              "mandate_active_at_decision",
+              "mandate_revoked_before_decision",
+              "amount_matches_decision",
+              "amount_differs_from_decision",
+              "within_quoted_total",
+              "no_duplicate_payment",
+              "duplicate_payment_found",
+              "fulfilment_evidence"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Strong When",
+          "type": "array"
+        },
+        "weak_when": {
+          "default": [],
+          "items": {
+            "enum": [
+              "decision_within_mandate",
+              "payer_intent_confirmed",
+              "intent_mismatch_approved",
+              "mandate_revoked_before_capture",
+              "mandate_active_at_decision",
+              "mandate_revoked_before_decision",
+              "amount_matches_decision",
+              "amount_differs_from_decision",
+              "within_quoted_total",
+              "no_duplicate_payment",
+              "duplicate_payment_found",
+              "fulfilment_evidence"
+            ],
+            "type": "string"
+          },
+          "title": "Weak When",
+          "type": "array"
+        }
+      },
+      "required": [
+        "network_codes",
+        "strong_when"
+      ],
+      "title": "DisputeReasonRules",
+      "type": "object"
+    },
+    "DisputeRules": {
+      "additionalProperties": false,
+      "description": "Network codes and Evidence strength for Disputes, one entry per Dispute reason.",
+      "properties": {
+        "duplicate_window_seconds": {
+          "exclusiveMinimum": 0,
+          "title": "Duplicate Window Seconds",
+          "type": "integer"
+        },
+        "reasons": {
+          "additionalProperties": {
+            "$ref": "#/$defs/DisputeReasonRules"
+          },
+          "propertyNames": {
+            "enum": [
+              "unauthorised",
+              "not_as_described",
+              "not_received",
+              "duplicate",
+              "amount_differs",
+              "cancelled_recurring"
+            ]
+          },
+          "title": "Reasons",
+          "type": "object"
+        }
+      },
+      "required": [
+        "duplicate_window_seconds",
+        "reasons"
+      ],
+      "title": "DisputeRules",
+      "type": "object"
+    },
     "IntentParams": {
       "additionalProperties": false,
       "description": "How long an Intent verdict can be cited after the check, and the lowest Risk tier\nthat needs a usable match.",
@@ -66,6 +159,28 @@
         "min_tier"
       ],
       "title": "MerchantNewParams",
+      "type": "object"
+    },
+    "NetworkCodes": {
+      "additionalProperties": false,
+      "description": "The card network reason codes a Dispute reason is filed under.",
+      "properties": {
+        "visa": {
+          "pattern": "^\\d{2}(\\.\\d+)+$",
+          "title": "Visa",
+          "type": "string"
+        },
+        "mastercard": {
+          "pattern": "^\\d{4}$",
+          "title": "Mastercard",
+          "type": "string"
+        }
+      },
+      "required": [
+        "visa",
+        "mastercard"
+      ],
+      "title": "NetworkCodes",
       "type": "object"
     },
     "PriceDriftParams": {
@@ -257,6 +372,17 @@
       ],
       "default": null,
       "title": "Payment Window Seconds"
+    },
+    "disputes": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DisputeRules"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

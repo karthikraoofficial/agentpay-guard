@@ -11,9 +11,10 @@ citing the Audit records it rests on.
 """
 
 from datetime import datetime
+from pathlib import Path
 
 from core.domain.audit import AuditRecord, SealedAuditRecord
-from core.domain.decisions import DecisionId, decision_time
+from core.domain.decisions import DecisionId, PackRef, decision_time
 from core.domain.disputes import CLOSED, Dispute, DisputeId
 from core.domain.evidence import (
     BundleRecord,
@@ -26,6 +27,8 @@ from core.domain.evidence import (
 from core.domain.mandates import Mandate
 from core.domain.money import Money
 from core.domain.payments import PaymentId
+from core.evidence_strength import assess
+from core.policy.packs import load_active_pack
 from core.ports import Clock, TenantId, TenantTransaction, UnitOfWork
 
 # --- The readers ---------------------------------------------------------------------
@@ -104,13 +107,28 @@ def gather_bundle(tx: TenantTransaction, dispute: Dispute) -> EvidenceBundle:
     related = tuple(
         r for r in get_audit_trail(tx, others, dispute.opened_seq) if r.kind == "decision"
     )
+    mandate = get_mandate(trail)
+    elsewhere = {
+        d.decision_id
+        for d in tx.list_payer_decisions(mandate.payer_id, decision.merchant_id)
+        if d.decision_id != decision.decision_id
+    }
+    payer_payments = tuple(
+        r
+        for r in get_audit_trail(tx, elsewhere, dispute.opened_seq)
+        if r.kind == "payment" and r.record.payment and r.record.payment.status == "captured"
+    )
+    live = tx.get_mandate(mandate.mandate_id)
+    revoked_at = live.revoked_at if live else None
     return EvidenceBundle(
         dispute_id=dispute.dispute_id,
         trail=trail,
-        mandate=get_mandate(trail),
+        mandate=mandate,
         consent=get_consent_record(tx, dispute.decision_id),
         rail_events=get_rail_events(tx, dispute.payment_id, dispute.created_at),
         related=related,
+        mandate_revoked_at=revoked_at if revoked_at and revoked_at <= dispute.created_at else None,
+        payer_payments=payer_payments,
     )
 
 
@@ -118,13 +136,15 @@ def gather_bundle(tx: TenantTransaction, dispute: Dispute) -> EvidenceBundle:
 
 
 def build_evidence_pack(
-    store: UnitOfWork, tenant_id: TenantId, dispute_id: DisputeId, clock: Clock
+    store: UnitOfWork, tenant_id: TenantId, dispute_id: DisputeId, clock: Clock, packs_dir: Path
 ) -> str:
-    """Build the next pack version of an open Dispute and put it in review. Driven by the
-    Dispute's status, so it is safe to run more than once: returns `built`,
-    `already_built` (in review), `closed` (signed off, expired or withdrawn, so a build
-    in progress writes nothing) or `missing`."""
+    """Build the next pack version of an open Dispute and put it in review, assessed with
+    the Policy pack active now. Driven by the Dispute's status, so it is safe to run more
+    than once: returns `built`, `already_built` (in review), `closed` (signed off, expired
+    or withdrawn, so a build in progress writes nothing) or `missing`."""
     now = decision_time(clock.now())
+    policy = load_active_pack(packs_dir, "default")
+    rules = policy.pack.disputes
     with store.transaction(tenant_id) as tx:
         dispute = tx.lock_dispute(dispute_id)
         if dispute is None:
@@ -144,6 +164,10 @@ def build_evidence_pack(
                 narrative=template_narrative(bundle),
                 narrative_source="template",
                 built_at=now,
+                policy_pack=PackRef(
+                    id=policy.pack.id, version=policy.pack.version, hash=policy.hash
+                ),
+                assessment=None if rules is None else assess(bundle, dispute.reason, rules),
             )
         )
         tx.update_dispute(dispute.model_copy(update={"status": "in_review", "updated_at": now}))
@@ -160,6 +184,8 @@ def template_narrative(bundle: EvidenceBundle) -> tuple[Claim, ...]:
         claims.append(_claim(item))
     for item in bundle.related:
         claims.append(_related_claim(item))
+    for item in bundle.payer_payments:
+        claims.append(_payer_payment_claim(item))
     return tuple(claims)
 
 
@@ -235,6 +261,19 @@ def _related_claim(item: BundleRecord) -> Claim:
             f"{request.merchant.name} {_money(request.amount)} under this Mandate, and "
             f"AgentPay Guard decided {record.output.outcome}"
             + (f" (reason codes {', '.join(reasons)})." if reasons else ".")
+        ),
+        cites=(item.audit_record_id,),
+    )
+
+
+def _payer_payment_claim(item: BundleRecord) -> Claim:
+    payment = item.record.payment
+    if payment is None:
+        raise ValueError("a Payer payment record is a payment record")
+    return Claim(
+        text=(
+            f"On {_at(item.record.recorded_at)}, another Payment by the same Payer to this "
+            f"merchant, {payment.payment_id} for {_money(payment.amount)}, was captured."
         ),
         cites=(item.audit_record_id,),
     )

@@ -178,6 +178,15 @@ class InMemoryTransaction:
         ]
         return sorted(found, key=lambda d: (d.decided_at, d.decision_id))
 
+    def list_payer_decisions(self, payer_id: PayerId, merchant_id: str) -> list[Decision]:
+        mandates = {m for m, mandate in self._data.mandates.items() if mandate.payer_id == payer_id}
+        found = [
+            d
+            for d in self._data.decisions.values()
+            if d.mandate_id in mandates and d.merchant_id == merchant_id
+        ]
+        return sorted(found, key=lambda d: (d.decided_at, d.decision_id))
+
     def add_dispute(self, dispute: Dispute) -> None:
         self._own(dispute.tenant_id)
         if self.get_dispute_for_payment(dispute.payment_id) is not None:
