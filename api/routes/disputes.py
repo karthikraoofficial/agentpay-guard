@@ -5,7 +5,7 @@ Only a `manage` key may open or read one: an Agent never argues its own case. Th
 is built after the request, by the `dispute_pack` workflow the outbox starts, so a new
 Dispute is `open` with no pack until then."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Request, Response
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
@@ -20,6 +20,7 @@ from core.disputes import (
     sign_off,
     withdraw,
 )
+from core.domain.consent import hash_link_token, new_link_token
 from core.domain.decisions import DecisionId, decision_time
 from core.domain.disputes import (
     PAYER_STATEMENT_MAX,
@@ -28,6 +29,7 @@ from core.domain.disputes import (
     DisputeReason,
     DisputeStatus,
     Reviewer,
+    ReviewLink,
     SignOff,
     regenerate_refusal,
     sign_off_refusal,
@@ -131,17 +133,9 @@ def sign_off_dispute(
     fingerprint = request_hash(request, body)
 
     def write(read_at: datetime) -> tuple[int, DisputeOut]:
-        now = decision_time(read_at)
         dispute = _locked_dispute(tx, dispute_id)
-        pack = tx.get_evidence_pack(dispute.dispute_id)
-        refusal = sign_off_refusal(
-            dispute.status, None if pack is None else pack.version, body.pack_version
-        )
-        if refusal is not None:
-            raise ApiError(409, refusal, _REFUSAL_TEXT[refusal])
-        if pack is None:  # sign_off_refusal refuses this; keeps mypy sure
-            raise RuntimeError("a Dispute in review has a pack")
-        return 200, _out(sign_off(tx, dispute, pack, body.reviewer, now), pack)
+        signed = checked_sign_off(tx, dispute, body.pack_version, body.reviewer, read_at)
+        return 200, signed
 
     with store.transaction(tenant) as tx:
         return run_idempotent(tx, key, fingerprint, clock, write)
@@ -184,20 +178,78 @@ def regenerate_pack(
     version needs its own Sign-off."""
 
     def write(read_at: datetime) -> tuple[int, DisputeOut]:
-        now = decision_time(read_at)
         dispute = _locked_dispute(tx, dispute_id)
-        pack = tx.get_evidence_pack(dispute.dispute_id)
-        refusal = regenerate_refusal(
-            dispute.status,
-            None if pack is None else pack.version,
-            settings.dispute_pack_versions_max,
-        )
-        if refusal is not None:
-            raise ApiError(409, refusal, _REFUSAL_TEXT[refusal])
-        return 200, _out(request_regenerate(tx, dispute, now), pack)
+        asked = checked_regenerate(tx, dispute, settings.dispute_pack_versions_max, read_at)
+        return 200, asked
 
     with store.transaction(tenant) as tx:
         return run_idempotent(tx, key, request_hash(request, None), clock, write)
+
+
+class ReviewLinkBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Whoever opens the link is treated as this person; the Tenant attests who it is.
+    reviewer: Reviewer
+
+
+class ReviewLinkOut(BaseModel):
+    dispute_id: DisputeId
+    reviewer: Reviewer
+    # Shown once. An idempotent replay of the mint returns null: the token is never stored.
+    url: str | None
+    expires_at: AwareDatetime
+
+
+@router.post("/{dispute_id}/review-link", status_code=201, response_model=ReviewLinkOut)
+def mint_review_link(
+    request: Request,
+    dispute_id: str,
+    body: ReviewLinkBody,
+    tenant: ManageTenant,
+    store: StoreDep,
+    clock: ClockDep,
+    settings: SettingsDep,
+    key: IdemKey,
+) -> Response:
+    """A link to the hosted dispute viewer for a named reviewer, who can read the pack,
+    sign it off or ask for it again without an API key. Minting again revokes the
+    previous link. The token is in the URL's fragment, which browsers never send."""
+
+    def write(read_at: datetime) -> tuple[int, ReviewLinkOut]:
+        now = decision_time(read_at)
+        dispute = _locked_dispute(tx, dispute_id)
+        refusal = withdraw_refusal(dispute.status)  # only an open Dispute can be reviewed
+        if refusal is not None:
+            raise ApiError(409, refusal, _REFUSAL_TEXT[refusal])
+        token = new_link_token()
+        expires_at = min(
+            now + timedelta(seconds=settings.review_link_ttl_seconds), dispute.respond_by
+        )
+        tx.add_review_link(
+            ReviewLink(
+                token_hash=hash_link_token(token),
+                tenant_id=tenant,
+                dispute_id=dispute.dispute_id,
+                reviewer=body.reviewer,
+                created_at=now,
+                expires_at=expires_at,
+            )
+        )
+        return 201, ReviewLinkOut(
+            dispute_id=dispute.dispute_id,
+            reviewer=body.reviewer,
+            url=f"{settings.web_origin}/dispute#{token}",
+            expires_at=expires_at,
+        )
+
+    def without_url(model: BaseModel) -> BaseModel:
+        return model.model_copy(update={"url": None})
+
+    with store.transaction(tenant) as tx:
+        return run_idempotent(
+            tx, key, request_hash(request, body), clock, write, kept_as=without_url
+        )
 
 
 @router.get("/{dispute_id}")
@@ -208,6 +260,41 @@ def get_dispute(dispute_id: str, tenant: ManageTenant, store: StoreDep) -> Dispu
     if dispute is None:
         raise ApiError(404, "DISPUTE_NOT_FOUND", f"No Dispute {dispute_id}.")
     return _out(dispute, pack)
+
+
+def checked_sign_off(
+    tx: TenantTransaction,
+    dispute: Dispute,
+    pack_version: int,
+    reviewer: Reviewer,
+    read_at: datetime,
+) -> DisputeOut:
+    """Sign off a held Dispute's pack version, or refuse with a 409. Shared by the API and
+    Review links."""
+    pack = tx.get_evidence_pack(dispute.dispute_id)
+    refusal = sign_off_refusal(dispute.status, None if pack is None else pack.version, pack_version)
+    if refusal is not None:
+        raise ApiError(409, refusal, _REFUSAL_TEXT[refusal])
+    if pack is None:  # sign_off_refusal refuses this; keeps mypy sure
+        raise RuntimeError("a Dispute in review has a pack")
+    return _out(sign_off(tx, dispute, pack, reviewer, decision_time(read_at)), pack)
+
+
+def checked_regenerate(
+    tx: TenantTransaction, dispute: Dispute, versions_max: int, read_at: datetime
+) -> DisputeOut:
+    """Ask for a held Dispute's next pack version, or refuse with a 409."""
+    pack = tx.get_evidence_pack(dispute.dispute_id)
+    refusal = regenerate_refusal(
+        dispute.status, None if pack is None else pack.version, versions_max
+    )
+    if refusal is not None:
+        raise ApiError(409, refusal, _REFUSAL_TEXT[refusal])
+    return _out(request_regenerate(tx, dispute, decision_time(read_at)), pack)
+
+
+def dispute_out(tx: TenantTransaction, dispute: Dispute) -> DisputeOut:
+    return _out(dispute, tx.get_evidence_pack(dispute.dispute_id))
 
 
 def _locked_dispute(tx: TenantTransaction, dispute_id: str) -> Dispute:

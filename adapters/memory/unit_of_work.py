@@ -14,7 +14,7 @@ from core.domain.consent import (
     ConsentStatus,
 )
 from core.domain.decisions import AuditRecordId, Decision, DecisionId
-from core.domain.disputes import Dispute, DisputeId
+from core.domain.disputes import Dispute, DisputeId, ReviewLink
 from core.domain.evidence import EvidencePack
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.intents import IntentCheck, IntentId
@@ -55,6 +55,7 @@ class _TenantData:
     disputes: dict[DisputeId, Dispute] = field(default_factory=dict)
     # dispute_id -> pack versions, oldest first
     packs: dict[DisputeId, tuple[EvidencePack, ...]] = field(default_factory=dict)
+    review_links: dict[str, ReviewLink] = field(default_factory=dict)
 
     def copy(self) -> "_TenantData":
         return _TenantData(
@@ -75,6 +76,7 @@ class _TenantData:
             self.webhook,
             dict(self.disputes),
             dict(self.packs),
+            dict(self.review_links),
         )
 
 
@@ -215,6 +217,21 @@ class InMemoryTransaction:
         if any(v.version == pack.version for v in versions):
             raise ValueError(f"pack version {pack.version} of {pack.dispute_id} exists")
         self._data.packs[pack.dispute_id] = (*versions, pack)
+
+    def add_review_link(self, link: ReviewLink) -> None:
+        self._own(link.tenant_id)
+        links = self._data.review_links
+        for token_hash, old in list(links.items()):
+            if old.dispute_id == link.dispute_id and old.revoked_at is None:
+                links[token_hash] = old.model_copy(update={"revoked_at": link.created_at})
+        links[link.token_hash] = link
+
+    def get_review_link(self, token_hash: str) -> ReviewLink | None:
+        return self._data.review_links.get(token_hash)
+
+    def use_review_link(self, token_hash: str, at: datetime) -> None:
+        link = self._data.review_links[token_hash]
+        self._data.review_links[token_hash] = link.model_copy(update={"used_at": at})
 
     def get_evidence_pack(self, dispute_id: DisputeId) -> EvidencePack | None:
         versions = self._data.packs.get(dispute_id, ())
@@ -469,6 +486,12 @@ class InMemoryUnitOfWork:
         for data in list(self._tenants.values()):
             if token_hash in data.links:
                 return data.links[token_hash]
+        return None
+
+    def review_link(self, token_hash: str) -> ReviewLink | None:
+        for data in list(self._tenants.values()):
+            if token_hash in data.review_links:
+                return data.review_links[token_hash]
         return None
 
     def scheduled_payments(

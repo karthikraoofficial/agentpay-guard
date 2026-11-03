@@ -27,6 +27,7 @@ from api.routes import (
     parties,
     payments,
     rail_webhooks,
+    review_links,
     webhook_endpoint,
 )
 from core.policy.packs import load_active_pack
@@ -88,6 +89,7 @@ def create_app(
     app.include_router(consent_links.router)
     app.include_router(payments.router)
     app.include_router(disputes.router)
+    app.include_router(review_links.router)
     app.include_router(rail_webhooks.router)
     app.include_router(webhook_endpoint.router)
     app.add_middleware(_LinkCors, origin=settings.web_origin)
@@ -102,10 +104,11 @@ def create_app(
 
 
 class _LinkCors:
-    """CORS for the consent screen, on the Consent link endpoints only and for the web
-    origin only. Every other endpoint is for servers, so browsers get no CORS there."""
+    """CORS for the consent screen and the dispute viewer, on the Consent link and Review
+    link endpoints only and for the web origin only. Every other endpoint is for servers,
+    so browsers get no CORS there."""
 
-    PREFIX = "/v1/consent-link"
+    PREFIXES = ("/v1/consent-link", "/v1/review-link")
 
     def __init__(self, app: ASGIApp, origin: str) -> None:
         self._app = app
@@ -113,12 +116,13 @@ class _LinkCors:
             app,
             allow_origins=[origin],
             allow_methods=["GET", "POST"],
-            allow_headers=["Consent-Link", "Idempotency-Key", "Content-Type"],
+            allow_headers=["Consent-Link", "Review-Link", "Idempotency-Key", "Content-Type"],
         )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         path = scope.get("path", "")
-        if scope["type"] == "http" and (path == self.PREFIX or path.startswith(self.PREFIX + "/")):
+        linked = any(path == p or path.startswith(p + "/") for p in self.PREFIXES)
+        if scope["type"] == "http" and linked:
             await self._cors(scope, receive, send)
         else:
             await self._app(scope, receive, send)

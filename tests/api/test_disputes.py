@@ -17,6 +17,7 @@ from agents.dispute_narrative import PROMPT_VERSION, NarrativeWriter
 from api.admin import replay_record
 from core.disputes import NotYetDue, expire_dispute
 from core.domain.canonical_json import canonical_json
+from core.domain.consent import hash_link_token
 from core.domain.disputes import DisputeId
 from core.domain.evidence import Claim, EvidencePack
 from core.evidence import build_evidence_pack, gather_bundle
@@ -1003,3 +1004,234 @@ def test_a_withdrawal_while_the_model_writes_wins(disputes: Disputes) -> None:
 
     assert outcome == "closed"
     assert disputes.get(dispute_id).json()["pack"] is None
+
+
+# --- Review links -------------------------------------------------------------------------
+
+
+class Reviews:
+    """Minting Review links with the manage key, and using them as the viewer does."""
+
+    def __init__(self, disputes: Disputes) -> None:
+        self.d = disputes
+
+    def mint(self, dispute_id: str, reviewer=None, *, key: str | None = None, headers=None):  # type: ignore[no-untyped-def]
+        body = {"reviewer": reviewer or REVIEWER}
+        path = f"/v1/disputes/{dispute_id}/review-link"
+        headers = headers or self.d.manage
+        if key is None:
+            return self.d.api.post(path, headers, body)
+        return self.d.api.client.post(path, headers={**headers, "Idempotency-Key": key}, json=body)
+
+    def token(self, dispute_id: str) -> str:
+        minted = self.mint(dispute_id)
+        assert minted.status_code == 201, minted.text
+        url: str = minted.json()["url"]
+        return url.split("#", 1)[1]
+
+    def view(self, token: str | None):  # type: ignore[no-untyped-def]
+        headers = {} if token is None else {"Review-Link": token}
+        return self.d.api.client.get("/v1/review-link", headers=headers)
+
+    def sign_off(self, token: str, pack_version: int = 1, *, key: str | None = None):  # type: ignore[no-untyped-def]
+        return self.d.api.client.post(
+            "/v1/review-link/sign-off",
+            headers={
+                "Review-Link": token,
+                "Idempotency-Key": key or f"so-{token[:8]}-{pack_version}",
+            },
+            json={"pack_version": pack_version},
+        )
+
+    def regenerate(self, token: str, *, key: str = "rg-link"):  # type: ignore[no-untyped-def]
+        return self.d.api.client.post(
+            "/v1/review-link/regenerate", headers={"Review-Link": token, "Idempotency-Key": key}
+        )
+
+
+@pytest.fixture
+def reviews(disputes: Disputes) -> Reviews:
+    return Reviews(disputes)
+
+
+def test_a_minted_link_points_at_the_dispute_viewer_and_names_its_reviewer(
+    reviews: Reviews,
+) -> None:
+    dispute_id = reviews.d.built(reviews.d.captured())["dispute_id"]
+
+    minted = reviews.mint(dispute_id)
+
+    assert minted.status_code == 201, minted.text
+    body = minted.json()
+    assert body["url"].startswith("http://localhost:3000/dispute#")
+    assert (body["dispute_id"], body["reviewer"]) == (dispute_id, REVIEWER)
+    # 72 hours by default, from the test clock's NOW.
+    assert body["expires_at"] == "2026-11-05T09:30:00Z"
+
+
+def test_a_link_never_outlives_respond_by(reviews: Reviews) -> None:
+    payment = reviews.d.captured()
+    soon = (NOW + timedelta(hours=5)).isoformat()
+    dispute_id = reviews.d.open(payment["payment_id"], respond_by=soon).json()["dispute_id"]
+
+    assert reviews.mint(dispute_id).json()["expires_at"] == "2026-11-02T14:30:00Z"
+
+
+def test_the_link_shows_the_dispute_and_its_pack(reviews: Reviews) -> None:
+    dispute = reviews.d.built(reviews.d.captured())
+    token = reviews.token(dispute["dispute_id"])
+
+    shown = reviews.view(token)
+
+    assert shown.status_code == 200, shown.text
+    body = shown.json()
+    assert body["reviewer"] == REVIEWER
+    assert body["dispute"] == reviews.d.get(dispute["dispute_id"]).json()
+
+
+def test_signing_off_through_the_link_signs_as_its_reviewer_and_uses_it_up(
+    reviews: Reviews,
+) -> None:
+    dispute = reviews.d.built(reviews.d.captured())
+    token = reviews.token(dispute["dispute_id"])
+
+    signed = reviews.sign_off(token)
+
+    assert signed.status_code == 200, signed.text
+    assert signed.json()["status"] == "ready"
+    assert signed.json()["sign_off"]["reviewer"] == REVIEWER
+    record = reviews.d.chain()[-1]
+    assert (record.kind, record.sign_off.reviewer.model_dump()) == ("dispute_signed_off", REVIEWER)
+    assert_problem(reviews.view(token), 404, "REVIEW_LINK_INVALID")
+
+
+def test_a_retried_sign_off_through_the_link_replays(reviews: Reviews) -> None:
+    dispute = reviews.d.built(reviews.d.captured())
+    token = reviews.token(dispute["dispute_id"])
+
+    first = reviews.sign_off(token, key="same")
+    again = reviews.sign_off(token, key="same")
+
+    assert (first.status_code, again.status_code) == (200, 200)
+    assert first.json() == again.json()
+
+
+def test_a_regenerate_through_the_link_keeps_the_link_working(reviews: Reviews) -> None:
+    dispute = reviews.d.built(reviews.d.captured())
+    token = reviews.token(dispute["dispute_id"])
+
+    asked = reviews.regenerate(token)
+
+    assert asked.status_code == 200, asked.text
+    assert asked.json()["status"] == "open"
+    assert reviews.view(token).status_code == 200
+    reviews.d.build(dispute["dispute_id"])
+    assert reviews.sign_off(token, pack_version=2).json()["sign_off"]["pack_version"] == 2
+
+
+def test_the_version_cap_holds_through_the_link(reviews: Reviews) -> None:
+    dispute_id = reviews.d.built(reviews.d.captured())["dispute_id"]
+    token = reviews.token(dispute_id)
+    for i in range(2):
+        reviews.regenerate(token, key=f"rg-{i}")
+        reviews.d.build(dispute_id)
+
+    assert_problem(reviews.regenerate(token, key="rg-3"), 409, "PACK_VERSION_LIMIT")
+
+
+def test_a_newer_link_replaces_the_old_one(reviews: Reviews) -> None:
+    dispute_id = reviews.d.built(reviews.d.captured())["dispute_id"]
+    old = reviews.token(dispute_id)
+
+    new = reviews.token(dispute_id)
+
+    assert_problem(reviews.view(old), 404, "REVIEW_LINK_INVALID")
+    assert reviews.view(new).status_code == 200
+
+
+def test_an_expired_link_is_invalid(reviews: Reviews) -> None:
+    dispute_id = reviews.d.built(reviews.d.captured())["dispute_id"]
+    token = reviews.token(dispute_id)
+
+    reviews.d.api.clock.advance(timedelta(hours=72))
+
+    assert_problem(reviews.view(token), 404, "REVIEW_LINK_INVALID")
+    assert_problem(reviews.sign_off(token), 404, "REVIEW_LINK_INVALID")
+
+
+@pytest.mark.parametrize("ending", ["withdraw", "sign-off by API", "expiry"])
+def test_a_link_to_a_closed_dispute_is_invalid(reviews: Reviews, ending: str) -> None:
+    dispute_id = reviews.d.built(reviews.d.captured())["dispute_id"]
+    token = reviews.token(dispute_id)
+    if ending == "withdraw":
+        reviews.d.act(dispute_id, "withdraw")
+    elif ending == "sign-off by API":
+        reviews.d.sign_off(dispute_id)
+    else:
+        reviews.d.api.clock.advance(timedelta(days=10))
+        reviews.d.expire(dispute_id)
+        reviews.d.api.clock.advance(-timedelta(days=10))  # the link itself hasn't expired
+
+    for response in (reviews.view(token), reviews.sign_off(token), reviews.regenerate(token)):
+        assert_problem(response, 404, "REVIEW_LINK_INVALID")
+
+
+@pytest.mark.parametrize("token", [None, "", "not-a-real-token"])
+def test_a_missing_or_unknown_token_is_invalid(reviews: Reviews, token: str | None) -> None:
+    assert_problem(reviews.view(token), 404, "REVIEW_LINK_INVALID")
+
+
+def test_a_link_can_be_minted_while_the_pack_is_still_being_built(reviews: Reviews) -> None:
+    dispute_id = reviews.d.open(reviews.d.captured()["payment_id"]).json()["dispute_id"]
+    token = reviews.token(dispute_id)
+
+    shown = reviews.view(token).json()
+
+    assert (shown["dispute"]["status"], shown["dispute"]["pack"]) == ("open", None)
+    assert_problem(reviews.sign_off(token), 409, "DISPUTE_NOT_IN_REVIEW")
+
+
+def test_minting_needs_a_manage_key_an_open_dispute_and_a_named_reviewer(
+    reviews: Reviews,
+) -> None:
+    dispute_id = reviews.d.built(reviews.d.captured())["dispute_id"]
+    other = Reviews(Disputes(reviews.d.api, "globex"))
+
+    assert_problem(reviews.mint(dispute_id, headers=reviews.d.decide), 403, "INSUFFICIENT_SCOPE")
+    assert_problem(other.mint(dispute_id), 404, "DISPUTE_NOT_FOUND")
+    assert_problem(reviews.mint(dispute_id, {"id": "ops-7"}), 422, "VALIDATION_FAILED")
+    reviews.d.act(dispute_id, "withdraw")
+    assert_problem(reviews.mint(dispute_id), 409, "DISPUTE_CLOSED")
+
+
+def test_a_replayed_mint_never_shows_the_token_again(reviews: Reviews) -> None:
+    dispute_id = reviews.d.built(reviews.d.captured())["dispute_id"]
+
+    first = reviews.mint(dispute_id, key="mint-1")
+    again = reviews.mint(dispute_id, key="mint-1")
+
+    assert first.json()["url"] is not None
+    assert again.json()["url"] is None
+    assert reviews.view(first.json()["url"].split("#", 1)[1]).status_code == 200
+
+
+def test_only_the_tokens_hash_is_stored(reviews: Reviews) -> None:
+    dispute_id = reviews.d.built(reviews.d.captured())["dispute_id"]
+    token = reviews.token(dispute_id)
+
+    with reviews.d.api.store.transaction(reviews.d.tenant_id()) as tx:
+        assert tx.get_review_link(token) is None
+        assert tx.get_review_link(hash_link_token(token)) is not None
+
+
+def test_the_viewer_origin_may_call_the_link_endpoints(reviews: Reviews) -> None:
+    response = reviews.d.api.client.options(
+        "/v1/review-link",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "review-link",
+        },
+    )
+
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"

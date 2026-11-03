@@ -30,7 +30,7 @@ from core.domain.consent import (
     ConsentStatus,
 )
 from core.domain.decisions import AuditRecordId, Decision, DecisionId
-from core.domain.disputes import Dispute, DisputeId
+from core.domain.disputes import Dispute, DisputeId, ReviewLink
 from core.domain.evidence import EvidencePack
 from core.domain.idempotency import IdempotencyKey as IdempotencyKey  # re-exported
 from core.domain.idempotency import IdempotencyRecord
@@ -401,6 +401,17 @@ class TenantTransaction(Protocol):
         """Store a pack version. A version is written once and never changed."""
         ...
 
+    def add_review_link(self, link: ReviewLink) -> None:
+        """Store a new Review link and revoke every earlier one for the same Dispute, so
+        at most one works."""
+        ...
+
+    def get_review_link(self, token_hash: str) -> ReviewLink | None: ...
+
+    def use_review_link(self, token_hash: str, at: datetime) -> None:
+        """Mark a Review link used: Sign-off through it uses it up."""
+        ...
+
     def get_evidence_pack(self, dispute_id: DisputeId) -> EvidencePack | None:
         """A Dispute's latest pack version, if one has been built."""
         ...
@@ -482,6 +493,10 @@ class TenantDirectory(Protocol):
     def consent_link(self, token_hash: str) -> ConsentLink | None:
         """The link a token hash names, from any Tenant: like an API key, a link is how a
         public request's Tenant is found."""
+        ...
+
+    def review_link(self, token_hash: str) -> ReviewLink | None:
+        """The Review link a token hash names, from any Tenant, as with a Consent link."""
         ...
 
     def scheduled_payments(

@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     dispute_narrative_model: str = "claude-sonnet-5-5"
     dispute_narrative_timeout_ms: int = Field(default=45_000, gt=0, le=120_000)
 
+    # How long a Review link works, at most: never past the Dispute's respond_by.
+    review_link_ttl_seconds: int = Field(default=72 * 3600, gt=0, le=30 * 86400)
+
     # The consent screen's origin: Consent links point here, and only this origin may
     # call the Consent link endpoints from a browser (CORS).
     web_origin: str = Field(default="http://localhost:3000", pattern=r"^https?://[^/\s]+$")

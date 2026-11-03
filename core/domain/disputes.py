@@ -3,6 +3,7 @@ GLOSSARY.md). A Payment has at most one Dispute, and opening one never changes t
 Payment, its Decision or Spent this month."""
 
 import hashlib
+from datetime import datetime
 from typing import Annotated, Literal, NewType
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
@@ -99,6 +100,31 @@ class Dispute(BaseModel):
     sign_off: SignOff | None = None
     created_at: AwareDatetime
     updated_at: AwareDatetime
+
+
+class ReviewLink(BaseModel):
+    """An expiring link to one Dispute's Evidence pack for a named reviewer (see
+    GLOSSARY.md). Only the token's hash is kept. It works until a newer link replaces it,
+    Sign-off uses it up, it expires, or the Dispute is closed."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    token_hash: str
+    tenant_id: TenantId
+    dispute_id: DisputeId
+    reviewer: Reviewer
+    created_at: AwareDatetime
+    expires_at: AwareDatetime
+    revoked_at: AwareDatetime | None = None
+    used_at: AwareDatetime | None = None
+
+    def works(self, status: DisputeStatus, now: datetime) -> bool:
+        return (
+            self.revoked_at is None
+            and self.used_at is None
+            and now < self.expires_at
+            and status not in CLOSED
+        )
 
 
 def sign_off_refusal(

@@ -36,6 +36,7 @@ from adapters.postgres.tables import (
     payers,
     payments,
     rail_events,
+    review_links,
     tenant_chain_heads,
     tenants,
     voids,
@@ -51,7 +52,7 @@ from core.domain.consent import (
     ConsentStatus,
 )
 from core.domain.decisions import AuditRecordId, Decision, DecisionId, PackRef
-from core.domain.disputes import Dispute, DisputeId, Reviewer, SignOff
+from core.domain.disputes import Dispute, DisputeId, Reviewer, ReviewLink, SignOff
 from core.domain.evidence import EvidencePack
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.intents import IntentCheck, IntentContent, IntentId
@@ -598,6 +599,43 @@ class PostgresTransaction:
             )
         )
 
+    def add_review_link(self, link: ReviewLink) -> None:
+        self._own(link.tenant_id)
+        rl = review_links.c
+        self._conn.execute(
+            update(review_links)
+            .where(
+                rl.tenant_id == self._tenant_id,
+                rl.dispute_id == link.dispute_id,
+                rl.revoked_at.is_(None),
+            )
+            .values(revoked_at=link.created_at)
+        )
+        self._conn.execute(insert(review_links).values(**_review_link_row(link)))
+
+    def get_review_link(self, token_hash: str) -> ReviewLink | None:
+        row = (
+            self._conn.execute(
+                select(review_links).where(
+                    review_links.c.tenant_id == self._tenant_id,
+                    review_links.c.token_hash == token_hash,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return None if row is None else _review_link(row)
+
+    def use_review_link(self, token_hash: str, at: datetime) -> None:
+        self._conn.execute(
+            update(review_links)
+            .where(
+                review_links.c.tenant_id == self._tenant_id,
+                review_links.c.token_hash == token_hash,
+            )
+            .values(used_at=at)
+        )
+
     def get_evidence_pack(self, dispute_id: DisputeId) -> EvidencePack | None:
         row = self._conn.execute(
             select(evidence_packs.c.body)
@@ -807,6 +845,12 @@ class PostgresStore:
             row = conn.execute(query).mappings().one_or_none()
         return None if row is None else ConsentLink.model_validate(dict(row))
 
+    def review_link(self, token_hash: str) -> ReviewLink | None:
+        query = select(review_links).where(review_links.c.token_hash == token_hash)
+        with self._engine.connect() as conn:
+            row = conn.execute(query).mappings().one_or_none()
+        return None if row is None else _review_link(row)
+
     def scheduled_payments(
         self, created_before: datetime, now: datetime
     ) -> list[tuple[TenantId, PaymentId]]:
@@ -901,6 +945,17 @@ class PostgresStore:
                 .where(o.tenant_id == tenant_id, o.event_id == event_id)
                 .values(delivered_at=at, gave_up=True)
             )
+
+
+def _review_link_row(link: ReviewLink) -> dict[str, object]:
+    row = link.model_dump(exclude={"reviewer"})
+    return row | {"reviewer_id": link.reviewer.id, "reviewer_name": link.reviewer.name}
+
+
+def _review_link(row: RowMapping) -> ReviewLink:
+    fields = {k: v for k, v in row.items() if k in ReviewLink.model_fields}
+    reviewer = Reviewer(id=row["reviewer_id"], name=row["reviewer_name"])
+    return ReviewLink.model_validate(fields | {"reviewer": reviewer})
 
 
 _SIGN_OFF_COLUMNS = (
