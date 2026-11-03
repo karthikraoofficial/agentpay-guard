@@ -9,8 +9,7 @@ from sqlalchemy import create_engine
 from starlette.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from adapters.claude.gateway import ClaudeGateway
-from adapters.memory.model_gateway import UnconfiguredGateway
+from adapters.gateways import build_gateway
 from adapters.otel.telemetry import OtelTelemetry
 from adapters.postgres.store import PostgresStore
 from adapters.rails import build_rail
@@ -75,7 +74,7 @@ def create_app(
     app.state.clock = clock or SystemClock()
     app.state.telemetry = telemetry or otel
     app.state.settings = settings
-    app.state.gateway = gateway or _default_gateway(settings, app.state.telemetry)
+    app.state.gateway = gateway or build_gateway(settings, app.state.telemetry)
     # Only resolutions signal from here (best effort); the worker's relay starts workflows.
     app.state.workflow = workflow or TemporalWorkflow.from_settings(settings)
     app.state.secret_box = secret_box or build_secret_box(settings)
@@ -123,14 +122,6 @@ class _LinkCors:
             await self._cors(scope, receive, send)
         else:
             await self._app(scope, receive, send)
-
-
-def _default_gateway(settings: Settings, telemetry: Telemetry) -> ModelGateway:
-    """Claude when a key is configured. Settings refuse to load without one outside the
-    test env while the Intent check is on, so the fallback only serves tests."""
-    if settings.anthropic_api_key is None:
-        return UnconfiguredGateway()
-    return ClaudeGateway(settings.anthropic_api_key, telemetry)
 
 
 def asgi_app() -> FastAPI:

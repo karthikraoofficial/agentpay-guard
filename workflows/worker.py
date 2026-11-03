@@ -18,12 +18,16 @@ from sqlalchemy import create_engine
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from adapters.gateways import build_gateway
+from adapters.otel.telemetry import OtelTelemetry
 from adapters.postgres.store import PostgresStore
 from adapters.rails import build_rail
 from adapters.system_clock import SystemClock
 from adapters.webhooks.secret_box import secret_box
 from adapters.webhooks.sender import HttpWebhookSender
+from agents.dispute_narrative import NarrativeWriter as DisputeNarrativeWriter
 from core.debits import run_debit_step
+from core.evidence import NarrativeWriter
 from core.ports import Clock, EventBus, PaymentRail, UnitOfWork
 from core.reconcile import SweepStore, sweep
 from core.relay import relay_once
@@ -48,15 +52,26 @@ def consent_worker(
     clock: Clock,
     pool: ThreadPoolExecutor,
     packs_dir: Path = PACKS,
+    writer: NarrativeWriter | None = None,
 ) -> Worker:
     activities = ConsentActivities(store, clock)
-    disputes = DisputeActivities(store, clock, packs_dir)
+    disputes = DisputeActivities(store, clock, packs_dir, writer)
     return Worker(
         client,
         task_queue=task_queue,
         workflows=[StepUpConsent, DisputePack],
         activities=[activities.notify, activities.expire, disputes.build, disputes.expire],
         activity_executor=pool,
+    )
+
+
+def narrative_writer(settings: Settings) -> NarrativeWriter | None:
+    """The dispute evidence agent, or None to have every narrative written by code."""
+    if not settings.dispute_narrative_enabled:
+        return None
+    gateway = build_gateway(settings, OtelTelemetry.from_settings(settings))
+    return DisputeNarrativeWriter(
+        gateway, settings.dispute_narrative_model, settings.dispute_narrative_timeout_ms
     )
 
 
@@ -117,7 +132,13 @@ async def main() -> None:
     client = await Client.connect(settings.temporal_address, namespace=settings.temporal_namespace)
     with ThreadPoolExecutor(max_workers=8) as pool:
         worker = consent_worker(
-            client, settings.temporal_task_queue, store, clock, pool, settings.policy_packs_dir
+            client,
+            settings.temporal_task_queue,
+            store,
+            clock,
+            pool,
+            settings.policy_packs_dir,
+            narrative_writer(settings),
         )
         async with worker:
             log.info("consent worker polling task queue %s", settings.temporal_task_queue)

@@ -1,4 +1,5 @@
-"""The Dispute golden set: network codes and Evidence strength for labelled scenarios.
+"""The Dispute golden sets: network codes and Evidence strength for labelled scenarios,
+and the citation checker's verdict on labelled model replies.
 
 Each case in `evals/golden/disputes*.jsonl` describes a disputed Payment in a few fields
 (how it was decided, any Intent check and approval, the amounts, a Revocation, other
@@ -26,7 +27,7 @@ from core.domain.decisions import (
     PackRef,
 )
 from core.domain.disputes import DisputeId, DisputeReason, EvidenceFact, EvidenceStrength
-from core.domain.evidence import BundleRecord, EvidenceBundle
+from core.domain.evidence import BundleRecord, CheckCode, EvidenceBundle
 from core.domain.intents import IntentId, IntentVerdict
 from core.domain.mandates import Mandate
 from core.domain.money import Money
@@ -34,6 +35,7 @@ from core.domain.parties import TenantId
 from core.domain.payments import PaymentId
 from core.domain.signals import IntentSignal, Signals
 from core.evidence_strength import assess
+from core.narrative_check import check_narrative
 from core.policy.packs import load_pack
 
 _ZERO = "sha256:" + "00" * 32
@@ -71,11 +73,10 @@ class Expected(_Strict):
     missing: tuple[EvidenceFact, ...]
 
 
-class DisputeCase(_Strict):
-    id: str
-    description: str
+class Scenario(_Strict):
+    """A disputed Payment, described in a few fields: what `bundle_for` builds from."""
+
     pack: Pin
-    reason: DisputeReason
     mandate: dict[str, Any]
     outcome: Outcome
     decision_amount_minor: int
@@ -86,6 +87,12 @@ class DisputeCase(_Strict):
     other_payments: tuple[OtherPayment, ...] = ()
     decided_at: datetime
     captured_at: datetime
+
+
+class DisputeCase(Scenario):
+    id: str
+    description: str
+    reason: DisputeReason
     expected: Expected
 
 
@@ -136,7 +143,7 @@ def run_dispute_cases(cases: list[DisputeCase], pack_root: Path) -> DisputeRepor
 # --- Building a bundle from a case ------------------------------------------------------
 
 
-def bundle_for(case: DisputeCase) -> EvidenceBundle:
+def bundle_for(case: Scenario) -> EvidenceBundle:
     revoked = {
         "before_decision": case.decided_at - timedelta(hours=1),
         "before_capture": case.decided_at + (case.captured_at - case.decided_at) / 2,
@@ -265,3 +272,59 @@ def _record(seq: int, kind: Any, at: datetime, **sections: Any) -> BundleRecord:
     return BundleRecord(
         audit_record_id=record_id, seq=seq, kind=kind, record_hash=_ZERO, record=record
     )
+
+
+# --- The citation checker ----------------------------------------------------------------
+
+
+class NarrativeExpected(_Strict):
+    accepted: bool
+    codes: tuple[CheckCode, ...]
+
+
+class NarrativeCase(Scenario):
+    """A model reply and what the checker must make of it against the scenario's bundle."""
+
+    id: str
+    description: str
+    reply: str
+    stop_reason: str = "end_turn"
+    expected: NarrativeExpected
+
+
+class NarrativeMiss(_Strict):
+    case_id: str
+    description: str
+    expected: NarrativeExpected
+    actual: NarrativeExpected
+
+
+class NarrativeReport(_Strict):
+    total: int
+    mismatches: list[NarrativeMiss] = Field(default_factory=list)
+
+
+def load_narrative_cases(path: Path) -> list[NarrativeCase]:
+    base = json.loads((path.parent / f"{path.stem}_base.json").read_text(encoding="utf-8"))
+    base.pop("_about", None)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return [NarrativeCase.model_validate(base | json.loads(line)) for line in lines if line.strip()]
+
+
+def run_narrative_cases(cases: list[NarrativeCase]) -> NarrativeReport:
+    misses = []
+    for case in cases:
+        claims, failures = check_narrative(case.reply, case.stop_reason, bundle_for(case))
+        actual = NarrativeExpected(
+            accepted=not failures and bool(claims), codes=tuple(f.code for f in failures)
+        )
+        if actual != case.expected:
+            misses.append(
+                NarrativeMiss(
+                    case_id=case.id,
+                    description=case.description,
+                    expected=case.expected,
+                    actual=actual,
+                )
+            )
+    return NarrativeReport(total=len(cases), mismatches=misses)

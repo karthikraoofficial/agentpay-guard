@@ -12,7 +12,7 @@ from core.disputes import NotYetDue, expire_dispute
 from core.domain.consent import ConsentRequestId
 from core.domain.decisions import decision_time
 from core.domain.disputes import DisputeId
-from core.evidence import build_evidence_pack
+from core.evidence import NarrativeWriter, build_evidence_pack
 from core.ports import Clock, TenantId, UnitOfWork
 from core.resolutions import record_resolution
 from workflows.consent import EXPIRE, NOTIFY, ConsentArgs
@@ -76,10 +76,17 @@ class ConsentActivities:
 
 
 class DisputeActivities:
-    def __init__(self, store: UnitOfWork, clock: Clock, packs_dir: Path) -> None:
+    def __init__(
+        self,
+        store: UnitOfWork,
+        clock: Clock,
+        packs_dir: Path,
+        writer: NarrativeWriter | None = None,
+    ) -> None:
         self._store = store
         self._clock = clock
         self._packs_dir = packs_dir
+        self._writer = writer
 
     @activity.defn(name=BUILD)
     def build(self, args: DisputeArgs) -> str:
@@ -91,6 +98,7 @@ class DisputeActivities:
             DisputeId(args.dispute_id),
             self._clock,
             self._packs_dir,
+            self._writer,
         )
 
     @activity.defn(name=EXPIRE_DISPUTE)

@@ -27,7 +27,8 @@ EXPIRE = "expire_dispute"
 # The expire activity refuses to run before `respond_by` by the store's clock, so a timer
 # that fires a little early is retried until the Dispute is due.
 _ACTIVITY_RETRY = RetryPolicy(maximum_interval=timedelta(minutes=1))
-_ACTIVITY_TIMEOUT = timedelta(seconds=60)
+# A build may make two model calls (a narrative and one retry) at up to 45 s each.
+_ACTIVITY_TIMEOUT = timedelta(minutes=3)
 
 
 @dataclass(frozen=True)

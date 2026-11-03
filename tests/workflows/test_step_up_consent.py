@@ -110,6 +110,8 @@ def _spawn_worker(env: WorkflowEnvironment, queue: str, database_url: str, log: 
         "AGENTPAY_TEMPORAL_NAMESPACE": env.client.namespace,
         "AGENTPAY_TEMPORAL_TASK_QUEUE": queue,
         "AGENTPAY_OUTBOX_POLL_INTERVAL_MS": "200",
+        # Never a paid model call from a test, whatever key .env holds.
+        "AGENTPAY_DISPUTE_NARRATIVE_ENABLED": "false",
     }
     out = log.open("w", encoding="utf-8")
     return subprocess.Popen(
