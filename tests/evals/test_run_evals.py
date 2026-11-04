@@ -179,7 +179,10 @@ def test_later_packs_decide_every_signal_era_case_as_its_own_pack_does(
     later = [c.model_copy(update={"pack": PackPin(id="default", version=version)}) for c in cases]
 
     assert run_cases(cases, PACKS).mismatches == []
-    assert run_cases(later, PACKS) == run_cases(cases, PACKS)
+    timing = {"engine_ms"}  # wall time differs run to run
+    assert run_cases(later, PACKS).model_dump(exclude=timing) == run_cases(cases, PACKS).model_dump(
+        exclude=timing
+    )
 
 
 # --- Disputes -------------------------------------------------------------------------
