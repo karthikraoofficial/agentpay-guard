@@ -1,0 +1,15 @@
+# Only what the API, worker and migrations need goes into the image.
+.git
+.github
+.venv
+**/__pycache__
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.env
+.env.*
+web
+docs
+tests
+prototypes
+infra

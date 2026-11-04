@@ -24,6 +24,10 @@ _Avoid_: Role, permission
 An Agent its Tenant has switched off. Its requests are blocked under every Mandate until it is re-enabled.
 _Avoid_: Revoked agent, suspended agent
 
+**Demo Tenant**:
+The Tenant the owner creates on the hosted demo with `api.admin create-tenant`, so visitors can run the demo journeys. It is an ordinary Tenant on the mock rail with mock settle on, held to the Model spend cap like any other. No code treats it differently.
+_Avoid_: Test tenant, sandbox tenant, public tenant
+
 ## Authority
 
 **Mandate**:

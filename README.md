@@ -131,6 +131,7 @@ uv run alembic upgrade head
 uv run pytest
 uv run python -m evals.run_evals
 uv run pytest -m perf -s -o addopts=""   # latency budgets
+bash infra/smoke-prod.sh                 # the production stack, /healthz through Caddy (CI's deploy job)
 ```
 
 The tests need local Postgres running (the `docker compose` step above) and a `.env`. They create and migrate their own `<database>_test` database on each run, so your dev data is left alone.
@@ -182,7 +183,7 @@ Allow, step-up and block count decision-stage cases; approval re-checks are labe
 | `policy_packs/` | Released policy packs and their hash manifest |
 | `evals/` | Labelled golden cases and the eval gate; the live Intent check eval set |
 | `migrations/` | Alembic migrations |
-| `infra/` | Docker Compose for local dev; deploy config later |
+| `infra/` | Docker Compose for local dev, the OTel collector configs, and the hosted demo's production overlay, Caddyfile and smoke test |
 | `web/` | Next.js front end; pages arrive from Phase 3 |
 
 ## Signals (Policy packs from `default@1.1.0`)
@@ -293,6 +294,29 @@ The run for #85, with ids and timings, is posted on the Phase 4 PRD (#74).
 - **New merchant has a harmless race.** Two parallel first payments to the same merchant under different Mandates can both see it as new. Both just step up.
 - **One Intent check can be cited for 30 minutes,** by any Decision on the same Mandate, Agent and merchant.
 - **Each Intent check holds a database connection while the model answers,** up to 2.5 s, so that a retry never calls the model twice.
+
+## Deploy (hosted demo)
+
+The hosted demo costs nothing except model calls (ADR-0021):
+- One Oracle Cloud Always Free VM runs the same compose stack, plus `infra/docker-compose.prod.yml`.
+- The web app is on Vercel Hobby.
+- Traces go to Langfuse Hobby.
+
+On the VM:
+
+```bash
+cp .env.production.example .env    # then replace every placeholder
+docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.prod.yml up -d --build
+docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.prod.yml   exec api python -m api.admin create-tenant "Demo"   # the Demo Tenant; prints its keys once
+```
+
+What the production overlay does:
+- **One image, three services.** The root `Dockerfile` builds a single image that runs the API, the worker and a one-shot `migrate` service. The API and worker wait until migrations have finished.
+- **Only Caddy is public.** It serves `AGENTPAY_API_HOST` over HTTPS with a certificate it gets and renews itself. A free hostname with no account is `api.<the VM's IP, dashes for dots>.sslip.io`. Postgres, Temporal and the collector have no published ports.
+- **Settings for a public demo.** `.env.production.example` lists every hosted setting. It sets the mock rail with mock settle, so demo journey 3 runs, and the Model spend cap.
+- **Vercel.** The web app deploys from `web/` (`web/vercel.json`). Set `NEXT_PUBLIC_API_URL=https://<AGENTPAY_API_HOST>` in Vercel, and set `AGENTPAY_WEB_ORIGIN` on the VM to the Vercel URL.
+
+`bash infra/smoke-prod.sh` checks the whole thing on your own machine, and CI's `deploy` job runs it on every PR. It builds and starts the production stack from `.env.production.example` on `localhost`, checks that `/healthz` answers through Caddy, then tears it down. It runs as a separate compose project on ports 8080 and 8443, so your dev stack is left alone.
 
 ## Going live
 

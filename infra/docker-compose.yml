@@ -22,13 +22,13 @@ services:
       retries: 10
 
   temporal:
-    image: temporalio/temporal:1.1.2
-    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/data/temporal.db"]
+    image: temporalio/temporal:1.9.1
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/home/temporal/temporal.db"]
     ports:
       - "7233:7233"
       - "8233:8233"
     volumes:
-      - temporaldata:/data
+      - temporaldata:/home/temporal
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.115.1

@@ -44,6 +44,8 @@ Run from the repo root. These are the same commands CI runs.
 - End to end on the mock rail (part of `pytest`), an allow to a captured Payment, and that Payment disputed to a signed-off Evidence pack that passes `verify-pack`: `uv run pytest tests/api/test_end_to_end.py`; the real Razorpay half is the runbook in the README
 - Contract tests against real vendor APIs: `uv run pytest -m contract -o addopts=""` (not in CI; skip without the vendor key)
 - Register a Razorpay test card for those contract tests (prints the two `AGENTPAY_RAZORPAY_TEST_*` refs for `.env`; test tokens expire within about a day, so re-run before each contract run): `uv run python -m adapters.razorpay.wizard`
+- Hosted demo (ADR-0021; on the VM, with `.env` copied from `.env.production.example`): `docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.prod.yml up -d --build`
+- Production stack smoke test (builds the image, starts the stack from `.env.production.example` on ports 8080/8443, checks `/healthz` through Caddy, tears it down; CI's `deploy` job): `bash infra/smoke-prod.sh`
 - Web: `cd web && npm ci && npm run lint && npm run typecheck && npm run build` (CI runs the same in its `web` job)
 
 ## How to work
