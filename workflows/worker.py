@@ -19,6 +19,7 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from adapters.gateways import build_gateway
+from adapters.memory.settling_rail import SettlingMockRail
 from adapters.otel.telemetry import OtelTelemetry
 from adapters.postgres.store import PostgresStore
 from adapters.rails import build_rail
@@ -94,13 +95,21 @@ async def relay_forever(
         await asyncio.sleep(interval_seconds)
 
 
-def sweep_rail(settings: Settings) -> PaymentRail | None:
+def sweep_rail(settings: Settings, store: UnitOfWork) -> PaymentRail | None:
     """The rail the sweep asks, or None when there is nothing to ask: MockRail keeps its
     charges inside the API process, so a worker's own MockRail would know none of them
-    and the sweep would wrongly fail every Payment."""
+    and the sweep would wrongly fail every Payment. With mock settle on (ADR-0019), the
+    sweep asks a rail that captures from the stored Payment instead."""
     if settings.rail == "mock":
-        return None
+        return None if settings.mock_settle_after_seconds is None else SettlingMockRail(store)
     return build_rail(settings)
+
+
+def sweep_age(settings: Settings) -> timedelta:
+    """How old a scheduled Payment is before the sweep asks about it."""
+    if settings.mock_settle_after_seconds is not None:
+        return timedelta(seconds=settings.mock_settle_after_seconds)
+    return timedelta(seconds=settings.reconcile_after_seconds)
 
 
 async def sweep_forever(
@@ -109,7 +118,7 @@ async def sweep_forever(
     """Until cancelled, each interval: debit the Payments whose Pre-debit notice period
     has ended, then reconcile the scheduled ones. Both are synchronous, so each pass runs
     in a thread."""
-    older_than = timedelta(seconds=settings.reconcile_after_seconds)
+    older_than = sweep_age(settings)
     while True:
         debits = await asyncio.to_thread(run_debit_step, store, rail, clock)
         if debits.checked:
@@ -152,9 +161,9 @@ async def main() -> None:
                     settings.outbox_poll_interval_ms / 1000,
                 )
             ]
-            rail = sweep_rail(settings)
+            rail = sweep_rail(settings, store)
             if rail is None:
-                log.info("reconciliation sweep off: the mock rail settles inside the API")
+                log.info("reconciliation sweep off: mock Payments stay scheduled (no mock settle)")
             else:
                 loops.append(sweep_forever(store, rail, clock, settings))
             await asyncio.gather(*loops)

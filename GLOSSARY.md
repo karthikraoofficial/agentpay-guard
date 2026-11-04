@@ -166,6 +166,10 @@ _Avoid_: Callback, notification, Tenant webhook (that one goes to a Tenant)
 Asking the rail how a Payment ended when no Rail webhook has said so after a while, and settling it the same way a webhook would. A Payment the rail has no Rail charge for is failed, never charged late.
 _Avoid_: Retry, polling
 
+**Mock settle**:
+A demo-only setting under which Reconciliation captures every debited mock Payment once it is old enough, so a hosted demo can dispute a captured Payment. It is refused with any real rail (ADR-0019).
+_Avoid_: Fake capture, auto-capture
+
 **Rail token**:
 The rail's reference to the Payer's payment instrument, bound to a Mandate when it is granted, shown only in masked form. Never the card number or UPI PIN.
 _Avoid_: Card, payment method, credentials
