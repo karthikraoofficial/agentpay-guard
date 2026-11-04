@@ -29,7 +29,8 @@ from adapters.webhooks.sender import HttpWebhookSender
 from agents.dispute_narrative import NarrativeWriter as DisputeNarrativeWriter
 from core.debits import run_debit_step
 from core.evidence import NarrativeWriter
-from core.ports import Clock, EventBus, PaymentRail, UnitOfWork
+from core.model_spend import CappedGateway, daily_caps
+from core.ports import Clock, EventBus, ModelCallCounter, PaymentRail, UnitOfWork
 from core.reconcile import SweepStore, sweep
 from core.relay import relay_once
 from core.settings import Settings, get_settings
@@ -66,11 +67,17 @@ def consent_worker(
     )
 
 
-def narrative_writer(settings: Settings) -> NarrativeWriter | None:
-    """The dispute evidence agent, or None to have every narrative written by code."""
+def narrative_writer(
+    settings: Settings, counter: ModelCallCounter, clock: Clock
+) -> NarrativeWriter | None:
+    """The dispute evidence agent, or None to have every narrative written by code. Its
+    model calls count against each Tenant's Model spend cap (ADR-0020)."""
     if not settings.dispute_narrative_enabled:
         return None
-    gateway = build_gateway(settings, OtelTelemetry.from_settings(settings))
+    telemetry = OtelTelemetry.from_settings(settings)
+    gateway = CappedGateway(
+        build_gateway(settings, telemetry), counter, clock, telemetry, daily_caps(settings)
+    )
     return DisputeNarrativeWriter(
         gateway, settings.dispute_narrative_model, settings.dispute_narrative_timeout_ms
     )
@@ -147,7 +154,7 @@ async def main() -> None:
             clock,
             pool,
             settings.policy_packs_dir,
-            narrative_writer(settings),
+            narrative_writer(settings, store, clock),
         )
         async with worker:
             log.info("consent worker polling task queue %s", settings.temporal_task_queue)

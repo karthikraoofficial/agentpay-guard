@@ -12,6 +12,7 @@ from core.ports import (
     Clock,
     EventBus,
     IdempotencyKey,
+    ModelCallCounter,
     ModelGateway,
     PaymentRail,
     SecretBox,
@@ -24,9 +25,9 @@ from core.ports import (
 from core.settings import Settings
 
 
-class Store(UnitOfWork, TenantDirectory, EventBus, Protocol):
-    """What the API needs from storage: tenant-scoped transactions, key lookup, and the
-    outbox the relay reads."""
+class Store(UnitOfWork, TenantDirectory, EventBus, ModelCallCounter, Protocol):
+    """What the API needs from storage: tenant-scoped transactions, key lookup, the
+    outbox the relay reads, and the Model spend cap's counts."""
 
 
 def get_store(request: Request) -> Store:

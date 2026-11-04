@@ -3,7 +3,7 @@ from collections.abc import Iterator
 from collections.abc import Set as AbstractSet
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 
 from core.domain.audit import ZERO_HASH, SealedAuditRecord, StoredAuditRow
 from core.domain.consent import (
@@ -452,6 +452,9 @@ class InMemoryUnitOfWork:
         self._keys: dict[str, ApiKeyGrant] = {}
         self._claims = _Claims()
         self._commit = threading.Lock()
+        # (tenant_id, purpose, UTC day) -> model calls counted (ADR-0020). Kept outside
+        # the Tenant data, so a count survives the rollback of the work around it.
+        self._model_calls: dict[tuple[TenantId, str, date], int] = {}
 
     @contextmanager
     def transaction(self, tenant_id: TenantId) -> Iterator[InMemoryTransaction]:
@@ -496,6 +499,14 @@ class InMemoryUnitOfWork:
             if token_hash in data.review_links:
                 return data.review_links[token_hash]
         return None
+
+    def take_model_call(self, tenant_id: TenantId, purpose: str, day: date, limit: int) -> bool:
+        with self._commit:
+            key = (tenant_id, purpose, day)
+            if self._model_calls.get(key, 0) >= limit:
+                return False
+            self._model_calls[key] = self._model_calls.get(key, 0) + 1
+            return True
 
     def scheduled_payments(
         self, created_before: datetime, now: datetime

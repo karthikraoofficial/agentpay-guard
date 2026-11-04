@@ -1,7 +1,7 @@
 from collections.abc import Iterator
 from collections.abc import Set as AbstractSet
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     ColumnElement,
@@ -32,6 +32,7 @@ from adapters.postgres.tables import (
     idempotency_keys,
     intent_checks,
     mandates,
+    model_calls,
     outbox_events,
     payers,
     payments,
@@ -861,6 +862,24 @@ class PostgresStore:
         with self._engine.connect() as conn:
             row = conn.execute(query).mappings().one_or_none()
         return None if row is None else _review_link(row)
+
+    def take_model_call(self, tenant_id: TenantId, purpose: str, day: date, limit: int) -> bool:
+        if limit <= 0:
+            return False
+        c = model_calls.c
+        # One statement, so two parallel calls can't both take the last one.
+        statement = (
+            pg_insert(model_calls)
+            .values(tenant_id=tenant_id, purpose=purpose, day=day, calls=1)
+            .on_conflict_do_update(
+                index_elements=[c.tenant_id, c.purpose, c.day],
+                set_={"calls": c.calls + 1},
+                where=c.calls < limit,
+            )
+            .returning(c.calls)
+        )
+        with self._engine.begin() as conn:
+            return conn.execute(statement).first() is not None
 
     def scheduled_payments(
         self, created_before: datetime, now: datetime

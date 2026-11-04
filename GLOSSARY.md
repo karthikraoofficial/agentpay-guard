@@ -200,6 +200,10 @@ _Avoid_: Intent match, intent classification
 The result of an Intent check: match, mismatch or unknown. A check that fails or times out gives unknown. A verdict can be used for a limited time, by Decisions on the same Mandate and Agent at the same merchant.
 _Avoid_: Intent score, intent result
 
+**Model spend cap**:
+How many model calls a Tenant may make per UTC day for each purpose (Intent checks, dispute narratives). Past it the model isn't called and the caller fails closed: the Intent verdict is unknown and the narrative is written by code (ADR-0020).
+_Avoid_: Budget, quota, rate limit
+
 **Quoted total**:
 The cart total submitted with an Intent check: the price the Agent said it would pay.
 _Avoid_: Quote, quoted price, expected amount

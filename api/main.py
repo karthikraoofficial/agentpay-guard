@@ -30,6 +30,7 @@ from api.routes import (
     review_links,
     webhook_endpoint,
 )
+from core.model_spend import CappedGateway, daily_caps
 from core.policy.packs import load_active_pack
 from core.ports import Clock, ModelGateway, PaymentRail, SecretBox, Telemetry, Workflow
 from core.settings import Settings, get_settings
@@ -75,7 +76,14 @@ def create_app(
     app.state.clock = clock or SystemClock()
     app.state.telemetry = telemetry or otel
     app.state.settings = settings
-    app.state.gateway = gateway or build_gateway(settings, app.state.telemetry)
+    # Every model call is counted against the Tenant's Model spend cap (ADR-0020).
+    app.state.gateway = CappedGateway(
+        gateway or build_gateway(settings, app.state.telemetry),
+        app.state.store,
+        app.state.clock,
+        app.state.telemetry,
+        daily_caps(settings),
+    )
     # Only resolutions signal from here (best effort); the worker's relay starts workflows.
     app.state.workflow = workflow or TemporalWorkflow.from_settings(settings)
     app.state.secret_box = secret_box or build_secret_box(settings)

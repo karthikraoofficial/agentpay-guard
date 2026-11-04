@@ -19,7 +19,8 @@ from core.domain.parties import AgentId, TenantId
 IntentId = NewType("IntentId", str)
 IntentVerdict = Literal["match", "mismatch", "unknown"]
 # Why a verdict is unknown without the model having said so.
-FailureCause = Literal["timeout", "error", "unparseable", "disabled"]
+# "capped": the Tenant's Model spend cap for Intent checks was used up (ADR-0020).
+FailureCause = Literal["timeout", "error", "unparseable", "disabled", "capped"]
 
 PayerInstruction = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)
