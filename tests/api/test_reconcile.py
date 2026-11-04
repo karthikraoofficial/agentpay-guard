@@ -281,13 +281,13 @@ def test_the_worker_sweeps_on_its_interval(
     assert waits == [300]
 
 
-def test_the_worker_does_not_sweep_the_mock_rail() -> None:
+def test_the_worker_does_not_sweep_the_mock_rail(api: Api) -> None:
     from workflows import worker
 
-    assert worker.sweep_rail(make_settings(rail="mock")) is None
+    assert worker.sweep_rail(make_settings(rail="mock"), api.store) is None
 
 
-def test_the_worker_sweeps_razorpay() -> None:
+def test_the_worker_sweeps_razorpay(api: Api) -> None:
     from adapters.razorpay.rail import RazorpayRail
     from workflows import worker
 
@@ -298,4 +298,4 @@ def test_the_worker_sweeps_razorpay() -> None:
         razorpay_webhook_secret="whsec",  # noqa: S106
     )
 
-    assert isinstance(worker.sweep_rail(settings), RazorpayRail)
+    assert isinstance(worker.sweep_rail(settings, api.store), RazorpayRail)

@@ -282,9 +282,9 @@ The run for #85, with ids and timings, is posted on the Phase 4 PRD (#74).
 - **Run one worker.** The debit step relies on asking Razorpay for an earlier debit before making one, so two workers could debit the same Payment twice.
 - **A Revocation in the last seconds before a debit can miss it.** The debit step re-checks the Mandate and Agent, then calls the rail without holding the Mandate, so a Revocation that lands during that call doesn't stop the debit.
 - **A debit can be up to one sweep interval late:** the debit step runs every `AGENTPAY_RECONCILE_INTERVAL_SECONDS` (5 minutes).
-- **Mock Payments stay `scheduled` outside tests.** No webhook comes from the mock rail, and the reconciliation sweep is off for it.
+- **Mock Payments stay `scheduled` outside tests,** unless mock settle is on. No webhook comes from the mock rail, and the reconciliation sweep is off for it. The hosted demo sets `AGENTPAY_MOCK_SETTLE_AFTER_SECONDS`, and the worker's sweep then captures every debited mock Payment older than that, through the same path as a rail webhook (ADR-0019). It captures even a mock Payment whose token would fail, and the app won't start with it on the Razorpay rail.
 - **Disputes are reported by the Tenant,** never by the rail. No pack holds the merchant's own fulfilment evidence, so `not_received` and `not_as_described` are never better than mixed.
-- **A Dispute runs end to end only on the mock rail.** A Dispute needs a captured Payment, and a Razorpay test-mode debit can't complete (above), so demo journey 3 is `tests/api/test_end_to_end.py`.
+- **A Dispute runs end to end only on the mock rail.** A Dispute needs a captured Payment, and a Razorpay test-mode debit can't complete (above), so demo journey 3 is `tests/api/test_end_to_end.py`, or a running stack with mock settle on.
 - **No refunds.** A Dispute is evidence only: it never moves money or changes the Payment, and `PaymentRail.refund` is not implemented.
 - **Only INR and USD,** and one Policy pack for every Tenant.
 - **Scopes only help if the Agent gets only the agent key.** A Tenant that hands an Agent its tenant key, or a key with every scope, gives it back the power to grant Mandates and read Intent verdicts.

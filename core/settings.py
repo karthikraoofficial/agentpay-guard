@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     reconcile_interval_seconds: int = Field(default=300, gt=0)
     # At least a minute, so the sweep never fails a Payment whose rail call is in flight.
     reconcile_after_seconds: int = Field(default=600, ge=60)
+    # Mock settle, for the hosted demo only (ADR-0019): when set, the worker's sweep
+    # captures every debited mock Payment older than this many seconds, so a demo Payment can be
+    # disputed. Unset, mock Payments stay scheduled. Refused with any real rail.
+    mock_settle_after_seconds: int | None = Field(default=None, gt=0)
     # The one Razorpay test-mode account every Tenant charges through (ADR-0012). All three
     # are required with AGENTPAY_RAIL=razorpay, and only a test key is ever accepted.
     razorpay_key_id: str | None = None
@@ -102,6 +106,11 @@ class Settings(BaseSettings):
     def _razorpay_test_mode_only(self) -> "Settings":
         if self.razorpay_key_id is not None and not self.razorpay_key_id.startswith("rzp_test_"):
             raise ValueError("AGENTPAY_RAZORPAY_KEY_ID must be a test key (rzp_test_...)")
+        if self.rail != "mock" and self.mock_settle_after_seconds is not None:
+            raise ValueError(
+                "AGENTPAY_MOCK_SETTLE_AFTER_SECONDS is for the mock rail only; "
+                f"unset it with AGENTPAY_RAIL={self.rail}"
+            )
         if self.rail == "razorpay":
             missing = [
                 f"AGENTPAY_{name.upper()}"
