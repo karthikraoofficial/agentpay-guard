@@ -1,4 +1,5 @@
-# Receive OTLP from the API and print it. A Langfuse exporter comes in Phase 6.
+# Receive OTLP from the API and worker and print it. When the Langfuse keys are set,
+# docker-compose.yml merges otel-collector.langfuse.yaml on top to send traces there too.
 receivers:
   otlp:
     protocols:

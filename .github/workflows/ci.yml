@@ -58,6 +58,11 @@ jobs:
           git fetch --no-tags --depth=1 origin "$BASE_REF"
           bash .github/scripts/check-released-packs.sh FETCH_HEAD
 
+      - name: Collector configs are valid (console only, and with the Langfuse overlay)
+        run: |
+          docker run --rm -v "$PWD/infra:/cfg:ro" otel/opentelemetry-collector-contrib:0.115.1 \n            validate --config=/cfg/otel-collector.yaml
+          docker run --rm -v "$PWD/infra:/cfg:ro" -e LANGFUSE_PUBLIC_KEY=pk -e LANGFUSE_SECRET_KEY=sk \n            -e LANGFUSE_HOST=https://cloud.langfuse.com otel/opentelemetry-collector-contrib:0.115.1 \n            validate --config=/cfg/otel-collector.yaml --config=/cfg/otel-collector.langfuse.yaml
+
       - name: Migrations
         run: uv run alembic upgrade head
 

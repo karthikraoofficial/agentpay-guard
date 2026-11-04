@@ -1,0 +1,20 @@
+# Merged on top of otel-collector.yaml when AGENTPAY_LANGFUSE_PUBLIC_KEY is set (see
+# docker-compose.yml). Sends traces to Langfuse over OTLP HTTP with Basic auth; Langfuse
+# takes no metrics, so those stay on the console. The keys come from the environment.
+extensions:
+  basicauth/langfuse:
+    client_auth:
+      username: ${env:LANGFUSE_PUBLIC_KEY}
+      password: ${env:LANGFUSE_SECRET_KEY}
+
+exporters:
+  otlphttp/langfuse:
+    endpoint: ${env:LANGFUSE_HOST}/api/public/otel
+    auth:
+      authenticator: basicauth/langfuse
+
+service:
+  extensions: [basicauth/langfuse]
+  pipelines:
+    traces:
+      exporters: [debug, otlphttp/langfuse]

@@ -1,5 +1,7 @@
-# Local stack: `docker compose -f infra/docker-compose.yml up -d`
+# Local stack: `docker compose --env-file .env -f infra/docker-compose.yml up -d`
 # Postgres on 5432, Temporal on 7233 (web UI on 8233), OTLP collector on 4317/4318.
+# The env file only switches on the collector's Langfuse exporter; without it (or without
+# the Langfuse keys in it) the collector prints spans to its log, nothing more.
 name: agentpay-guard
 
 services:
@@ -30,9 +32,16 @@ services:
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.115.1
-    command: ["--config=/etc/otelcol/config.yaml"]
+    # Langfuse is added only when its public key is set. Keys reach the collector by
+    # environment and are never written in its config.
+    command: --config=/etc/otelcol/config.yaml ${AGENTPAY_LANGFUSE_PUBLIC_KEY:+--config=/etc/otelcol/langfuse.yaml}
+    environment:
+      LANGFUSE_PUBLIC_KEY: ${AGENTPAY_LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${AGENTPAY_LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${AGENTPAY_LANGFUSE_HOST:-https://cloud.langfuse.com}
     volumes:
       - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+      - ./otel-collector.langfuse.yaml:/etc/otelcol/langfuse.yaml:ro
     ports:
       - "4317:4317"
       - "4318:4318"
