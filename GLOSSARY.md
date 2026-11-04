@@ -273,3 +273,13 @@ _Avoid_: Approval (that is for Consent requests), review
 **Review link**:
 An expiring link to one Dispute's Evidence pack, which the Tenant mints for a named reviewer. Whoever opens it is treated as that reviewer, and it is used up by Sign-off. A newer link for the same Dispute replaces it.
 _Avoid_: Sign-off link, Consent link (that is for Consent requests)
+
+## Quality
+
+**Golden case**:
+One hand-labelled input to the engine (or the Dispute rules, or the citation checker) with the answer it must give, written from the Policy pack's rules and never copied from the engine's output. A Golden case may name the build-plan scenario it covers.
+_Avoid_: Test case, fixture, sample
+
+**Eval report**:
+The published numbers of one run over every Golden case: case counts per file and scenario, false-allow, false-block, wrong Reason codes and the step-up rate. It holds only numbers every machine reproduces, so latency is left out, and CI fails when the committed copy is out of date.
+_Avoid_: Scorecard (that is the page that shows it), eval results, metrics
