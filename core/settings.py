@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     dispute_narrative_model: str = "claude-sonnet-5-5"
     dispute_narrative_timeout_ms: int = Field(default=45_000, gt=0, le=120_000)
 
+    # The Model spend cap (ADR-0020): model calls each Tenant may make per UTC day, per
+    # purpose. Past it the model isn't called and the caller fails closed (Intent check
+    # unknown, narrative written by code). 0 stops that purpose's calls.
+    intent_check_daily_cap: int = Field(default=200, ge=0)
+    dispute_narrative_daily_cap: int = Field(default=20, ge=0)
+
     # How long a Review link works, at most: never past the Dispute's respond_by.
     review_link_ttl_seconds: int = Field(default=72 * 3600, gt=0, le=30 * 86400)
 

@@ -16,7 +16,7 @@ Store. Later PRDs may refine any of them.
 from collections.abc import Mapping
 from collections.abc import Set as AbstractSet
 from contextlib import AbstractContextManager
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
@@ -182,6 +182,21 @@ class ModelTimeout(ModelGatewayError):
 class ModelUnavailable(ModelGatewayError):
     """The provider refused or failed the call: a network, auth, rate-limit or server
     error."""
+
+
+class ModelSpendCapReached(ModelUnavailable):
+    """The Tenant's Model spend cap for this purpose is used up today, so the model was
+    not called (ADR-0020). A ModelUnavailable, so every caller already fails closed."""
+
+
+class ModelCallCounter(Protocol):
+    """Counts model calls per Tenant, purpose and UTC day for the Model spend cap. Each
+    count commits on its own, outside any Tenant transaction: a call costs money even if
+    the work around it rolls back (ADR-0020)."""
+
+    def take_model_call(self, tenant_id: TenantId, purpose: str, day: date, limit: int) -> bool:
+        """Count one call if fewer than `limit` are counted for that day; True if it was."""
+        ...
 
 
 class ModelGateway(Protocol):

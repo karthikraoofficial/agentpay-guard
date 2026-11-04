@@ -16,6 +16,7 @@ from core.ports import (
     Completion,
     Effort,
     ModelGateway,
+    ModelSpendCapReached,
     ModelTimeout,
     ModelUnavailable,
     TenantId,
@@ -101,6 +102,8 @@ def run_intent_check(
         )
     except ModelTimeout:
         return IntentResult("unknown", "timeout", None)
+    except ModelSpendCapReached:
+        return IntentResult("unknown", "capped", None)
     except ModelUnavailable:
         return IntentResult("unknown", "error", None)
     return parse(completion)

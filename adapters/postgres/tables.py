@@ -6,6 +6,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -416,4 +417,16 @@ review_links = Table(
         ["tenant_id", "dispute_id"], ["disputes.tenant_id", "disputes.dispute_id"]
     ),
     Index("ix_review_links_dispute", "tenant_id", "dispute_id"),
+)
+
+# The Model spend cap (#134, ADR-0020): model calls counted per Tenant, purpose and UTC
+# day. Each count commits on its own, outside the Tenant transaction around the call.
+model_calls = Table(
+    "model_calls",
+    metadata,
+    Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+    Column("purpose", String, primary_key=True),
+    Column("day", Date, primary_key=True),
+    Column("calls", Integer, nullable=False),
+    CheckConstraint("calls >= 1", name="model_calls_counted"),
 )
