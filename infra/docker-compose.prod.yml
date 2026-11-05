@@ -61,7 +61,7 @@ services:
         condition: service_started
 
   caddy:
-    image: caddy:2.8.4
+    image: caddy:2.11.7
     restart: unless-stopped
     # Host ports are 80 and 443 on the VM; the smoke test moves them off privileged ports.
     ports:
