@@ -107,6 +107,10 @@ class Settings(BaseSettings):
     # `python -m adapters.razorpay.wizard`; Razorpay expires it within about a day.
     razorpay_test_customer_ref: str | None = None
     razorpay_test_token_ref: str | None = None
+    # The Demo Tenant's two keys, as `api.admin create-tenant` printed them, for the demo
+    # CLI (`python -m demo`) only. The API never reads them.
+    demo_agent_key: SecretStr | None = None
+    demo_tenant_key: SecretStr | None = None
 
     @model_validator(mode="after")
     def _razorpay_test_mode_only(self) -> "Settings":
