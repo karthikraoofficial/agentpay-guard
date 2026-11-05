@@ -1,0 +1,7 @@
+# The only public entry to the hosted stack: HTTPS for the API on AGENTPAY_API_HOST.
+# Caddy gets and renews the certificate itself (Let's Encrypt); for `localhost` it uses
+# its own local CA instead.
+{$AGENTPAY_API_HOST} {
+	encode zstd gzip
+	reverse_proxy api:8000
+}

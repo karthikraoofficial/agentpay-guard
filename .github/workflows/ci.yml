@@ -107,3 +107,11 @@ jobs:
       - name: Build
         run: npm run build
 
+
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Production stack renders, builds, and answers /healthz through Caddy
+        run: bash infra/smoke-prod.sh

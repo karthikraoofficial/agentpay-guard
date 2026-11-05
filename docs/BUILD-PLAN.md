@@ -28,9 +28,9 @@ The MVP scales smoothly because every external dependency sits behind an interfa
 | --- | --- | --- | --- |
 | `PaymentRail` | `MockRail` + Razorpay or Stripe test mode | Live keys per tenant, more rails (UPI mandates, cards) | 3 — Tools |
 | `PolicyEngine` | Python rules reading versioned YAML policy packs | Same engine; packs edited through a maker-checker admin UI | 8 — Guardrails |
-| `Workflow` (durable execution) | Temporal dev server in Docker | Temporal Cloud (or self-hosted cluster) | 7 — Durable execution |
+| `Workflow` (durable execution) | Temporal dev server in Docker, locally and on the hosted VM | Temporal Cloud (or self-hosted cluster) | 7 — Durable execution |
 | `ModelGateway` | One wrapper around the Claude API with token and cost logging | Same wrapper + fallback chain, prompt caching, per-tenant budgets | 10, 12 — Architecture, cost |
-| `UnitOfWork` (Postgres store) | Postgres 16 in Docker; in-memory fake for tests | Managed Postgres (Neon, RDS) with read replicas | 10 — Architecture |
+| `UnitOfWork` (Postgres store) | Postgres 16 in Docker, locally and on the hosted VM; in-memory fake for tests | Managed Postgres (Neon, RDS) with read replicas | 10 — Architecture |
 | `Clock` | System time, read once per request at the API edge; fixed fake for tests | Same | 10 — Architecture |
 | `Cache` / rate limits | In-process dict | Redis | 11 — Scaling |
 | `EventBus` | Postgres outbox table polled by a worker | Kafka or a managed queue; same outbox pattern | 7, 11 |
@@ -79,7 +79,7 @@ Pick boring, widely hired-for tools so every choice holds up in a design intervi
 | Evals | pytest + JSONL golden set + a small scoring script | Runs in CI; no extra vendor needed |
 | Telemetry | OpenTelemetry SDK + Langfuse | Traces every decision, LLM call and tool call with cost |
 | Local infra | Docker Compose | Postgres, Temporal, OTel collector with one command |
-| Hosting (MVP) | API and workers on Render, front end on Vercel | You've deployed this pairing before (Rebound) |
+| Hosting (MVP) | The compose stack on one Oracle Cloud Always Free VM behind Caddy; front end on Vercel Hobby; traces to Langfuse Hobby | $0 except model calls; Render's free tier sleeps and has no worker (ADR-0021) |
 | Quality gates | Ruff, mypy, pytest, GitHub Actions | Every PR is linted, typed, tested and eval-scored |
 
 ## Repository structure
@@ -111,7 +111,8 @@ agentpay-guard/
 ├─ tests/                    # unit + contract tests per seam
 ├─ infra/
 │  ├─ docker-compose.yml     # postgres, temporal, otel-collector
-│  └─ render.yaml            # deploy blueprint
+│  ├─ docker-compose.prod.yml # the hosted demo on one VM (ADR-0021)
+│  └─ Caddyfile              # HTTPS in front of the API
 └─ .github/workflows/ci.yml  # lint, type, test, evals gate
 ```
 
@@ -284,6 +285,8 @@ is marked ready. Add the dispute viewer page in Next.js.
 
 **Phase 6 — evals, deploy, polish** (`/clear` first)
 
+> Superseded in detail by the Phase 6 PRD (#130) and ADR-0021. Only Decision cases count toward 200+; the zero-tolerance gate stays and step-up rate and p95 are reported, in a committed Eval report. The ops console is a scorecard of that report. Hosting is $0: the compose stack on one Oracle Cloud Always Free VM behind Caddy, the web app on Vercel Hobby and traces in Langfuse Hobby, instead of Render and Temporal Cloud. Mock settle and a per-Tenant Model spend cap make the public demo work and keep its cost bounded.
+
 ```text
 Read CLAUDE.md, SPEC-07, SPEC-08. Generate 200+ golden cases in evals/golden/ covering clean allows,
 over-cap, wrong category, intent mismatch, velocity spikes, price drift, expired mandates and prompt-
@@ -297,8 +300,8 @@ for deployment, and a README with architecture, how to run, and the eval results
 
 None of these need a rewrite if the seams hold; each is a swap or an addition. Listing them in the README shows you know the gap between demo and production.
 
-- [ ] Temporal: dev server → Temporal Cloud. For the hosted demo, Render's free tier can't run the Temporal server, so use a Temporal Cloud trial or a small paid Render private service.
-- [ ] Postgres: Docker → managed Postgres with backups, point-in-time recovery and a read replica for the ops console.
+- [ ] Temporal: dev server → Temporal Cloud, which needs its TLS or API-key settings added. The hosted demo runs the dev server on its VM (ADR-0021).
+- [ ] Postgres: Docker → managed Postgres with backups, point-in-time recovery and a read replica for the ops console. The hosted demo's Postgres is a container on one VM, with no backups (ADR-0021).
 - [ ] Redis for rate limits and the intent-signal cache; outbox worker → managed queue.
 - [ ] Horizontal scale: stateless API pods behind a load balancer; workers scaled on Temporal task-queue depth.
 - [ ] Model gateway: fallback chain, prompt caching, per-tenant token budgets and a kill switch per tenant and per tool.
