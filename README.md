@@ -316,7 +316,16 @@ The hosted demo costs nothing except model calls (ADR-0021):
 - The web app is on Vercel Hobby.
 - Traces go to Langfuse Hobby.
 
-On the VM:
+To put it live, run `bash infra/provision-wizard.sh` from the repo root. It walks you through 11 stages:
+- creating the Oracle VM and opening ports 80 and 443 (in Oracle's security list and on the VM's own firewall);
+- installing Docker;
+- creating the Langfuse project, the Anthropic key and the Vercel project;
+- writing the VM's `.env`, starting the stack and creating the Demo Tenant;
+- checking it's live.
+
+It never shows a secret. Generated passwords and keys go into the git-ignored `.env.production`, which is copied to the VM. The Demo Tenant's keys go into your local `.env` for `python -m demo`. Re-running it keeps the values already saved.
+
+By hand, on the VM:
 
 ```bash
 cp .env.production.example .env    # then replace every placeholder
