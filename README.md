@@ -194,6 +194,7 @@ Allow, step-up and block count decision-stage cases; approval re-checks are labe
 | `workflows/` | Temporal: the `step_up_consent` and `dispute_pack` workflows, their activities, the Workflow port adapter and the worker (the only code that imports `temporalio`) |
 | `agents/` | The dispute evidence agent: tools and versioned prompts |
 | `policy_packs/` | Released policy packs and their hash manifest |
+| `demo/` | The demo CLI: the three demo journeys over HTTP (`python -m demo`) |
 | `evals/` | Labelled golden cases and the eval gate; the live Intent check eval set |
 | `migrations/` | Alembic migrations |
 | `infra/` | Docker Compose for local dev, the OTel collector configs, and the hosted demo's production overlay, Caddyfile and smoke test |
@@ -300,7 +301,7 @@ The run for #85, with ids and timings, is posted on the Phase 4 PRD (#74).
 - **A debit can be up to one sweep interval late:** the debit step runs every `AGENTPAY_RECONCILE_INTERVAL_SECONDS` (5 minutes).
 - **Mock Payments stay `scheduled` outside tests,** unless mock settle is on. No webhook comes from the mock rail, and the reconciliation sweep is off for it. The hosted demo sets `AGENTPAY_MOCK_SETTLE_AFTER_SECONDS`, and the worker's sweep then captures every debited mock Payment older than that, through the same path as a rail webhook (ADR-0019). It captures even a mock Payment whose token would fail, and the app won't start with it on the Razorpay rail.
 - **Disputes are reported by the Tenant,** never by the rail. No pack holds the merchant's own fulfilment evidence, so `not_received` and `not_as_described` are never better than mixed.
-- **A Dispute runs end to end only on the mock rail.** A Dispute needs a captured Payment, and a Razorpay test-mode debit can't complete (above), so demo journey 3 is `tests/api/test_end_to_end.py`, or a running stack with mock settle on.
+- **A Dispute runs end to end only on the mock rail.** A Dispute needs a captured Payment, and a Razorpay test-mode debit can't complete (above), so demo journey 3 is `tests/api/test_end_to_end.py`, or a running stack with mock settle on (`python -m demo`, see [Demo](#demo)).
 - **No refunds.** A Dispute is evidence only: it never moves money or changes the Payment, and `PaymentRail.refund` is not implemented.
 - **Only INR and USD,** and one Policy pack for every Tenant.
 - **Scopes only help if the Agent gets only the agent key.** A Tenant that hands an Agent its tenant key, or a key with every scope, gives it back the power to grant Mandates and read Intent verdicts.
@@ -320,7 +321,8 @@ On the VM:
 ```bash
 cp .env.production.example .env    # then replace every placeholder
 docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.prod.yml up -d --build
-docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.prod.yml   exec api python -m api.admin create-tenant "Demo"   # the Demo Tenant; prints its keys once
+docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.prod.yml \
+  exec api python -m api.admin create-tenant "Demo"   # the Demo Tenant; prints its keys once
 ```
 
 What the production overlay does:
@@ -330,6 +332,20 @@ What the production overlay does:
 - **Vercel.** The web app deploys from `web/` (`web/vercel.json`). Set `NEXT_PUBLIC_API_URL=https://<AGENTPAY_API_HOST>` in Vercel, and set `AGENTPAY_WEB_ORIGIN` on the VM to the Vercel URL.
 
 `bash infra/smoke-prod.sh` checks the whole thing on your own machine, and CI's `deploy` job runs it on every PR. It builds and starts the production stack from `.env.production.example` on `localhost`, checks that `/healthz` answers through Caddy, then tears it down. It runs as a separate compose project on ports 8080 and 8443, so your dev stack is left alone.
+
+## Demo
+
+`uv run python -m demo --base-url <api>` runs the three demo journeys against any deployment on the mock rail, over HTTP, and prints each step:
+
+1. **An Agent pays within its Mandate:** a Payer, Agent and Mandate are set up, an INR 1,250 payment is allowed, and its Payment is `scheduled`.
+2. **A large payment needs the Payer's approval:** an INR 6,000 payment steps up. The CLI prints the Consent link and waits while you open it in the browser and approve. Then the Payment is made.
+3. **A disputed Payment:**
+   - An allowed Payment is captured. Mock settle and the worker do this, so the deployment needs `AGENTPAY_MOCK_SETTLE_AFTER_SECONDS`.
+   - The Payment is disputed as `unauthorised`, and the CLI waits for the worker to build the Evidence pack.
+   - The CLI prints the Review link and waits while you sign off.
+   - It checks the signed-off pack: the pack must parse, every claim must cite a record in its bundle, and the pack must hash to what the Sign-off approved.
+
+It reads the Demo Tenant's keys from `AGENTPAY_DEMO_AGENT_KEY` and `AGENTPAY_DEMO_TENANT_KEY` in `.env`, as `create-tenant` printed them, and never prints them. `--journey 1|2|3` runs one journey. Each journey sets up its own Mandate, so any one can run alone. A failure names the step that failed and exits 1. `--interval` and `--timeout` set how often it checks and how long it waits. `tests/api/test_demo_cli.py` runs it against the in-process app with mock settle on, playing the worker, the Payer and the reviewer.
 
 ## Going live
 
