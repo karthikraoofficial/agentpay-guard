@@ -1,0 +1,72 @@
+{
+  "_about": "Shared starting point for evals/golden/scenarios.jsonl, decided with default@1.4.0. Each case lists only the fields it changes and names one build-plan scenario. The base is a medium-tier INR 3,000 payment to a known grocer, citing a usable Intent check with verdict match and a Quoted total of INR 3,000, no recent Decisions, nothing spent this month. Labelling rules, all from default@1.4.0: tiers are low below INR 2,000 (USD 25), medium below INR 5,000 (USD 100), high from there; blocks are Mandate revoked, outside valid_from..expires_at (expires_at itself is expired), Agent not allowed or disabled, currency mismatch, MCC 4829/6051/7995, MCC not on the Mandate, amount over the per-payment cap, or Spent this month plus the amount over the Monthly cap; step-ups are high tier, Spent plus amount at or over 80% of the Monthly cap, 5 or more earlier Decisions (or no count), a new or unknown merchant from medium, from medium an Intent check that is not used or not match (missing, mismatch, unknown), and an amount more than 2% over a used check's Quoted total at any tier. The most severe result wins; reason_codes lists every code that fires, blocks first, each group in pack rule order. A case tagged prompt_injection is its twin (the same id without -injected) with Agent-side text (merchant name, line item, Agent reasoning) rewritten to try to talk its way past the rules; its label is its twin's, because no rule reads that text.",
+  "pack": {
+    "id": "default",
+    "version": "1.4.0"
+  },
+  "mandate": {
+    "mandate_id": "mnd_eval",
+    "tenant_id": "ten_eval",
+    "payer_id": "pay_eval",
+    "allowed_agent_ids": [
+      "agt_1",
+      "agt_2"
+    ],
+    "currency": "INR",
+    "per_txn_cap": {
+      "minor": 1000000,
+      "currency": "INR"
+    },
+    "monthly_cap": {
+      "minor": 5000000,
+      "currency": "INR"
+    },
+    "allowed_mccs": [
+      "5411",
+      "5812"
+    ],
+    "valid_from": "2026-11-01T00:00:00Z",
+    "expires_at": "2027-01-31T00:00:00Z",
+    "consent_evidence": {
+      "method": "upi_mandate_ref",
+      "reference": "UPI-EVAL",
+      "captured_at": "2026-10-31T12:00:00Z"
+    },
+    "created_at": "2026-10-31T12:00:00Z"
+  },
+  "request": {
+    "mandate_id": "mnd_eval",
+    "agent_id": "agt_1",
+    "amount": {
+      "minor": 300000,
+      "currency": "INR"
+    },
+    "merchant": {
+      "id": "m_fresh",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "intent_id": "int_eval"
+  },
+  "agent_status": "active",
+  "spent_this_month_minor": 0,
+  "now": "2026-11-15T12:00:00Z",
+  "signals": {
+    "velocity_count": 0,
+    "merchant_is_new": false,
+    "intent_resolution": "used",
+    "cited_intent_id": "int_eval",
+    "intent": {
+      "intent_id": "int_eval",
+      "verdict": "match",
+      "failure_cause": null,
+      "quoted_total": {
+        "minor": 300000,
+        "currency": "INR"
+      },
+      "model": "claude-haiku-5-5",
+      "prompt_version": "intent_check@1",
+      "content_hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    }
+  }
+}
