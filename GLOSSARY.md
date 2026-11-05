@@ -295,3 +295,7 @@ _Avoid_: Test case, fixture, sample
 **Eval report**:
 The published numbers of one run over every Golden case: case counts per file and scenario, false-allow, false-block, wrong Reason codes and the step-up rate. It holds only numbers every machine reproduces, so latency is left out, and CI fails when the committed copy is out of date.
 _Avoid_: Scorecard (that is the page that shows it), eval results, metrics
+
+**Ops console**:
+The web app's read-only scorecard page (`/ops`), built from the committed Eval report: case counts, false-allows, false-blocks, wrong Reason codes and the step-up rate, per scenario and per golden file, with the release it came from. It holds no live data and needs no API key.
+_Avoid_: Dashboard, admin panel, ops dashboard

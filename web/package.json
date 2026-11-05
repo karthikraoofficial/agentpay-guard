@@ -3,10 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/sync-eval-report.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/sync-eval-report.mjs",
     "build": "next build",
     "start": "next start",
+    "prelint": "node scripts/sync-eval-report.mjs",
     "lint": "eslint",
+    "pretypecheck": "node scripts/sync-eval-report.mjs",
     "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {

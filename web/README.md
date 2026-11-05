@@ -1,7 +1,7 @@
 # web/
 
 Next.js (App Router + Tailwind) front end for AgentPay Guard: the consent screen (Phase 3)
-and the dispute viewer (Phase 5). The ops console comes later.
+the dispute viewer (Phase 5) and the Ops console (Phase 6).
 
 ```bash
 cp .env.example .env.local   # NEXT_PUBLIC_API_URL, default http://localhost:8000
@@ -58,3 +58,21 @@ To try it locally:
 2. Open a Dispute on a captured Payment, let the worker build its pack, and mint a link
    with `POST /v1/disputes/{id}/review-link`.
 3. Open the returned URL.
+
+## The Ops console (`/ops`)
+
+A read-only eval scorecard. It shows the Decision case count, false-allows, false-blocks,
+wrong Reason codes, the step-up rate, the counts per scenario and per golden file, and the
+release the numbers came from. It needs no API key and shows no live data.
+
+- It's built from the committed Eval report. Before `dev`, `lint`, `typecheck` and
+  `build`, `scripts/sync-eval-report.mjs` copies `../evals/report.json` into
+  `src/data/eval-report.json` (git-ignored), with `git describe` of the checkout. The page
+  is then prerendered as static HTML.
+- If the build can't see `../evals/report.json`, for example because a Vercel project
+  doesn't include files outside `web/`, it uses `src/data/eval-report.fixture.json` and
+  the page says it is sample data.
+- Latency isn't on it, since it differs by machine; CI gates latency separately.
+
+To refresh it, regenerate the report (`uv run python -m evals.run_evals --write-report`)
+and rebuild.
