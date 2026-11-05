@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# The Ops console copy of evals/report.json, written by scripts/sync-eval-report.mjs
+/src/data/eval-report.json
