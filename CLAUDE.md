@@ -45,6 +45,7 @@ Run from the repo root. These are the same commands CI runs.
 - Contract tests against real vendor APIs: `uv run pytest -m contract -o addopts=""` (not in CI; skip without the vendor key)
 - Register a Razorpay test card for those contract tests (prints the two `AGENTPAY_RAZORPAY_TEST_*` refs for `.env`; test tokens expire within about a day, so re-run before each contract run): `uv run python -m adapters.razorpay.wizard`
 - Hosted demo (ADR-0021; on the VM, with `.env` copied from `.env.production.example`): `docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.prod.yml up -d --build`
+- Provision the hosted demo end to end (interactive; Oracle VM, Langfuse, Vercel, Demo Tenant; never echoes secrets): `bash infra/provision-wizard.sh`. Its stage 1 can run `bash infra/oci-create-vm.sh [--guardrails]` (OCI CLI: network + VM, retries on no capacity; `--guardrails` adds the Always Free quota and spend alert)
 - Production stack smoke test (builds the image, starts the stack from `.env.production.example` on ports 8080/8443, checks `/healthz` through Caddy, tears it down; CI's `deploy` job): `bash infra/smoke-prod.sh`
 - Demo journeys against a deployment on the mock rail (Demo Tenant keys in `.env` as `AGENTPAY_DEMO_AGENT_KEY` and `AGENTPAY_DEMO_TENANT_KEY`; journey 3 needs mock settle and a worker): `uv run python -m demo --base-url <api> [--journey 1|2|3]`
 - Web: `cd web && npm ci && npm run lint && npm run typecheck && npm run build` (CI runs the same in its `web` job)

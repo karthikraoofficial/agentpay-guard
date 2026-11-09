@@ -220,6 +220,17 @@ prod_ask()    { ENV_FILE=$PROD ask "$@"; }
 prod_secret() { ENV_FILE=$PROD ask_secret "$@"; }
 prod_write()  { ENV_FILE=$PROD write_env "$@"; }
 
+# prod_real ask|secret KEY "Prompt" asks until the value is neither empty nor the example's
+# placeholder (Enter on the prompt would otherwise keep `pk-lf-replace-me`).
+prod_real() {
+  local how="$1" key="$2" prompt="$3"
+  while :; do
+    if [[ "$how" == secret ]]; then prod_secret "$key" "$prompt"; else prod_ask "$key" "$prompt"; fi
+    [[ -n "${!key}" && "${!key}" != *replace* ]] && return
+    warn "That's empty or still the example's placeholder; paste the real value."
+  done
+}
+
 # vm CMD runs CMD on the VM over SSH.
 vm() { ssh -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 "$VM_USER@$VM_IP" "$@"; }
 
@@ -235,8 +246,27 @@ stage "Oracle Cloud: create the Always Free VM"
 say "One Always Free Ampere (ARM) VM runs the whole stack (ADR-0021)."
 note "Always Free Ampere is 2 OCPUs and 12 GB in total. Oracle may reclaim an instance"
 note "whose CPU, network and memory all stay under 20% for 7 days."
+say "Have an Oracle account first (a card is asked for; Always Free isn't charged)."
+say "The CLI route creates the network, opens 22/80/443 and keeps retrying while the"
+say "region is out of Ampere capacity, which on a free account can last days. A Pay As"
+say "You Go account gets capacity far sooner; add guardrails to keep it at zero cost."
+if command -v oci >/dev/null && confirm "Create the VM with the OCI CLI (infra/oci-create-vm.sh)?"; then
+  guard=""; confirm "Is the account Pay As You Go? (adds an Always Free quota and a spend alert)" && guard="--guardrails"
+  bash infra/oci-create-vm.sh $guard | tee .oci-create.log
+  VM_IP=$(grep '^PUBLIC_IP=' .oci-create.log | tail -1 | cut -d= -f2); rm -f .oci-create.log
+  if [[ -n "$VM_IP" ]]; then
+    note_write VM_IP "$VM_IP"
+    note_write SSH_KEY "$HOME/.ssh/agentpay-oci"
+    note_write VM_USER ubuntu
+    note_write OCI_CLI_ROUTE yes
+  else
+    warn "The CLI route didn't finish; create the VM in the console instead."
+  fi
+elif ! command -v oci >/dev/null; then
+  note "To use the CLI route instead: uv tool install oci-cli, then run this wizard again."
+fi
+if [[ -z "${VM_IP:-}" || "${OCI_CLI_ROUTE:-}" != yes ]]; then
 open_url "https://cloud.oracle.com/compute/instances/create"
-step "Sign in (or sign up; a card is asked for but Always Free isn't charged)."
 step "Name: agentpay-guard. Use your home region: Always Free only counts there."
 step "Image and shape → Change image → Canonical Ubuntu 24.04 (the aarch64 build)."
 step "Change shape → Ampere → VM.Standard.A1.Flex → 2 OCPUs, 12 GB memory."
@@ -254,6 +284,8 @@ note_write SSH_KEY "$SSH_KEY"
 note_ask VM_USER "SSH user (Enter for ubuntu):"
 VM_USER="${VM_USER:-ubuntu}"
 note_write VM_USER "$VM_USER"
+note_write OCI_CLI_ROUTE no
+fi
 
 # ── 2 ──────────────────────────────────────────────────────────────────────
 stage "Connect to the VM"
@@ -270,11 +302,15 @@ pause
 stage "Open ports 80 and 443"
 say "Two firewalls must both let HTTP and HTTPS in: Oracle's security list, and the"
 say "VM's own iptables rules (Oracle's Ubuntu images reject everything but SSH)."
-open_url "https://cloud.oracle.com/networking/vcns"
-step "Open the VCN made with the VM → Subnets → the public subnet → its Default Security List."
-step "Add Ingress Rules: Source CIDR 0.0.0.0/0, IP protocol TCP, Destination port 80."
-step "Add another: Source CIDR 0.0.0.0/0, TCP, Destination port 443."
-pause "Press Enter once both rules are saved"
+if [[ "${OCI_CLI_ROUTE:-}" == yes ]]; then
+  printf '  %s✓ security list already allows 80 and 443 (made by the CLI route)%s\n' "$GREEN" "$RESET"
+else
+  open_url "https://cloud.oracle.com/networking/vcns"
+  step "Open the VCN made with the VM → Subnets → the public subnet → its Default Security List."
+  step "Add Ingress Rules: Source CIDR 0.0.0.0/0, IP protocol TCP, Destination port 80."
+  step "Add another: Source CIDR 0.0.0.0/0, TCP, Destination port 443."
+  pause "Press Enter once both rules are saved"
+fi
 if confirm "Insert iptables ACCEPT rules for 80 and 443 on the VM, and save them?"; then
   vm 'set -e
     for port in 443 80; do
@@ -313,8 +349,8 @@ open_url "https://cloud.langfuse.com"
 step "Sign in (Hobby is free) and create an organization and a project: agentpay-guard."
 step "Project Settings → API Keys → Create new API keys."
 note "Use the region you signed up in: EU is cloud.langfuse.com, US is us.cloud.langfuse.com."
-prod_ask AGENTPAY_LANGFUSE_PUBLIC_KEY "Paste the public key (pk-lf-…):"
-prod_secret AGENTPAY_LANGFUSE_SECRET_KEY "Paste the secret key (sk-lf-…, hidden):"
+prod_real ask AGENTPAY_LANGFUSE_PUBLIC_KEY "Paste the public key (pk-lf-…):"
+prod_real secret AGENTPAY_LANGFUSE_SECRET_KEY "Paste the secret key (sk-lf-…, hidden):"
 prod_ask AGENTPAY_LANGFUSE_HOST "Langfuse host (Enter keeps it; EU https://cloud.langfuse.com):"
 AGENTPAY_LANGFUSE_HOST="${AGENTPAY_LANGFUSE_HOST:-https://cloud.langfuse.com}"
 prod_write AGENTPAY_LANGFUSE_PUBLIC_KEY "$AGENTPAY_LANGFUSE_PUBLIC_KEY"
@@ -330,7 +366,7 @@ open_url "https://console.anthropic.com/settings/keys"
 step "Create Key → name it agentpay-guard-demo → copy it."
 step "Check Plans & Billing has credit; without it every Intent check fails closed to unknown."
 note "Optional: Limits → set a monthly spend limit for the workspace."
-prod_secret AGENTPAY_ANTHROPIC_API_KEY "Paste the key (sk-ant-…, hidden):"
+prod_real secret AGENTPAY_ANTHROPIC_API_KEY "Paste the key (sk-ant-…, hidden):"
 prod_write AGENTPAY_ANTHROPIC_API_KEY "$AGENTPAY_ANTHROPIC_API_KEY"
 pause
 

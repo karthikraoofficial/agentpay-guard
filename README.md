@@ -311,13 +311,22 @@ The run for #85, with ids and timings, is posted on the Phase 4 PRD (#74).
 
 ## Deploy (hosted demo)
 
+**Live:**
+- **Web app:** https://agentpay-guard-bice.vercel.app, with the eval scorecard at [/ops](https://agentpay-guard-bice.vercel.app/ops).
+- **API:** https://api.129-159-239-74.sslip.io, with health at [/healthz](https://api.129-159-239-74.sslip.io/healthz) and the interactive docs at [/docs](https://api.129-159-239-74.sslip.io/docs).
+
+It runs on the mock rail, and no real money moves.
+
 The hosted demo costs nothing except model calls (ADR-0021):
 - One Oracle Cloud Always Free VM runs the same compose stack, plus `infra/docker-compose.prod.yml`.
 - The web app is on Vercel Hobby.
 - Traces go to Langfuse Hobby.
 
 To put it live, run `bash infra/provision-wizard.sh` from the repo root. It walks you through 11 stages:
-- creating the Oracle VM and opening ports 80 and 443 (in Oracle's security list and on the VM's own firewall);
+- creating the Oracle VM and opening ports 80 and 443 (in Oracle's security list and on the VM's own firewall). With the OCI CLI installed (`uv tool install oci-cli`), stage 1 runs `infra/oci-create-vm.sh`, which:
+  - creates the network and the VM;
+  - keeps retrying while the region is out of Ampere capacity;
+  - with `--guardrails`, for a Pay As You Go account, adds an Always Free quota and a spend alert;
 - installing Docker;
 - creating the Langfuse project, the Anthropic key and the Vercel project;
 - writing the VM's `.env`, starting the stack and creating the Demo Tenant;
