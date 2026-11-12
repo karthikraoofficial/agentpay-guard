@@ -31,7 +31,7 @@ services:
       - temporaldata:/home/temporal
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.115.1
+    image: otel/opentelemetry-collector-contrib:0.165.0
     # Langfuse is added only when its public key is set. Keys reach the collector by
     # environment and are never written in its config.
     command: --config=/etc/otelcol/config.yaml ${AGENTPAY_LANGFUSE_PUBLIC_KEY:+--config=/etc/otelcol/langfuse.yaml}
