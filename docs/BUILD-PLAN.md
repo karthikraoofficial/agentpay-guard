@@ -8,15 +8,15 @@ AgentPay Guard is a trust layer that decides, in real time, whether a payment an
 
 The MVP is done when a reviewer at Stripe or Razorpay can watch three journeys run end to end on a live URL and inspect the evals behind them.
 
-| Criterion | Target for MVP |
-| --- | --- |
-| Demo journeys | 3 run end to end: clean allow, step-up consent, a disputed captured Payment with a signed-off Evidence pack |
-| Decision latency (hot path) | p95 under 150 ms, no LLM call on this path |
-| Eval set | 200+ labelled agent transactions, run in CI on every PR |
-| Decision quality | False-allow rate and false-block rate published per release |
-| Replay | Any past decision re-runs byte-identical from its audit record |
-| Real rails | At least one sandbox wired: Razorpay test mode or Stripe test mode |
-| Deployed | Public URL (front end) + API, with a 3-minute walkthrough video |
+| Criterion | Target for MVP | Shipped in v1.0.0 |
+| --- | --- | --- |
+| Demo journeys | 3 run end to end: clean allow, step-up consent, a disputed captured Payment with a signed-off Evidence pack | All three run on the live URL with the demo CLI (`python -m demo`) |
+| Decision latency (hot path) | p95 under 150 ms, no LLM call on this path | `POST /v1/decisions` p95 under 150 ms, gated by the perf tests in CI; no `ModelGateway` in `core/policy` (architecture test) |
+| Eval set | 200+ labelled agent transactions, run in CI on every PR | 203 Decision cases in `evals/golden/`, plus 27 Dispute and 18 narrative-check cases, run in CI |
+| Decision quality | False-allow rate and false-block rate published per release | 0 false-allows and 0 false-blocks, in the Eval report, the README and the Ops console |
+| Replay | Any past decision re-runs byte-identical from its audit record | `api.admin replay`; every Decision in the test suite is replayed |
+| Real rails | At least one sandbox wired: Razorpay test mode or Stripe test mode | Razorpay test mode (card recurring); the hosted demo runs on the mock rail |
+| Deployed | Public URL (front end) + API, with a 3-minute walkthrough video | Vercel web app + API on an Oracle Always Free VM; video linked from the README |
 
 Out of scope for the MVP: real money, live card data, multi-region, and a production on-call setup. These are listed in the go-live checklist at the end.
 
