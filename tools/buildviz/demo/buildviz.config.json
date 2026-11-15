@@ -1,0 +1,13 @@
+{
+  "project": "Demo web app",
+  "concurrency": 4,
+  "modules": [
+    { "id": "shared",  "label": "Shared library",   "phase": "Phase 1 · Foundation", "description": "Types and utilities used by every service.", "cmd": "node -e \"setTimeout(()=>console.log('shared compiled'),700)\"" },
+    { "id": "db",      "label": "Database schema",  "phase": "Phase 1 · Foundation", "cmd": "node -e \"setTimeout(()=>console.log('schema migrated'),500)\"" },
+    { "id": "auth",    "label": "Auth service",     "phase": "Phase 2 · Services", "cmd": "node -e \"setTimeout(()=>console.log('auth compiled'),900)\"", "dependsOn": ["shared", "db"] },
+    { "id": "billing", "label": "Billing service",  "phase": "Phase 2 · Services", "cmd": "node -e \"setTimeout(()=>console.log('billing compiled'),1100)\"", "dependsOn": ["shared", "db"] },
+    { "id": "web",     "label": "Web UI",           "phase": "Phase 3 · Frontend", "cmd": "node -e \"setTimeout(()=>console.log('web bundled'),1000)\"", "dependsOn": ["auth", "billing"] },
+    { "id": "admin",   "label": "Admin UI",         "phase": "Phase 3 · Frontend", "cmd": "node -e \"setTimeout(()=>console.log('admin bundled'),800)\"", "dependsOn": ["auth"] },
+    { "id": "e2e",     "label": "End-to-end checks","phase": "Phase 4 · Verify", "cmd": "node -e \"setTimeout(()=>console.log('e2e passed'),600)\"", "dependsOn": ["web", "admin"] }
+  ]
+}

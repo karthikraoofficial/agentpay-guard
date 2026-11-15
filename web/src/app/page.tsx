@@ -5,6 +5,13 @@ export default function Home() {
     <main className="mx-auto flex max-w-2xl flex-1 flex-col justify-center gap-3 px-4 py-16">
       <h1 className="text-2xl font-semibold">AgentPay Guard</h1>
       <p>
+        <Link href="/how-it-works" className="underline">
+          How AgentPay Guard works
+        </Link>
+        : a map of how a payment is decided, how the person is asked, and how a dispute is
+        handled.
+      </p>
+      <p>
         Payers reach the consent screen through the Consent link their provider sends them,
         and reviewers reach the dispute viewer through a Review link.
       </p>

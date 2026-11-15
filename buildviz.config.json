@@ -1,0 +1,252 @@
+{
+  "project": "AgentPay Guard",
+  "concurrency": 4,
+  "modules": [
+    {
+      "id": "domain",
+      "label": "core/domain",
+      "phase": "1 Domain & policy",
+      "description": "The basic building blocks: money, spending rules, decisions, records, consent and disputes.",
+      "cmd": "uv run ruff check core/domain && uv run python -m compileall -q core/domain"
+    },
+    {
+      "id": "policy",
+      "label": "core/policy",
+      "phase": "1 Domain & policy",
+      "description": "The decision maker: fixed rules that say allow, ask the person, or block. No AI inside.",
+      "cmd": "uv run ruff check core/policy && uv run python -m compileall -q core/policy",
+      "dependsOn": [
+        "domain"
+      ]
+    },
+    {
+      "id": "core-services",
+      "label": "core (ports, settings, services)",
+      "phase": "1 Domain & policy",
+      "description": "Shared business logic: settings, payments, disputes, evidence and the background job queue.",
+      "cmd": "uv run ruff check core --extend-exclude core/domain,core/policy,core/signals && uv run python -m compileall -q -l core",
+      "dependsOn": [
+        "domain",
+        "policy"
+      ]
+    },
+    {
+      "id": "signals",
+      "label": "core/signals",
+      "phase": "1 Domain & policy",
+      "description": "The warning-sign checks, including the AI check that the cart matches what the person asked for.",
+      "cmd": "uv run ruff check core/signals && uv run python -m compileall -q core/signals",
+      "dependsOn": [
+        "domain",
+        "core-services"
+      ]
+    },
+    {
+      "id": "adapters-memory",
+      "label": "adapters/memory",
+      "phase": "2 Adapters",
+      "description": "Stand-in versions of the database, AI and payment provider, used in tests and the demo.",
+      "cmd": "uv run ruff check adapters/memory && uv run python -m compileall -q adapters/memory",
+      "dependsOn": [
+        "domain",
+        "core-services"
+      ]
+    },
+    {
+      "id": "adapters-postgres",
+      "label": "adapters/postgres",
+      "phase": "2 Adapters",
+      "description": "Saves and loads everything in the database, kept separate for each business.",
+      "cmd": "uv run ruff check adapters/postgres && uv run python -m compileall -q adapters/postgres",
+      "dependsOn": [
+        "domain",
+        "core-services"
+      ]
+    },
+    {
+      "id": "adapters-claude",
+      "label": "adapters/claude",
+      "phase": "2 Adapters",
+      "description": "Talks to the Claude AI model and logs what each call cost and how long it took.",
+      "cmd": "uv run ruff check adapters/claude && uv run python -m compileall -q adapters/claude",
+      "dependsOn": [
+        "core-services"
+      ]
+    },
+    {
+      "id": "adapters-razorpay",
+      "label": "adapters/razorpay",
+      "phase": "2 Adapters",
+      "description": "Talks to Razorpay, the payment provider, in test mode only.",
+      "cmd": "uv run ruff check adapters/razorpay && uv run python -m compileall -q adapters/razorpay",
+      "dependsOn": [
+        "domain",
+        "core-services"
+      ]
+    },
+    {
+      "id": "adapters-otel",
+      "label": "adapters/otel",
+      "phase": "2 Adapters",
+      "description": "Sends timing and tracing data to the monitoring tools.",
+      "cmd": "uv run ruff check adapters/otel && uv run python -m compileall -q adapters/otel",
+      "dependsOn": [
+        "core-services"
+      ]
+    },
+    {
+      "id": "adapters-webhooks",
+      "label": "adapters/webhooks",
+      "phase": "2 Adapters",
+      "description": "Sends signed updates to the businesses that use the service.",
+      "cmd": "uv run ruff check adapters/webhooks && uv run python -m compileall -q adapters/webhooks",
+      "dependsOn": [
+        "core-services"
+      ]
+    },
+    {
+      "id": "adapters-wiring",
+      "label": "adapters (gateways, rails)",
+      "phase": "2 Adapters",
+      "description": "Picks which AI model and payment provider to use, based on the settings.",
+      "cmd": "uv run ruff check adapters/gateways.py adapters/rails.py adapters/system_clock.py && uv run python -m compileall -q -l adapters",
+      "dependsOn": [
+        "core-services",
+        "adapters-claude",
+        "adapters-memory",
+        "adapters-razorpay"
+      ]
+    },
+    {
+      "id": "agents",
+      "label": "agents",
+      "phase": "3 Async & API",
+      "description": "The AI helper that writes the dispute summary from the collected facts.",
+      "cmd": "uv run ruff check agents && uv run python -m compileall -q agents",
+      "dependsOn": [
+        "domain",
+        "core-services"
+      ]
+    },
+    {
+      "id": "workflows",
+      "label": "workflows (Temporal)",
+      "phase": "3 Async & API",
+      "description": "Background jobs that wait for a person's answer and build the dispute case.",
+      "cmd": "uv run ruff check workflows && uv run python -m compileall -q workflows",
+      "dependsOn": [
+        "domain",
+        "core-services",
+        "adapters-wiring",
+        "adapters-memory",
+        "adapters-otel",
+        "adapters-postgres",
+        "adapters-webhooks",
+        "agents"
+      ]
+    },
+    {
+      "id": "api",
+      "label": "api (FastAPI)",
+      "phase": "3 Async & API",
+      "description": "The web service that agents and businesses call, plus the admin commands.",
+      "cmd": "uv run ruff check api && uv run python -m compileall -q api",
+      "dependsOn": [
+        "domain",
+        "policy",
+        "core-services",
+        "signals",
+        "adapters-wiring",
+        "adapters-otel",
+        "adapters-postgres",
+        "adapters-razorpay",
+        "adapters-webhooks",
+        "workflows"
+      ]
+    },
+    {
+      "id": "demo",
+      "label": "demo CLI",
+      "phase": "3 Async & API",
+      "description": "A command-line tool that runs the three demo stories against a live server.",
+      "cmd": "uv run ruff check demo && uv run python -m compileall -q demo",
+      "dependsOn": [
+        "domain",
+        "core-services"
+      ]
+    },
+    {
+      "id": "web",
+      "label": "web (Next.js)",
+      "phase": "3 Async & API",
+      "description": "The website: the consent screen, the dispute viewer, the ops scorecard and the How it works map.",
+      "cwd": "web",
+      "cmd": "npm run lint && npm run typecheck && npm run build",
+      "timeoutSec": 600
+    },
+    {
+      "id": "format",
+      "label": "ruff format",
+      "phase": "4 Gates",
+      "description": "Checks that all the Python code is formatted the standard way.",
+      "cmd": "uv run ruff format --check .",
+      "dependsOn": [
+        "api",
+        "workflows",
+        "demo"
+      ]
+    },
+    {
+      "id": "mypy",
+      "label": "mypy --strict",
+      "phase": "4 Gates",
+      "description": "Checks that the Python code's types all fit together.",
+      "cmd": "uv run mypy",
+      "dependsOn": [
+        "api",
+        "workflows",
+        "demo"
+      ],
+      "timeoutSec": 600
+    },
+    {
+      "id": "evals",
+      "label": "golden evals",
+      "phase": "4 Gates",
+      "description": "Runs every hand-labelled test case and fails if any decision comes out wrong.",
+      "cmd": "uv run ruff check evals && uv run python -m evals.run_evals",
+      "dependsOn": [
+        "policy",
+        "signals",
+        "agents",
+        "adapters-claude",
+        "adapters-memory"
+      ],
+      "timeoutSec": 600
+    },
+    {
+      "id": "pytest",
+      "label": "pytest",
+      "phase": "4 Gates",
+      "description": "Runs the full automated test suite. Needs the local database and services running.",
+      "cmd": "uv run pytest",
+      "dependsOn": [
+        "mypy"
+      ],
+      "timeoutSec": 1200
+    },
+    {
+      "id": "release",
+      "label": "v1.0.0 ready",
+      "phase": "4 Gates",
+      "description": "Everything above has passed, so the release is good to go.",
+      "dependsOn": [
+        "format",
+        "mypy",
+        "evals",
+        "pytest",
+        "web"
+      ]
+    }
+  ]
+}
