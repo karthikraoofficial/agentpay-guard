@@ -1,0 +1,10 @@
+{
+  "name": "buildviz",
+  "version": "1.0.0",
+  "description": "Visualise a module-by-module build as a branching node graph (zero dependencies)",
+  "bin": { "buildviz": "buildviz.js" },
+  "scripts": { "start": "node buildviz.js", "demo": "node buildviz.js --config demo/buildviz.config.json" },
+  "engines": { "node": ">=18" },
+  "license": "MIT",
+  "private": true
+}

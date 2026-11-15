@@ -49,6 +49,7 @@ Run from the repo root. These are the same commands CI runs.
 - Production stack smoke test (builds the image, starts the stack from `.env.production.example` on ports 8080/8443, checks `/healthz` through Caddy, tears it down; CI's `deploy` job): `bash infra/smoke-prod.sh`
 - Demo journeys against a deployment on the mock rail (Demo Tenant keys in `.env` as `AGENTPAY_DEMO_AGENT_KEY` and `AGENTPAY_DEMO_TENANT_KEY`; journey 3 needs mock settle and a worker): `uv run python -m demo --base-url <api> [--journey 1|2|3]`
 - Web: `cd web && npm ci && npm run lint && npm run typecheck && npm run build` (CI runs the same in its `web` job)
+- Module build graph (buildviz, Node 18+): `node tools/buildviz/buildviz.js` serves it at http://localhost:4477; `node tools/buildviz/buildviz.js run [<module-id>] [--downstream]` builds from the terminal (logs in `.buildviz/logs/<id>.log`). Modules and their `dependsOn` edges are in `buildviz.config.json`, which follows the real imports between packages: register a new top-level package there. Its `pytest` node needs local infra up. Don't edit `.buildviz/`
 
 ## How to work
 - One SPEC section per task. Plan first, then code, then tests, then run evals.

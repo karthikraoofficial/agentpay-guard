@@ -198,7 +198,8 @@ Allow, step-up and block count decision-stage cases; approval re-checks are labe
 | `evals/` | Labelled golden cases and the eval gate; the live Intent check eval set |
 | `migrations/` | Alembic migrations |
 | `infra/` | Docker Compose for local dev, the OTel collector configs, and the hosted demo's production overlay, Caddyfile and smoke test |
-| `web/` | Next.js front end: the consent screen, the dispute viewer and the Ops console (`/ops`, the eval scorecard) |
+| `web/` | Next.js front end: the consent screen, the dispute viewer, the Ops console (`/ops`, the eval scorecard) and a plain-English map of the whole flow (`/how-it-works`, linked from the home page) |
+| `tools/buildviz/` | A zero-dependency module build graph. `node tools/buildviz/buildviz.js` serves it at http://localhost:4477, with modules and dependencies taken from `buildviz.config.json` |
 
 ## Signals (Policy packs from `default@1.1.0`)
 
