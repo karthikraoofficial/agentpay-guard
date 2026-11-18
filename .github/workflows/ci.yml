@@ -60,7 +60,7 @@ jobs:
 
       - name: Collector configs are valid (console only, and with the Langfuse overlay)
         run: |
-          image=otel/opentelemetry-collector-contrib:0.115.1
+          image=otel/opentelemetry-collector-contrib:0.165.0
           docker run --rm -v "$PWD/infra:/cfg:ro" "$image" validate --config=/cfg/otel-collector.yaml
           docker run --rm -v "$PWD/infra:/cfg:ro" \
             -e LANGFUSE_PUBLIC_KEY=pk -e LANGFUSE_SECRET_KEY=sk -e LANGFUSE_HOST=https://cloud.langfuse.com \

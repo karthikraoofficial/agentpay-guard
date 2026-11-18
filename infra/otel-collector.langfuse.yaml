@@ -8,7 +8,7 @@ extensions:
       password: ${env:LANGFUSE_SECRET_KEY}
 
 exporters:
-  otlphttp/langfuse:
+  otlp_http/langfuse:
     endpoint: ${env:LANGFUSE_HOST}/api/public/otel
     auth:
       authenticator: basicauth/langfuse
@@ -17,4 +17,4 @@ service:
   extensions: [basicauth/langfuse]
   pipelines:
     traces:
-      exporters: [debug, otlphttp/langfuse]
+      exporters: [debug, otlp_http/langfuse]
