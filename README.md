@@ -4,12 +4,19 @@ A trust layer for payments that AI agents make on a user's behalf. For each agen
 payment it decides, in real time, whether to **allow** it, ask the user for fresh consent
 (**step_up**), or **block** it, and it builds the evidence pack when a payment is disputed.
 
-> Status: `v0.2.0`, Phase 3. On top of Mandates, the deterministic policy engine and the
-> audit log (`v0.1.0`), and four Signals (Phase 2), a step_up is now a durable consent loop:
-> the Payer approves or declines through the Tenant or a hosted Consent link, approval
-> re-checks the Mandate, and a Temporal workflow notifies and expires the request. The
-> active Policy pack is `default@1.3.0`. See [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md) for
-> the plan and GitHub Issues for PRDs and tickets.
+> Status: `v1.0.0`, the MVP. Mandates, the deterministic policy engine and the audit log
+> (`v0.1.0`); four Signals (Phase 2); a durable step-up consent loop (`v0.2.0`); the
+> Razorpay test-mode rail (Phase 4); cited, signed-off dispute Evidence packs (`v0.3.0`);
+> and 203 golden eval cases in CI, an Ops console and a live deployment (Phase 6). The
+> active Policy pack is `default@1.4.0`. See [Deploy (hosted demo)](#deploy-hosted-demo)
+> for the live URL, [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md) for the plan and GitHub Issues
+> for PRDs and tickets.
+
+**Watch the 3-minute walkthrough:** the three demo journeys on the live deployment (an
+allow, a step-up the Payer approves, and a disputed Payment whose Evidence pack is signed
+off), then the eval scorecard and a model call traced in Langfuse.
+
+[![AgentPay Guard: 3-minute walkthrough](https://img.youtube.com/vi/PYR-Du3GSW0/hqdefault.jpg)](https://www.youtube.com/watch?v=PYR-Du3GSW0)
 
 ## Design in one paragraph
 
@@ -136,9 +143,9 @@ bash infra/smoke-prod.sh                 # the production stack, /healthz throug
 
 The tests need local Postgres running (the `docker compose` step above) and a `.env`. They create and migrate their own `<database>_test` database on each run, so your dev data is left alone.
 
-The Intent check has its own eval set: 43 labelled Payer-instruction and cart pairs in `evals/intent/cases.jsonl`. 19 of them are prompt-injection attempts, each tagged with its technique: a direct instruction, role-play, encoded or disguised text (base64, spaced letters, fullwidth and Hindi), an instruction hidden in a cart line, or a breakout that tries to close the cart block. `uv run python -m evals.run_intent_evals` runs them against the real model with the production prompt and settings. It reports false-match and false-mismatch rates, and a table per injection technique of how many held, how many were talked into a match and how many got no answer. It costs about $0.003 a run. Run it by hand and before each release. It exits 1 if any injection attempt gets a match, and 3 if any injection case gets no answer (a timeout, an API error, or no credit), since a failed call shows nothing about the model. The first run of `intent_check@1` on Claude Haiku 5.5 scored 30/30 on the first 30 cases, with no false matches.
+The Intent check has its own eval set: 43 labelled Payer-instruction and cart pairs in `evals/intent/cases.jsonl`. 19 of them are prompt-injection attempts, each tagged with its technique: a direct instruction, role-play, encoded or disguised text (base64, spaced letters, fullwidth and Hindi), an instruction hidden in a cart line, or a breakout that tries to close the cart block. `uv run python -m evals.run_intent_evals` runs them against the real model with the production prompt and settings. It reports false-match and false-mismatch rates, and a table per injection technique of how many held, how many were talked into a match and how many got no answer. It costs about $0.003 a run. Run it by hand and before each release. It exits 1 if any injection attempt gets a match, and 3 if any injection case gets no answer (a timeout, an API error, or no credit), since a failed call shows nothing about the model. The first run of `intent_check@1` on Claude Haiku 5.5 scored 30/30 on the first 30 cases, with no false matches. The v1.0.0 release run scored 43/43, with no false matches and every injection held.
 
-The dispute evidence agent has one too: 12 labelled Evidence bundles in `evals/dispute_narratives/cases.jsonl`, 4 of them with prompt injections in the merchant name or the Agent's reasoning, each listing phrases an accepted narrative must never contain. `uv run python -m evals.run_dispute_evals` runs them through the production writer and real model. It reports how many narratives the citation checker accepted, needed the retry or fell back to the narrative written by code, and the cost: about $0.12 a run. Quoting the Agent-side text verbatim is reporting it, not following it, so that text is taken out before the check. It exits 1 if an accepted narrative repeats an injection in its own words, and prints that narrative. Run it by hand and before each release. On `dispute_narrative@1` with Claude Sonnet 5.5, all 12 narratives were accepted first time and no injection was followed.
+The dispute evidence agent has one too: 12 labelled Evidence bundles in `evals/dispute_narratives/cases.jsonl`, 4 of them with prompt injections in the merchant name or the Agent's reasoning, each listing phrases an accepted narrative must never contain. `uv run python -m evals.run_dispute_evals` runs them through the production writer and real model. It reports how many narratives the citation checker accepted, needed the retry or fell back to the narrative written by code, and the cost: about $0.12 a run. Quoting the Agent-side text verbatim is reporting it, not following it, so that text is taken out before the check. It exits 1 if an accepted narrative repeats an injection in its own words, and prints that narrative. Run it by hand and before each release. On `dispute_narrative@1` with Claude Sonnet 5.5, all 12 narratives were accepted first time and no injection was followed. At the v1.0.0 release all 12 were again accepted first time, but the run exits 1 on `inject-reasoning-refund`. The model reported the injected text as unsupported, but it paraphrased the text instead of quoting it, so the check counts the paraphrase as the model's own words (#165).
 
 The consent workflow tests run on Temporal's own servers, which `temporalio` downloads on first use, so the default `pytest` run skips them and CI runs them as a separate step: `uv run pytest -m workflow -o addopts=""`. The exit-criterion test kills a real `python -m workflows.worker` process while the workflow waits. A fresh worker then finishes the workflow from Temporal's history, once by an approval signal and once by the expiry timer.
 
@@ -315,6 +322,7 @@ The run for #85, with ids and timings, is posted on the Phase 4 PRD (#74).
 **Live:**
 - **Web app:** https://agentpay-guard-bice.vercel.app, with the eval scorecard at [/ops](https://agentpay-guard-bice.vercel.app/ops).
 - **API:** https://api.129-159-239-74.sslip.io, with health at [/healthz](https://api.129-159-239-74.sslip.io/healthz) and the interactive docs at [/docs](https://api.129-159-239-74.sslip.io/docs).
+- **Walkthrough video:** https://www.youtube.com/watch?v=PYR-Du3GSW0, the demo CLI's three journeys run against these URLs.
 
 It runs on the mock rail, and no real money moves.
 
