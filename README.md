@@ -12,6 +12,12 @@ payment it decides, in real time, whether to **allow** it, ask the user for fres
 > for the live URL, [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md) for the plan and GitHub Issues
 > for PRDs and tickets.
 
+**Watch the 3-minute walkthrough:** the three demo journeys on the live deployment (an
+allow, a step-up the Payer approves, and a disputed Payment whose Evidence pack is signed
+off), then the eval scorecard and a model call traced in Langfuse.
+
+[![AgentPay Guard: 3-minute walkthrough](https://img.youtube.com/vi/PYR-Du3GSW0/hqdefault.jpg)](https://www.youtube.com/watch?v=PYR-Du3GSW0)
+
 ## Design in one paragraph
 
 The decision path is deterministic: a policy engine reads a versioned, content-hashed policy
@@ -316,6 +322,7 @@ The run for #85, with ids and timings, is posted on the Phase 4 PRD (#74).
 **Live:**
 - **Web app:** https://agentpay-guard-bice.vercel.app, with the eval scorecard at [/ops](https://agentpay-guard-bice.vercel.app/ops).
 - **API:** https://api.129-159-239-74.sslip.io, with health at [/healthz](https://api.129-159-239-74.sslip.io/healthz) and the interactive docs at [/docs](https://api.129-159-239-74.sslip.io/docs).
+- **Walkthrough video:** https://www.youtube.com/watch?v=PYR-Du3GSW0, the demo CLI's three journeys run against these URLs.
 
 It runs on the mock rail, and no real money moves.
 
