@@ -39,7 +39,7 @@ Enforced by code from the first commit:
 
 ## Run it locally
 
-Prerequisites: [uv](https://docs.astral.sh/uv/), Docker Desktop, and Node 20+ for `web/`.
+Prerequisites: [uv](https://docs.astral.sh/uv/), Docker Desktop, and Node 22+ for `web/` (what CI runs).
 
 ```bash
 uv sync                                           # Python 3.12 + locked dependencies
