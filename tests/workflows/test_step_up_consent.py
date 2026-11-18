@@ -100,6 +100,17 @@ async def _until(handle: WorkflowHandle[Any, Any], event_type: int, seconds: flo
         await asyncio.sleep(0.2)
 
 
+async def _until_logged(log: Path, process: Any, line: str, seconds: float = 120) -> None:
+    """Wait until the spawned worker writes `line` to its log."""
+    deadline = asyncio.get_running_loop().time() + seconds
+    while line not in log.read_text(encoding="utf-8"):
+        if process.poll() is not None:
+            raise RuntimeError(f"the worker exited with {process.returncode}")
+        if asyncio.get_running_loop().time() > deadline:
+            raise TimeoutError(f"the worker never logged {line!r}")
+        await asyncio.sleep(0.2)
+
+
 def _spawn_worker(env: WorkflowEnvironment, queue: str, database_url: str, log: Path) -> Any:
     """`python -m workflows.worker` as its own process, against the dev server."""
     environ = {
@@ -164,22 +175,31 @@ def _utc(at: datetime) -> str:
 def test_the_workflow_survives_its_worker_being_killed_mid_wait(
     live: Approvals, migrated_database_url: str, tmp_path: Path, ending: str
 ) -> None:
-    csr = live.step_up()["step_up"]["consent_request_id"]
     store = live.api.store
+    csr = ""
 
     async def scenario() -> str:
+        nonlocal csr
         # The real dev server, not the time-skipping one: only a real server moves a task
         # off a dead worker's sticky queue (after ~5 s) so another worker can take it.
         async with await WorkflowEnvironment.start_local() as env:
             queue = _queue()
-            handle = env.client.get_workflow_handle_for(StepUpConsent.run, csr)
             worker_log = tmp_path / "worker.log"
             process = _spawn_worker(env, queue, migrated_database_url, worker_log)
             try:
+                # The Consent request's LIVE_TTL_SECONDS run from the API clock's now, so
+                # create it, on a clock set to real time, only once the worker polls: a
+                # slow start would otherwise use up the TTL, and a workflow that starts
+                # past its expiry sets no timer.
+                await _until_logged(worker_log, process, "consent worker polling")
+                live.api.clock.at = decision_time(datetime.now(UTC))
+                step_up = await asyncio.to_thread(live.step_up)
+                csr = step_up["step_up"]["consent_request_id"]
+                handle = env.client.get_workflow_handle_for(StepUpConsent.run, csr)
                 # The worker's relay starts the workflow from the outbox; it notifies,
                 # then waits on its expiry timer.
                 await _until(handle, EventType.EVENT_TYPE_TIMER_STARTED)
-            except TimeoutError:
+            except (TimeoutError, RuntimeError):
                 process.kill()
                 raise AssertionError(worker_log.read_text(encoding="utf-8")) from None
             process.kill()  # outright: no shutdown, no chance to finish anything
