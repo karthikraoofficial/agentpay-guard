@@ -6,6 +6,7 @@ config`, which renders the stack without starting it, so they need Docker but no
 """
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -67,8 +68,17 @@ def test_langfuse_gets_traces_only_and_keys_come_from_the_environment() -> None:
     overlay = yaml.safe_load((INFRA / "otel-collector.langfuse.yaml").read_text(encoding="utf-8"))
 
     pipelines = overlay["service"]["pipelines"]
-    assert pipelines == {"traces": {"exporters": ["debug", "otlphttp/langfuse"]}}
+    assert pipelines == {"traces": {"exporters": ["debug", "otlp_http/langfuse"]}}
     assert overlay["extensions"]["basicauth/langfuse"]["client_auth"] == {
         "username": "${env:LANGFUSE_PUBLIC_KEY}",
         "password": "${env:LANGFUSE_SECRET_KEY}",
     }
+
+
+def test_ci_validates_the_configs_with_the_collector_compose_runs() -> None:
+    compose = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
+    runs = compose["services"]["otel-collector"]["image"]
+    ci = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    [validates] = re.findall(r"^\s*image=(\S+)$", ci, flags=re.MULTILINE)
+
+    assert validates == runs
