@@ -31,9 +31,9 @@ jobs:
       AGENTPAY_TEMPORAL_ADDRESS: localhost:7233
       AGENTPAY_OTEL_EXPORTER_ENDPOINT: http://localhost:4318
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -87,9 +87,9 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -111,7 +111,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Production stack renders, builds, and answers /healthz through Caddy
         run: bash infra/smoke-prod.sh
