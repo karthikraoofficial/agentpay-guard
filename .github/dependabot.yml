@@ -8,6 +8,19 @@ updates:
     directory: "/web"
     schedule:
       interval: "weekly"
+    ignore:
+      # web/ runs on Node 22 (ci.yml node-version); its types track that major. Raise
+      # together with node-version.
+      - dependency-name: "@types/node"
+        versions: [">=23"]
+      # typescript-eslint, which eslint-config-next lints through, supports TypeScript
+      # below 6.1. Remove once its peer range covers the newer TypeScript (#180).
+      - dependency-name: "typescript"
+        versions: [">=6.1"]
+      # eslint-config-next bundles eslint-plugin-import, -jsx-a11y and -react, which stop
+      # at ESLint 9. Remove once all three accept ESLint 10 (#180).
+      - dependency-name: "eslint"
+        versions: [">=10"]
   - package-ecosystem: "docker-compose"
     directory: "/infra"
     schedule:
