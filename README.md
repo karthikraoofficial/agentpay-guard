@@ -44,11 +44,13 @@ Prerequisites: [uv](https://docs.astral.sh/uv/), Docker Desktop, and Node 22+ fo
 ```bash
 uv sync                                           # Python 3.12 + locked dependencies
 cp .env.example .env                              # the app refuses to start without required values
-docker compose --env-file .env -f infra/docker-compose.yml up -d  # Postgres 16, Temporal dev server, OTel collector
+docker compose --env-file .env -f infra/docker-compose.yml up -d  # Postgres 18, Temporal dev server, OTel collector
 uv run uvicorn api.main:asgi_app --factory --reload
 uv run python -m workflows.worker                 # in a second terminal: the consent worker
 cd web && npm ci && npm run dev                   # in a third: the consent screen, dispute viewer and Ops console on :3000
 ```
+
+Upgrading a local stack from before Postgres 18 (#196): Postgres 18 won't start on the old Postgres 16 volume. Run `bash infra/pg-upgrade.sh` once, then the `up -d` step above. It copies your data into a new `pgdata18` volume by dump and restore and checks every table's row count. The old `pgdata` volume and the dump (in `~/agentpay-pg-upgrade-<time>`) are kept until you remove them by hand (ADR-0022).
 
 Then open http://localhost:8000/healthz (liveness) and http://localhost:8000/docs (OpenAPI).
 The Temporal UI is at http://localhost:8233, where each step_up shows up as a `step_up_consent` workflow named after its Consent request ID.
@@ -351,6 +353,8 @@ docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compo
 docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.prod.yml \
   exec api python -m api.admin create-tenant "Demo"   # the Demo Tenant; prints its keys once
 ```
+
+To move the hosted demo's Postgres to a new major version, run `bash infra/pg-upgrade.sh --prod` on the VM after pulling, then the `up -d --build` step below. It stops the stack, copies the database into the new volume, and checks every table's row count. The `migrate` service then runs on the new database. The old volume and the dump stay as the rollback (ADR-0022).
 
 What the production overlay does:
 - **One image, three services.** The root `Dockerfile` builds a single image that runs the API, the worker and a one-shot `migrate` service. The API and worker wait until migrations have finished.

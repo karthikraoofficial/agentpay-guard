@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16.6
+        image: postgres:18.7
         env:
           POSTGRES_USER: agentpay
           POSTGRES_PASSWORD: agentpay # CI-only throwaway database
