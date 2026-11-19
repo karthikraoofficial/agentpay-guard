@@ -175,7 +175,7 @@ A signed message from the rail saying how a Rail charge ended, which settles its
 _Avoid_: Callback, notification, Tenant webhook (that one goes to a Tenant)
 
 **Reconciliation**:
-Asking the rail how a Payment ended when no Rail webhook has said so after a while, and settling it the same way a webhook would. A Payment the rail has no Rail charge for is failed, never charged late.
+Asking the rail how a Payment or Refund ended when no Rail webhook has said so after a while, and settling it the same way a webhook would. A Payment the rail has no Rail charge for is failed, never charged late; a Refund the rail never had is failed, so no money moved and it can be asked for again.
 _Avoid_: Retry, polling
 
 **Mock settle**:

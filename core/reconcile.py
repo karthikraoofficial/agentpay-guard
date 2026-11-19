@@ -9,21 +9,35 @@ Decision Voided rather than charged late: no money moved, and the Mandate may ha
 changed since (ADR-0016). Only a Payment the rail never answered for is treated so; one
 the rail answered for (with a rail payment id or a debit time) but has no charge for is a
 lookup fault, retried. A Payment in its Pre-debit notice period is left alone.
+
+Pending Refunds are swept the same way (#209), by Refund id. One the rail has no refund
+for and never answered for never reached it: it is failed, so the Tenant can try again,
+and no money moved. One the rail answered for but can't find is a lookup fault, retried.
 """
 
 import logging
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Protocol
 
 from core.charges import apply_charge
 from core.domain.decisions import decision_time
-from core.ports import Clock, PaymentRail, RailCharge, TenantDirectory, UnitOfWork
+from core.ports import (
+    Clock,
+    PaymentRail,
+    RailCharge,
+    RailRefund,
+    TenantDirectory,
+    UnitOfWork,
+)
+from core.refunds import record_refund
 
 log = logging.getLogger(__name__)
 
 # The failure code of a Payment the rail has no charge for.
 RAIL_CHARGE_MISSING = "RAIL_CHARGE_MISSING"
+# The failure code of a Refund the rail has no refund for.
+RAIL_REFUND_MISSING = "RAIL_REFUND_MISSING"
 
 
 class SweepStore(UnitOfWork, TenantDirectory, Protocol):
@@ -66,6 +80,42 @@ def sweep(store: SweepStore, rail: PaymentRail, clock: Clock, older_than: timede
             log.warning(
                 "reconciling Payment %s for Tenant %s failed: %s",
                 payment_id,
+                tenant_id,
+                type(exc).__name__,
+                exc_info=True,
+            )
+    refunds = _sweep_refunds(store, rail, now - max(older_than, rail.lookup_lag), now)
+    return SweepResult(checked=len(due) + refunds.checked, errors=errors + refunds.errors)
+
+
+def _sweep_refunds(
+    store: SweepStore, rail: PaymentRail, created_before: datetime, now: datetime
+) -> SweepResult:
+    due = store.pending_refunds(created_before)
+    errors = 0
+    for tenant_id, refund_id in due:
+        try:
+            answer = rail.get_refund(tenant_id, refund_id)
+            with store.transaction(tenant_id) as tx:
+                refund = tx.lock_refund(refund_id)
+                if refund is None:
+                    continue
+                if answer is None and refund.rail_refund_id is not None:
+                    raise LookupError(f"the rail lost track of Refund {refund_id}")
+                if answer is None:
+                    log.warning("Refund %s has no rail refund; failing it", refund_id)
+                    answer = RailRefund(
+                        refund_id=refund_id,
+                        status="failed",
+                        amount=refund.amount,
+                        failure_code=RAIL_REFUND_MISSING,
+                    )
+                record_refund(tx, refund_id, answer, now)
+        except Exception as exc:  # one Refund's trouble never stops the sweep
+            errors += 1
+            log.warning(
+                "reconciling Refund %s for Tenant %s failed: %s",
+                refund_id,
                 tenant_id,
                 type(exc).__name__,
                 exc_info=True,

@@ -11,6 +11,7 @@ notice can fail (`token_whose_notice_fails`): the charge is then failed with no 
 
 import threading
 from datetime import datetime, timedelta
+from typing import Literal
 
 from core.domain.money import Money
 from core.domain.parties import TenantId
@@ -51,6 +52,8 @@ class MockRail:
         # (tenant, Refund id) -> (its Payment, the answer given)
         self._refunds: dict[tuple[TenantId, RefundId], tuple[PaymentId, RailRefund]] = {}
         self._refunds_made: dict[tuple[TenantId, PaymentId], int] = {}
+        self._hold_refunds = False
+        self._time_out_refunds = False
         self._lock = threading.Lock()  # the API calls the rail from several threads
 
     @staticmethod
@@ -177,7 +180,9 @@ class MockRail:
     ) -> RailRefund:
         """Processed at once, from a charge this rail debited, never beyond its amount in
         all. The same Refund id always gets the same answer. The charges live in this
-        process, so a Payment debited before a restart can't be refunded (it fails)."""
+        process, so a Payment debited before a restart can't be refunded (it fails).
+        After `hold_refunds` a refund answers pending until `finish_refund`; after
+        `time_out_refunds` it is made and then the call times out."""
         with self._lock:
             done = self._refunds.get((tenant_id, refund_id))
             if done is not None:
@@ -186,7 +191,7 @@ class MockRail:
             refunded = sum(
                 r.amount.minor
                 for (t, _), (p, r) in self._refunds.items()
-                if (t, p) == (tenant_id, payment_id) and r.status == "processed"
+                if (t, p) == (tenant_id, payment_id) and r.status != "failed"
             )
             ok = (
                 charge is not None
@@ -196,7 +201,7 @@ class MockRail:
             )
             answer = RailRefund(
                 refund_id=refund_id,
-                status="processed" if ok else "failed",
+                status=("pending" if self._hold_refunds else "processed") if ok else "failed",
                 amount=amount,
                 rail_refund_id=f"rfnd_mock_{refund_id}" if ok else None,
                 failure_code=None if ok else _FAILURE_CODE,
@@ -205,7 +210,35 @@ class MockRail:
             if ok:
                 made = self._refunds_made.get((tenant_id, payment_id), 0)
                 self._refunds_made[(tenant_id, payment_id)] = made + 1
+            if self._time_out_refunds:
+                raise RailUnavailable("mock refund timed out after it was made")
             return answer
+
+    def get_refund(self, tenant_id: TenantId, refund_id: RefundId) -> RailRefund | None:
+        with self._lock:
+            done = self._refunds.get((tenant_id, refund_id))
+        return None if done is None else done[1]
+
+    def hold_refunds(self) -> None:
+        """Test hook: refunds from now on answer pending, as a slow rail's do."""
+        self._hold_refunds = True
+
+    def time_out_refunds(self) -> None:
+        """Test hook: refunds from now on are made, then the call times out."""
+        self._time_out_refunds = True
+
+    def finish_refund(
+        self, tenant_id: TenantId, refund_id: RefundId, status: Literal["processed", "failed"]
+    ) -> None:
+        """Test hook: the rail finishes a held refund, as a slow rail does later."""
+        with self._lock:
+            payment_id, held = self._refunds[(tenant_id, refund_id)]
+            update: dict[str, object] = {"status": status}
+            if status == "failed":
+                update |= {"failure_code": _FAILURE_CODE}
+                made = self._refunds_made[(tenant_id, payment_id)]
+                self._refunds_made[(tenant_id, payment_id)] = made - 1
+            self._refunds[(tenant_id, refund_id)] = (payment_id, held.model_copy(update=update))
 
     def refunds_for(self, tenant_id: TenantId, payment_id: PaymentId) -> int:
         """Test hook: how many refunds were ever made on this Payment's charge."""

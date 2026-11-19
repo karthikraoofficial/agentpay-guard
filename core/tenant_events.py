@@ -8,6 +8,7 @@ from core.domain.consent import ConsentRequest, ConsentResolution
 from core.domain.disputes import Dispute
 from core.domain.parties import new_id
 from core.domain.payments import Payment
+from core.domain.refunds import Refund
 from core.domain.webhooks import utc_iso
 from core.ports import DomainEvent
 
@@ -60,6 +61,28 @@ def payment_settled(payment: Payment, now: datetime) -> DomainEvent:
             "amount_minor": payment.amount.minor,
             "currency": payment.amount.currency,
             "failure_code": payment.failure_code,
+        },
+    )
+
+
+def refund_settled(refund: Refund, now: datetime) -> DomainEvent:
+    """`refund.processed` or `refund.failed`, for a Refund that just settled. Never the
+    Tenant's reason: it is free text."""
+    if refund.status == "pending":
+        raise ValueError(f"Refund {refund.refund_id} hasn't settled")
+    return DomainEvent(
+        event_id=new_id("evt"),
+        tenant_id=refund.tenant_id,
+        event_type="refund.processed" if refund.status == "processed" else "refund.failed",
+        occurred_at=now,
+        payload={
+            "refund_id": refund.refund_id,
+            "payment_id": refund.payment_id,
+            "decision_id": refund.decision_id,
+            "status": refund.status,
+            "amount_minor": refund.amount.minor,
+            "currency": refund.amount.currency,
+            "failure_code": refund.failure_code,
         },
     )
 
