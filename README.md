@@ -4,7 +4,7 @@ A trust layer for payments that AI agents make on a user's behalf. For each agen
 payment it decides, in real time, whether to **allow** it, ask the user for fresh consent
 (**step_up**), or **block** it, and it builds the evidence pack when a payment is disputed.
 
-> Status: `v1.0.0`, the MVP. Mandates, the deterministic policy engine and the audit log
+> Status: `v1.1.0`, the MVP (`v1.0.0`) plus refunds. Mandates, the deterministic policy engine and the audit log
 > (`v0.1.0`); four Signals (Phase 2); a durable step-up consent loop (`v0.2.0`); the
 > Razorpay test-mode rail (Phase 4); cited, signed-off dispute Evidence packs (`v0.3.0`);
 > 203 golden eval cases in CI, an Ops console and a live deployment (Phase 6); and refunds
