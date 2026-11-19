@@ -63,7 +63,7 @@ The merchant category codes a Mandate permits. Anything not listed is outside th
 _Avoid_: Categories, whitelist
 
 **Spent this month**:
-The sum of allowed payments and approved step-ups under a Mandate in the current calendar month (UTC), less any that were Voided, checked against the Monthly cap. An approved step-up counts in the month it was approved, not the month it was requested.
+The sum of allowed payments and approved step-ups under a Mandate in the current calendar month (UTC), less any that were Voided and less processed Refunds, checked against the Monthly cap. An approved step-up counts in the month it was approved, not the month it was requested, and a Refund comes off in the month its Decision counted, not the month it was made.
 _Avoid_: Usage, balance
 
 ## Decisions

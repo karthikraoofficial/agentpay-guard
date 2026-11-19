@@ -201,8 +201,19 @@ class PostgresTransaction:
             .where(v.tenant_id == d.tenant_id, v.decision_id == d.decision_id)
             .exists()
         )
+        # Processed Refunds come off the Decision they refund, in the month it counts.
+        refunded = (
+            select(func.coalesce(func.sum(refunds.c.amount_minor), 0))
+            .where(
+                refunds.c.tenant_id == d.tenant_id,
+                refunds.c.decision_id == d.decision_id,
+                refunds.c.status == "processed",
+            )
+            .scalar_subquery()
+        )
+        counted = func.coalesce(func.sum(d.amount_minor - refunded), 0)
         allowed = self._conn.execute(
-            select(func.coalesce(func.sum(d.amount_minor), 0)).where(
+            select(counted).where(
                 d.tenant_id == self._tenant_id,
                 d.mandate_id == mandate_id,
                 d.outcome == "allow",
@@ -212,7 +223,7 @@ class PostgresTransaction:
             )
         ).scalar_one()
         approved = self._conn.execute(
-            select(func.coalesce(func.sum(d.amount_minor), 0))
+            select(counted)
             .select_from(
                 consent_resolutions.join(
                     decisions, and_(d.tenant_id == r.tenant_id, d.decision_id == r.decision_id)
