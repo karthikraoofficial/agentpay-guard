@@ -19,16 +19,36 @@ RELEASED = {
 }
 
 
-def test_the_active_default_pack_is_1_4_0_which_only_adds_the_dispute_rules() -> None:
+def test_the_active_default_pack_is_1_5_0_which_only_adds_the_refund_rules() -> None:
     loaded = load_active_pack(PACKS, "default")
+    phase_5 = load_pack(PACKS, "default", "1.4.0").pack
+
+    assert (loaded.pack.id, loaded.pack.version) == ("default", "1.5.0")
+    assert loaded.pack.refund_window_days == 180
+    assert loaded.pack.refund_window == timedelta(days=180)
+    assert loaded.pack.disputes is not None and phase_5.disputes is not None
+    assert loaded.pack.disputes.strong_if_any == ("credit_issued",)
+    assert loaded.pack.disputes.model_dump(exclude={"strong_if_any"}) == (
+        phase_5.disputes.model_dump(exclude={"strong_if_any"})
+    )
+    assert loaded.pack.model_dump(exclude={"version", "refund_window_days", "disputes"}) == (
+        phase_5.model_dump(exclude={"version", "refund_window_days", "disputes"})
+    )
+    assert loaded.hash.startswith("sha256:") and len(loaded.hash) == len("sha256:") + 64
+
+
+def test_1_4_0_only_adds_the_dispute_rules() -> None:
+    loaded = load_pack(PACKS, "default", "1.4.0")
     phase_4 = load_pack(PACKS, "default", "1.3.0").pack
 
-    assert (loaded.pack.id, loaded.pack.version) == ("default", "1.4.0")
     assert loaded.pack.disputes is not None
     assert loaded.pack.model_dump(exclude={"version", "disputes"}) == (
         phase_4.model_dump(exclude={"version", "disputes"})
     )
-    assert loaded.hash.startswith("sha256:") and len(loaded.hash) == len("sha256:") + 64
+    # Released before 1.5.0 became active; its hash never changes, and it reads as the
+    # legacy 180-day Refund window.
+    assert loaded.hash == "sha256:95072d21ff7003e1e4d584545aa741155223352bd694ac888f90a54e22055a48"
+    assert loaded.pack.refund_window == timedelta(days=180)
 
 
 def test_1_3_0_only_adds_the_payment_window() -> None:

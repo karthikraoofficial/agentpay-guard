@@ -43,7 +43,8 @@
               "within_quoted_total",
               "no_duplicate_payment",
               "duplicate_payment_found",
-              "fulfilment_evidence"
+              "fulfilment_evidence",
+              "credit_issued"
             ],
             "type": "string"
           },
@@ -66,7 +67,8 @@
               "within_quoted_total",
               "no_duplicate_payment",
               "duplicate_payment_found",
-              "fulfilment_evidence"
+              "fulfilment_evidence",
+              "credit_issued"
             ],
             "type": "string"
           },
@@ -106,6 +108,36 @@
           },
           "title": "Reasons",
           "type": "object"
+        },
+        "strong_if_any": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "decision_within_mandate",
+                  "payer_intent_confirmed",
+                  "intent_mismatch_approved",
+                  "mandate_revoked_before_capture",
+                  "mandate_active_at_decision",
+                  "mandate_revoked_before_decision",
+                  "amount_matches_decision",
+                  "amount_differs_from_decision",
+                  "within_quoted_total",
+                  "no_duplicate_payment",
+                  "duplicate_payment_found",
+                  "fulfilment_evidence",
+                  "credit_issued"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strong If Any"
         }
       },
       "required": [
@@ -383,6 +415,19 @@
         }
       ],
       "default": null
+    },
+    "refund_window_days": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Refund Window Days"
     }
   },
   "required": [

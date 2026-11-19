@@ -14,18 +14,23 @@ scheduled with no rail payment id. A retry with the same key then asks the rail 
 rather than replaying: the rail finds the charge by Payment id, so it is never doubled.
 
 Refusals are 409s, logged and traced but not audited, and never reach the rail.
+
+A Tenant refunds a captured Payment the same way (PRD #205, ADR-0024): a pending Refund
+and its `refund` Audit record first, then the rail, keyed by the Refund id, then its
+answer. Only a `manage` key may refund: an Agent never moves money back.
 """
 
 import logging
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Request, Response
-from pydantic import AwareDatetime, BaseModel, ConfigDict
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 from api.deps import (
     ClockDep,
     DecideTenant,
     IdemKey,
+    ManageTenant,
     PackDep,
     RailDep,
     SettingsDep,
@@ -37,14 +42,22 @@ from api.errors import ApiError
 from api.idempotency import REPLAYED, request_hash, run_idempotent
 from api.payability import payable_until
 from core.charges import apply_charge, record_payment
-from core.domain.decisions import DecisionId, decision_time
+from core.domain.decisions import DecisionId, PackRef, decision_time
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.mandates import MandateId
 from core.domain.money import Money
 from core.domain.parties import new_id
 from core.domain.payments import Payment, PaymentId, PaymentStatus, payment_refusal
 from core.domain.rails import RailName, RailToken
+from core.domain.refunds import (
+    REASON_MAX,
+    Refund,
+    RefundId,
+    RefundStatus,
+    refund_refusal,
+)
 from core.ports import PaymentRail, RailUnavailable, TenantId
+from core.refunds import record_refund, request_refund
 
 router = APIRouter(prefix="/v1/payments", tags=["payments"])
 log = logging.getLogger(__name__)
@@ -56,6 +69,33 @@ class PayBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     decision_id: DecisionId
+
+
+class RefundBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    amount: Money
+    # The Tenant's own words, if any. Only its hash goes into the Audit chain.
+    reason: str | None = Field(default=None, min_length=1, max_length=REASON_MAX)
+
+    @field_validator("amount")
+    @classmethod
+    def _above_zero(cls, amount: Money) -> Money:
+        if amount.minor <= 0:
+            raise ValueError("a refund is for more than zero")
+        return amount
+
+
+class RefundOut(BaseModel):
+    refund_id: RefundId
+    payment_id: PaymentId
+    amount: Money
+    reason: str | None
+    status: RefundStatus
+    rail_refund_id: str | None
+    failure_code: str | None
+    created_at: AwareDatetime
+    updated_at: AwareDatetime
 
 
 class PaymentOut(BaseModel):
@@ -72,10 +112,26 @@ class PaymentOut(BaseModel):
     debit_after: AwareDatetime | None = None
     created_at: AwareDatetime
     updated_at: AwareDatetime
+    # Its Refunds, oldest first, and the total of the processed ones. Absent from replays
+    # of Payments made before refunds existed.
+    refunds: list[RefundOut] = []
+    refunded: Money | None = None
 
 
-def _out(payment: Payment) -> PaymentOut:
-    return PaymentOut.model_validate(payment.model_dump(include=set(PaymentOut.model_fields)))
+def _out(payment: Payment, refunds: list[Refund] | None = None) -> PaymentOut:
+    shown = refunds or []
+    refunded = sum(r.amount.minor for r in shown if r.status == "processed")
+    return PaymentOut.model_validate(
+        payment.model_dump(include=set(PaymentOut.model_fields) - {"refunds", "refunded"})
+        | {
+            "refunds": [_refund_out(r) for r in shown],
+            "refunded": Money(minor=refunded, currency=payment.amount.currency),
+        }
+    )
+
+
+def _refund_out(refund: Refund) -> RefundOut:
+    return RefundOut.model_validate(refund.model_dump(include=set(RefundOut.model_fields)))
 
 
 @router.post("", status_code=202, response_model=PaymentOut)
@@ -220,10 +276,102 @@ def _charge(
 def get_payment(payment_id: str, tenant: Tenant, store: StoreDep) -> PaymentOut:
     with store.transaction(tenant) as tx:
         payment = tx.get_payment(PaymentId(payment_id))
+        refunds = [] if payment is None else tx.list_refunds(payment.payment_id)
     if payment is None:
         raise ApiError(404, "PAYMENT_NOT_FOUND", f"No Payment {payment_id}.")
-    return _out(payment)
+    return _out(payment, refunds)
 
+
+@router.get("/{payment_id}/refunds/{refund_id}")
+def get_refund(payment_id: str, refund_id: str, tenant: Tenant, store: StoreDep) -> RefundOut:
+    with store.transaction(tenant) as tx:
+        found = [r for r in tx.list_refunds(PaymentId(payment_id)) if r.refund_id == refund_id]
+    if not found:
+        raise ApiError(404, "REFUND_NOT_FOUND", f"No Refund {refund_id} on Payment {payment_id}.")
+    return _refund_out(found[0])
+
+
+@router.post("/{payment_id}/refunds", status_code=201, response_model=RefundOut)
+def create_refund(
+    request: Request,
+    payment_id: str,
+    body: RefundBody,
+    tenant: ManageTenant,
+    store: StoreDep,
+    clock: ClockDep,
+    pack: PackDep,
+    rail: RailDep,
+    key: IdemKey,
+) -> Response:
+    fingerprint = request_hash(request, body)
+    made: list[Refund] = []
+
+    def write(read_at: datetime) -> tuple[int, RefundOut]:
+        now = decision_time(read_at)
+        found = tx.get_payment(PaymentId(payment_id))
+        if found is None:
+            raise ApiError(404, "PAYMENT_NOT_FOUND", f"No Payment {payment_id}.")
+        if body.amount.currency != found.amount.currency:
+            raise ApiError(
+                422,
+                "VALIDATION_FAILED",
+                f"amount must be in the Payment's currency, {found.amount.currency}.",
+            )
+        # Mandate before Payment, as rail reports and Disputes take them, so all queue.
+        tx.lock_mandate(found.mandate_id)
+        payment = tx.lock_payment(found.payment_id)
+        if payment is None:
+            raise RuntimeError(f"Payment {payment_id} vanished")
+        dispute = tx.get_dispute_for_payment(payment.payment_id)
+        refusal = refund_refusal(
+            payment,
+            None if dispute is None else dispute.status,
+            tx.list_refunds(payment.payment_id),
+            body.amount,
+            pack.pack.refund_window,
+            now,
+        )
+        if refusal is not None:
+            log.info("refund refused %s: Payment %s, Tenant %s", refusal, payment_id, tenant)
+            raise ApiError(409, refusal, _REFUND_REFUSAL_TEXT[refusal])
+        ref = PackRef(id=pack.pack.id, version=pack.pack.version, hash=pack.hash)
+        refund = request_refund(tx, payment, body.amount, body.reason, ref, now)
+        made.append(refund)
+        return 201, _refund_out(refund)
+
+    with store.transaction(tenant) as tx:
+        first = run_idempotent(tx, key, fingerprint, clock, write)
+    if not made:
+        return first
+    refund = made[0]
+    try:
+        answer = rail.refund(tenant, refund.payment_id, refund.refund_id, refund.amount, key)
+    except RailUnavailable:
+        # Unclear: the rail may have refunded. The Refund stays pending, to be asked about
+        # again by its id (#209).
+        log.warning("rail unavailable for Refund %s, Tenant %s", refund.refund_id, tenant)
+        answer = None
+    with store.transaction(tenant) as tx:
+        current = record_refund(tx, refund.refund_id, answer, decision_time(clock.now()))
+        content = _refund_out(current).model_dump_json().encode("utf-8")
+        tx.save_idempotency_record(
+            IdempotencyRecord(
+                key=key,
+                request_hash=fingerprint,
+                status_code=201,
+                body=content,
+                created_at=refund.created_at,
+            )
+        )
+    return Response(content=content, status_code=201, media_type="application/json")
+
+
+_REFUND_REFUSAL_TEXT = {
+    "PAYMENT_NOT_REFUNDABLE": "Only a captured Payment can be refunded; cancel a scheduled one.",
+    "PAYMENT_DISPUTED": "This Payment has a Dispute; a refund now could pay the Payer twice.",
+    "REFUND_WINDOW_CLOSED": "The Refund window for this Payment has closed.",
+    "REFUND_EXCEEDS_CAPTURED": "That would refund more than was captured on this Payment.",
+}
 
 _REFUSAL_TEXT = {
     "DECISION_NOT_PAYABLE": "Only an allowed Decision, or an approved step-up, can be paid.",

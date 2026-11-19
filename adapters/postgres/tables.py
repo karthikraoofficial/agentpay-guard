@@ -383,6 +383,36 @@ disputes = Table(
     ),
 )
 
+# Refunds (#206): money returned on a captured Payment. The reason's words live here, not
+# in the Audit chain, which holds only their hash (ADR-0007).
+refunds = Table(
+    "refunds",
+    metadata,
+    Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+    Column("refund_id", String, primary_key=True),
+    Column("payment_id", String, nullable=False),
+    Column("decision_id", String, nullable=False),
+    Column("mandate_id", String, nullable=False),
+    Column("amount_minor", BigInteger, nullable=False),
+    Column("currency", String(3), nullable=False),
+    Column("reason", String, nullable=True),
+    Column("status", String, nullable=False),
+    Column("rail_refund_id", String, nullable=True),
+    Column("failure_code", String, nullable=True),
+    Column("pack_id", String, nullable=False),
+    Column("pack_version", String, nullable=False),
+    Column("pack_hash", String, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    ForeignKeyConstraint(
+        ["tenant_id", "payment_id"], ["payments.tenant_id", "payments.payment_id"]
+    ),
+    # A Payment's Refunds.
+    Index("ix_refunds_tenant_payment", "tenant_id", "payment_id"),
+    CheckConstraint("status IN ('pending', 'processed', 'failed')", name="refunds_status"),
+    CheckConstraint("amount_minor > 0", name="refunds_amount_positive"),
+)
+
 # Evidence packs: one row per version, never changed once written. The body is the pack's
 # canonical JSON, kept outside the Audit chain (it may quote the Payer instruction).
 evidence_packs = Table(

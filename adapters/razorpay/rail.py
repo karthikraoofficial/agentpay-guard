@@ -27,7 +27,8 @@ from core.domain.money import Money
 from core.domain.parties import TenantId
 from core.domain.payments import PaymentId
 from core.domain.rails import RAIL_NOTICE_FAILED, RailToken
-from core.ports import IdempotencyKey, PaymentRail, RailCharge, RailUnavailable
+from core.domain.refunds import RefundId
+from core.ports import IdempotencyKey, PaymentRail, RailCharge, RailRefund, RailUnavailable
 from core.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -150,10 +151,11 @@ class RazorpayRail:
         self,
         tenant_id: TenantId,
         payment_id: PaymentId,
+        refund_id: RefundId,
         amount: Money,
         idempotency_key: IdempotencyKey,
-    ) -> RailCharge:
-        raise NotImplementedError("Refunds come with disputes in Phase 5")
+    ) -> RailRefund:
+        raise NotImplementedError("Razorpay refunds come with #210")
 
     def token_expires_at(self, rail_token: RailToken) -> datetime | None:
         """When Razorpay expires the token, or None if it doesn't know the token. Test

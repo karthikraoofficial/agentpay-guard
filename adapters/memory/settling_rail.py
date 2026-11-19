@@ -16,7 +16,8 @@ from core.domain.money import Money
 from core.domain.parties import TenantId
 from core.domain.payments import PaymentId
 from core.domain.rails import RailToken
-from core.ports import IdempotencyKey, PaymentRail, RailCharge, UnitOfWork
+from core.domain.refunds import RefundId
+from core.ports import IdempotencyKey, PaymentRail, RailCharge, RailRefund, UnitOfWork
 
 
 class SettlingMockRail:
@@ -64,9 +65,11 @@ class SettlingMockRail:
         self,
         tenant_id: TenantId,
         payment_id: PaymentId,
+        refund_id: RefundId,
         amount: Money,
         idempotency_key: IdempotencyKey,
-    ) -> RailCharge:
+    ) -> RailRefund:
+        # Refunds are made by the API's MockRail; this rail only answers the sweep.
         raise NotImplementedError("the settling rail only answers the worker's sweep")
 
 

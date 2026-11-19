@@ -37,6 +37,7 @@ from adapters.postgres.tables import (
     payers,
     payments,
     rail_events,
+    refunds,
     review_links,
     tenant_chain_heads,
     tenants,
@@ -70,6 +71,7 @@ from core.domain.parties import (
 )
 from core.domain.payments import Payment, PaymentId, RailEvent
 from core.domain.rails import RailToken
+from core.domain.refunds import Refund, RefundId
 from core.domain.voids import Void
 from core.domain.webhooks import WebhookEndpoint
 from core.ports import DomainEvent, EventBus, TenantDirectory, TenantId, UnitOfWork
@@ -569,6 +571,45 @@ class PostgresTransaction:
             self._conn.execute(query.with_for_update() if lock else query).mappings().one_or_none()
         )
         return None if row is None else _dispute(row)
+
+    def add_refund(self, refund: Refund) -> None:
+        self._own(refund.tenant_id)
+        self._conn.execute(insert(refunds).values(**_refund_row(refund)))
+
+    def lock_refund(self, refund_id: RefundId) -> Refund | None:
+        row = (
+            self._conn.execute(
+                select(refunds)
+                .where(refunds.c.tenant_id == self._tenant_id, refunds.c.refund_id == refund_id)
+                .with_for_update()
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return None if row is None else _refund(row)
+
+    def update_refund(self, refund: Refund) -> None:
+        self._own(refund.tenant_id)
+        changed = self._conn.execute(
+            update(refunds)
+            .where(refunds.c.tenant_id == self._tenant_id, refunds.c.refund_id == refund.refund_id)
+            .values(
+                status=refund.status,
+                rail_refund_id=refund.rail_refund_id,
+                failure_code=refund.failure_code,
+                updated_at=refund.updated_at,
+            )
+        ).rowcount
+        if changed != 1:
+            raise ValueError(f"no Refund {refund.refund_id}")
+
+    def list_refunds(self, payment_id: PaymentId) -> list[Refund]:
+        rows = self._conn.execute(
+            select(refunds)
+            .where(refunds.c.tenant_id == self._tenant_id, refunds.c.payment_id == payment_id)
+            .order_by(refunds.c.created_at, refunds.c.refund_id)
+        ).mappings()
+        return [_refund(r) for r in rows]
 
     def update_dispute(self, dispute: Dispute) -> None:
         self._own(dispute.tenant_id)
@@ -1154,6 +1195,28 @@ def _mandate(row: RowMapping) -> Mandate:
             token_ref=row["rail_token_ref"],
             display=row["rail_display"],
         ),
+    )
+
+
+def _refund_row(refund: Refund) -> dict[str, object]:
+    row = refund.model_dump(exclude={"amount", "pack"})
+    return row | {
+        "amount_minor": refund.amount.minor,
+        "currency": refund.amount.currency,
+        "pack_id": refund.pack.id,
+        "pack_version": refund.pack.version,
+        "pack_hash": refund.pack.hash,
+    }
+
+
+def _refund(row: RowMapping) -> Refund:
+    fields = {k: v for k, v in row.items() if k in Refund.model_fields}
+    return Refund.model_validate(
+        fields
+        | {
+            "amount": Money(minor=row["amount_minor"], currency=row["currency"]),
+            "pack": PackRef(id=row["pack_id"], version=row["pack_version"], hash=row["pack_hash"]),
+        }
     )
 
 
