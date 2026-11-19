@@ -29,7 +29,10 @@ def assess(bundle: EvidenceBundle, reason: DisputeReason, rules: DisputeRules) -
     weighed = rules.reasons[reason]
     missing = tuple(f for f in weighed.strong_when if f not in held)
     strength: EvidenceStrength
-    if any(f in held for f in weighed.weak_when):
+    if any(f in held for f in rules.strong_if_any or ()):
+        # E.g. a credit already issued: strong whatever the reason, with nothing missing.
+        strength, missing = "strong", ()
+    elif any(f in held for f in weighed.weak_when):
         strength = "weak"
     elif not missing:
         strength = "strong"
@@ -102,6 +105,14 @@ def evidence_facts(bundle: EvidenceBundle, duplicate_window: timedelta) -> froze
             facts.add("duplicate_payment_found")
         else:
             facts.add("no_duplicate_payment")
+    if captured is not None and captured.payment is not None:
+        refunded = sum(
+            r.record.refund.amount.minor
+            for r in bundle.trail
+            if r.kind == "refund" and r.record.refund and r.record.refund.status == "processed"
+        )
+        if refunded >= captured.payment.amount.minor:
+            facts.add("credit_issued")
     return frozenset(facts)
 
 

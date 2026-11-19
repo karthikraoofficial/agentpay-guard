@@ -871,9 +871,9 @@ def test_the_current_prompt_asks_for_agent_side_text_quoted_word_for_word(
     disputes.build(dispute_id, _good(ids))
 
     [call] = disputes.api.gateway.calls
-    assert call.prompt_version == PROMPT_VERSION == "dispute_narrative@2"
-    assert call.system == PROMPTS["dispute_narrative@2"]
-    assert "word for word" in call.system
+    assert call.prompt_version == PROMPT_VERSION == "dispute_narrative@3"
+    assert call.system == PROMPTS["dispute_narrative@3"]
+    assert "word for word" in call.system  # @3 keeps @2's quoting
 
 
 def test_a_released_prompt_stays_available_unchanged(disputes: Disputes) -> None:

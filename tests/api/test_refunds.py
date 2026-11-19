@@ -13,12 +13,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 
 from adapters.memory.rail import MockRail
 from adapters.memory.workflow import InMemoryWorkflow
 from adapters.postgres.store import PostgresStore
+from agents.dispute_narrative import PROMPT_VERSION, PROMPTS
+from api.admin import verify_pack_command
 from api.main import create_app
 from core.domain.payments import PaymentId
 from core.domain.refunds import RefundId
@@ -547,3 +550,105 @@ def test_a_refund_the_rail_answered_for_but_cannot_find_is_left_pending(
     [refund] = hooked.payment(payment["payment_id"], headers=hooked.manage).json()["refunds"]
     assert refund["status"] == "pending"  # tried again next sweep, never failed by guess
     assert result.errors >= 1  # other tests' leftovers share the Postgres run
+
+
+# --- Refunds in the Evidence pack (#208) ---------------------------------------------
+
+RULES_1_5 = yaml.safe_load(
+    (Path(__file__).resolve().parents[2] / "policy_packs" / "default" / "1.5.0.yaml").read_text(
+        encoding="utf-8"
+    )
+)["disputes"]
+
+
+@pytest.fixture
+def credited(api: Api, tmp_path: Path) -> Refunds:
+    # The Phase 1 decision rules, with default@1.5.0's Dispute rules ("credit already issued").
+    api.use_packs(release_test_pack(tmp_path, "1.0.1", {"disputes": RULES_1_5}))
+    api.use_settings(make_settings(razorpay_webhook_secret=SECRET))
+    return Refunds(api)
+
+
+def pack_of(refunds: Refunds, payment: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    dispute_id: str = refunds.open(payment["payment_id"], reason="unauthorised").json()[
+        "dispute_id"
+    ]
+    assert refunds.build(dispute_id) == "built"
+    pack: dict[str, Any] = refunds.get(dispute_id).json()["pack"]
+    return dispute_id, pack
+
+
+def verified(refunds: Refunds, dispute_id: str) -> list[str]:
+    said: list[str] = []
+    code = verify_pack_command(
+        refunds.api.store, refunds.tenant_id(), dispute_id, refunds.api.packs, said.append
+    )
+    assert code == 0, said
+    return said
+
+
+def test_a_fully_refunded_payment_is_strong_evidence_whatever_the_reason(
+    credited: Refunds,
+) -> None:
+    payment = credited.captured()  # an allow with no Intent check: mixed, unrefunded
+    refund = credited.refund(payment["payment_id"], amount=payment["amount"]).json()
+
+    dispute_id, pack = pack_of(credited, payment)
+
+    assert pack["assessment"]["strength"] == "strong"
+    assert "credit_issued" in pack["assessment"]["facts"]
+    # Nothing is missing for strong evidence once the credit is issued.
+    assert (pack["assessment"]["missing"], pack["assessment"]["notes"]) == ([], [])
+    settled = credited.trail(payment["decision_id"])["refund"][-1]
+    claims = [c for c in pack["narrative"] if c["kind"] == "refund"]
+    assert [c["cites"] for c in claims] == [
+        [credited.trail(payment["decision_id"])["refund"][0]],
+        [settled],
+    ]
+    assert refund["refund_id"] in " ".join(c["text"] for c in claims)
+    verified(credited, dispute_id)
+
+
+def test_a_partial_refund_is_listed_but_leaves_the_reasons_own_rating(credited: Refunds) -> None:
+    unrefunded, partial = credited.captured(), credited.captured()
+    credited.refund(partial["payment_id"], amount=inr(10_000))
+
+    _, plain = pack_of(credited, unrefunded)
+    dispute_id, pack = pack_of(credited, partial)
+
+    assert pack["assessment"] == plain["assessment"]  # mixed, as without the refund
+    assert "credit_issued" not in pack["assessment"]["facts"]
+    assert [c["kind"] for c in pack["narrative"]].count("refund") == 2  # asked, processed
+    verified(credited, dispute_id)
+
+
+def test_the_model_may_cite_a_refund_record_in_a_refund_claim(credited: Refunds) -> None:
+    payment = credited.captured()
+    credited.refund(payment["payment_id"], amount=payment["amount"])
+    dispute_id = credited.open(payment["payment_id"]).json()["dispute_id"]
+    ids = credited.trail(payment["decision_id"])
+    reply = json.dumps(
+        {
+            "claims": [
+                {"kind": "decision", "text": "The Agent was allowed.", "cites": ids["decision"]},
+                {"kind": "payment", "text": "It was captured.", "cites": ids["payment"][-1:]},
+                {"kind": "refund", "text": "It was refunded in full.", "cites": ids["refund"][-1:]},
+                {"kind": "dispute", "text": "Then disputed.", "cites": ids["dispute_opened"]},
+            ]
+        }
+    )
+
+    assert credited.build(dispute_id, reply) == "built"
+
+    pack = credited.get(dispute_id).json()["pack"]
+    assert (pack["narrative_source"], pack["narrative_note"]) == ("model", None)
+    assert [c["kind"] for c in pack["narrative"]] == ["decision", "payment", "refund", "dispute"]
+    assert pack["narrative_attempts"][0]["prompt_version"] == "dispute_narrative@3"
+
+
+def test_prompt_3_offers_the_refund_kind_and_leaves_2_as_released() -> None:
+    assert PROMPT_VERSION == "dispute_narrative@3"
+    assert '- "refund":' in PROMPTS["dispute_narrative@3"]
+    assert '- "refund":' not in PROMPTS["dispute_narrative@2"]
+    released = hashlib.sha256(PROMPTS["dispute_narrative@2"].encode()).hexdigest()
+    assert released == "c365df3b43d5f0a5cc62811e9c83b4a29152f05434a508cf44be13a983c34104"
