@@ -1,9 +1,11 @@
-"""The three demo journeys, over HTTP only, so they run against any deployment.
+"""The four demo journeys, over HTTP only, so they run against any deployment.
 
 1. An Agent pays within its Mandate: allow, then a Payment.
 2. A step-up: the Payer approves through the printed Consent link, then the Payment.
 3. A dispute: a captured Payment is disputed, a reviewer signs off its Evidence pack
    through the printed Review link, and the pack is verified against its Sign-off.
+4. A refund: a captured Payment is refunded in two parts, and the Monthly cap it used is
+   given back, so a Decision it blocked is allowed (#211).
 
 Each journey sets up its own Payer, Agent and Mandate the first time it needs them, so any
 journey can run on its own. Whenever it waits (for the worker, the Payer or the reviewer)
@@ -111,8 +113,12 @@ class Demo:
     # --- Shared -------------------------------------------------------------------------
 
     def _setup(self) -> tuple[str, str]:
-        if self.mandate_id is not None and self.agent_id is not None:
-            return self.mandate_id, self.agent_id
+        if self.mandate_id is None or self.agent_id is None:
+            self.mandate_id, self.agent_id = self._grant(10_000_00, 50_000_00)
+        return self.mandate_id, self.agent_id
+
+    def _grant(self, per_txn_minor: int, monthly_minor: int) -> tuple[str, str]:
+        """A new Payer, Agent and Mandate with these caps, on the mock card."""
         key = self.tenant_key
         payer = self._call(
             "Register a Payer",
@@ -132,8 +138,8 @@ class Demo:
                 "payer_id": payer["payer_id"],
                 "allowed_agent_ids": [agent["agent_id"]],
                 "currency": "INR",
-                "per_txn_cap": {"minor": 10_000_00, "currency": "INR"},
-                "monthly_cap": {"minor": 50_000_00, "currency": "INR"},
+                "per_txn_cap": {"minor": per_txn_minor, "currency": "INR"},
+                "monthly_cap": {"minor": monthly_minor, "currency": "INR"},
                 "allowed_mccs": ["5411", "5812"],
                 "valid_from": _iso(now - timedelta(minutes=5)),
                 "expires_at": _iso(now + timedelta(days=30)),
@@ -145,16 +151,17 @@ class Demo:
                 "rail_token": MOCK_CARD,
             },
         )
-        self.mandate_id, self.agent_id = mandate["mandate_id"], agent["agent_id"]
+        cap = {"currency": "INR"}
         self._step(
-            f"Payer {payer['payer_id']} granted Mandate {self.mandate_id} to Agent "
-            f"{self.agent_id}: groceries and restaurants, up to INR 10,000.00 a payment and "
-            "INR 50,000.00 a month"
+            f"Payer {payer['payer_id']} granted Mandate {mandate['mandate_id']} to Agent "
+            f"{agent['agent_id']}: groceries and restaurants, up to "
+            f"{money(cap | {'minor': per_txn_minor})} a payment and "
+            f"{money(cap | {'minor': monthly_minor})} a month"
         )
-        return self.mandate_id, self.agent_id
+        return mandate["mandate_id"], agent["agent_id"]
 
-    def _decide(self, amount: Json, expected: str) -> Json:
-        mandate_id, agent_id = self._setup()
+    def _decide(self, amount: Json, expected: str, on: tuple[str, str] | None = None) -> Json:
+        mandate_id, agent_id = on or self._setup()
         step = "Ask for a Decision"
         decision = self._call(
             step,
@@ -178,6 +185,42 @@ class Demo:
         )
         self._step(f"Payment {payment['payment_id']}: {payment['status']}")
         return payment
+
+    def _captured(self, payment_id: str) -> Json:
+        """The Payment once the worker's sweep captured it (mock settle)."""
+        step = "Wait for the Payment to be captured"
+
+        def settled() -> Json | None:
+            got = self._call(step, "GET", f"/v1/payments/{payment_id}", self.agent_key)
+            return None if got["status"] == "scheduled" else got
+
+        payment = self._until(step, settled)
+        self._step(f"Payment {payment_id}: {payment['status']}")
+        if payment["status"] != "captured":
+            raise StepFailed(step, f"the Payment {payment['status']}")
+        return payment
+
+    def _refund(self, payment_id: str, amount: Json) -> Json:
+        step = "Refund the Payment"
+        refund = self._call(
+            step,
+            "POST",
+            f"/v1/payments/{payment_id}/refunds",
+            self.tenant_key,
+            {"amount": amount, "reason": "Part of the order came back"},
+        )
+        path = f"/v1/payments/{payment_id}/refunds/{refund['refund_id']}"
+
+        def settled() -> Json | None:
+            got = self._call(step, "GET", path, self.tenant_key)
+            return None if got["status"] == "pending" else got
+
+        if refund["status"] == "pending":
+            refund = self._until("Wait for the Refund to settle", settled)
+        self._step(f"Refund {refund['refund_id']} of {money(amount)}: {refund['status']}")
+        if refund["status"] != "processed":
+            raise StepFailed(step, f"the Refund {refund['status']}: {refund['failure_code']}")
+        return refund
 
     # --- Journeys -----------------------------------------------------------------------
 
@@ -211,20 +254,7 @@ class Demo:
     def journey_3(self) -> Json:
         self.say("Journey 3: a captured Payment is disputed, and its evidence signed off")
         decision = self._decide(SMALL, "allow")
-        payment = self._pay(decision["decision_id"])
-        payment_id = payment["payment_id"]
-
-        step = "Wait for the Payment to be captured"
-
-        def settled() -> str | None:
-            got = self._call(step, "GET", f"/v1/payments/{payment_id}", self.agent_key)
-            status: str = got["status"]
-            return None if status == "scheduled" else status
-
-        status = self._until(step, settled)
-        self._step(f"Payment {payment_id}: {status}")
-        if status != "captured":
-            raise StepFailed(step, f"the Payment {status}")
+        payment_id = self._captured(self._pay(decision["decision_id"])["payment_id"])["payment_id"]
 
         opened = self._call(
             "Open a Dispute",
@@ -279,6 +309,26 @@ class Demo:
         self._step(f"Signed off by {dispute['sign_off']['reviewer']['name']}")
         self._verify(dispute)
         return dispute
+
+    def journey_4(self) -> Json:
+        self.say("Journey 4: a captured Payment is refunded, and its Monthly cap given back")
+        # A Mandate of its own, so the cap is tight enough to show: INR 2,000 a month.
+        tight = self._grant(2_000_00, 2_000_00)
+        decision = self._decide(SMALL, "allow", on=tight)
+        payment = self._captured(self._pay(decision["decision_id"])["payment_id"])
+        self._decide(SMALL, "block", on=tight)  # INR 1,250 of 2,000 used: no room for more
+        self._refund(payment["payment_id"], {"minor": 500_00, "currency": "INR"})
+        rest = payment["amount"]["minor"] - 500_00
+        self._refund(payment["payment_id"], {"minor": rest, "currency": "INR"})
+        self._decide(SMALL, "allow", on=tight)  # the refunds gave the cap back
+        refunded: Json = self._call(
+            "Read the Payment", "GET", f"/v1/payments/{payment['payment_id']}", self.tenant_key
+        )
+        self._step(
+            f"Payment {refunded['payment_id']}: still {refunded['status']}, with "
+            f"{money(refunded['refunded'])} refunded in {len(refunded['refunds'])} Refunds"
+        )
+        return refunded
 
     def _verify(self, dispute: Json) -> None:
         step = "Verify the Evidence pack"

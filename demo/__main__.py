@@ -2,7 +2,7 @@
 
 The Demo Tenant's keys come from settings (AGENTPAY_DEMO_AGENT_KEY and
 AGENTPAY_DEMO_TENANT_KEY), never from the command line, and are never printed. The
-deployment must use the mock rail; journey 3 also needs mock settle on and a worker."""
+deployment must use the mock rail; journeys 3 and 4 also need mock settle on and a worker."""
 
 import argparse
 import sys
@@ -15,14 +15,14 @@ import httpx
 from core.settings import Settings, get_settings
 from demo.journeys import Demo, StepFailed
 
-JOURNEYS = ("1", "2", "3")
+JOURNEYS = ("1", "2", "3", "4")
 
 
 def main(argv: Sequence[str] | None = None, settings: Settings | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m demo", description=__doc__)
     parser.add_argument("--base-url", required=True, help="the API, e.g. https://api.example")
     parser.add_argument(
-        "--journey", choices=(*JOURNEYS, "all"), default="all", help="one journey, or all three"
+        "--journey", choices=(*JOURNEYS, "all"), default="all", help="one journey, or all four"
     )
     parser.add_argument("--interval", type=float, default=3.0, help="seconds between checks")
     parser.add_argument("--timeout", type=float, default=600.0, help="seconds to wait for a step")

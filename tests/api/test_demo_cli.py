@@ -134,6 +134,21 @@ def test_journey_3_a_captured_payment_is_disputed_signed_off_and_verified(
     assert any("verified" in line.lower() for line in out)
 
 
+def test_journey_4_a_payment_refunded_in_two_parts_gives_back_its_monthly_cap(
+    api: Api, keys: tuple[str, str]
+) -> None:
+    out: list[str] = []
+
+    payment = demo(api, keys, out).journey_4()
+
+    assert payment["status"] == "captured"  # a refund never changes it
+    assert payment["refunded"] == payment["amount"]
+    assert [r["status"] for r in payment["refunds"]] == ["processed", "processed"]
+    outcomes = [line for line in out if "Agent asks to pay" in line]
+    assert ["block" in outcomes[1], "allow" in outcomes[2]] == [True, True]
+    assert "MONTHLY_CAP_EXCEEDED" in outcomes[1]
+
+
 def test_the_journeys_run_one_after_another_and_never_print_a_key(
     api: Api, keys: tuple[str, str]
 ) -> None:
@@ -143,6 +158,7 @@ def test_the_journeys_run_one_after_another_and_never_print_a_key(
     run.journey_1()
     run.journey_2()
     run.journey_3()
+    run.journey_4()
 
     text = "\n".join(out)
     assert keys[0] not in text and keys[1] not in text
