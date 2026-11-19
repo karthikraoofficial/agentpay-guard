@@ -57,9 +57,14 @@ if [[ -z "$(q iam policy list -c "$T" --name "$POLICY" --query 'data[0].id' --ra
     || { echo "couldn't create policy $POLICY" >&2; exit 1; }
   echo "  policy $POLICY created"
 fi
-q os object-lifecycle-policy put --bucket-name "$BUCKET" --force --items \
-  "[{\"name\":\"delete-after-$KEEP_DAYS-days\",\"action\":\"DELETE\",\"timeAmount\":$KEEP_DAYS,\"timeUnit\":\"DAYS\",\"isEnabled\":true,\"objectNameFilter\":{\"inclusionPrefixes\":[\"agentpay-\"]}}]" \
-  >/dev/null || { echo "couldn't set the lifecycle rule" >&2; exit 1; }
+rule="[{\"name\":\"delete-after-$KEEP_DAYS-days\",\"action\":\"DELETE\",\"timeAmount\":$KEEP_DAYS,\"timeUnit\":\"DAYS\",\"isEnabled\":true,\"objectNameFilter\":{\"inclusionPrefixes\":[\"agentpay-\"]}}]"
+# A new policy takes a little while to apply; until it does, the rule is refused.
+for attempt in 1 2 3 4 5 6; do
+  q os object-lifecycle-policy put --bucket-name "$BUCKET" --force --items "$rule" >/dev/null && break
+  (( attempt < 6 )) || { echo "couldn't set the lifecycle rule (is the policy $POLICY there?)" >&2; exit 1; }
+  echo "  waiting for the policy to apply…"
+  sleep 10
+done
 echo "  lifecycle: agentpay-* objects deleted after $KEEP_DAYS days"
 
 expires=$(current AGENTPAY_BACKUP_PAR_EXPIRES)
