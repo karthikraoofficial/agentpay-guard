@@ -409,7 +409,9 @@ It reads the Demo Tenant's keys from `AGENTPAY_DEMO_AGENT_KEY` and `AGENTPAY_DEM
 
 ## Going live
 
-The production go-live checklist is at the end of [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md#production-go-live-checklist). For the rail it adds live Razorpay keys, UPI Reserve Pay, a Razorpay Route account per Tenant, and refunds.
+The production go-live checklist is at the end of [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md#production-go-live-checklist). For the rail it adds live Razorpay keys, UPI Reserve Pay and a Razorpay Route account per Tenant.
+
+When something fails, the [runbooks](docs/runbooks/README.md) say how you'd notice, what already happens on its own, and what to do: a [rail outage](docs/runbooks/rail-outage.md), a [model outage](docs/runbooks/model-outage.md) and [stuck consent workflows](docs/runbooks/stuck-consent-workflows.md).
 
 ## Proving a Decision
 
