@@ -171,7 +171,7 @@ A signed notice that AgentPay Guard sends to a Tenant's own endpoint when someth
 _Avoid_: Callback, notification (that is what the Tenant sends the Payer), rail webhook
 
 **Rail webhook**:
-A signed message from the rail saying how a Rail charge ended, which settles its Payment as captured or failed. Each one is acted on at most once.
+A signed message from the rail saying how a Rail charge ended, which settles its Payment as captured or failed, or how a refund ended, which settles its Refund as processed or failed. Each one is acted on at most once.
 _Avoid_: Callback, notification, Tenant webhook (that one goes to a Tenant)
 
 **Reconciliation**:

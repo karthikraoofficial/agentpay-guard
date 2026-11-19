@@ -950,16 +950,18 @@ class PostgresStore:
             rows = conn.execute(query).all()
         return [(TenantId(t), PaymentId(i)) for t, i in rows]
 
-    def pending_refunds(self, created_before: datetime) -> list[tuple[TenantId, RefundId]]:
+    def pending_refunds(
+        self, created_before: datetime
+    ) -> list[tuple[TenantId, PaymentId, RefundId]]:
         r = refunds.c
         query = (
-            select(r.tenant_id, r.refund_id)
+            select(r.tenant_id, r.payment_id, r.refund_id)
             .where(r.status == "pending", r.created_at < created_before)
             .order_by(r.created_at, r.refund_id)
         )
         with self._engine.connect() as conn:
             rows = conn.execute(query).all()
-        return [(TenantId(t), RefundId(i)) for t, i in rows]
+        return [(TenantId(t), PaymentId(p), RefundId(i)) for t, p, i in rows]
 
     def due_debits(self, now: datetime) -> list[tuple[TenantId, PaymentId]]:
         p = payments.c

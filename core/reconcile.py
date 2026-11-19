@@ -93,9 +93,9 @@ def _sweep_refunds(
 ) -> SweepResult:
     due = store.pending_refunds(created_before)
     errors = 0
-    for tenant_id, refund_id in due:
+    for tenant_id, payment_id, refund_id in due:
         try:
-            answer = rail.get_refund(tenant_id, refund_id)
+            answer = rail.get_refund(tenant_id, payment_id, refund_id)
             with store.transaction(tenant_id) as tx:
                 refund = tx.lock_refund(refund_id)
                 if refund is None:

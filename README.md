@@ -297,6 +297,8 @@ One Payment from allow to `scheduled` on the real rail, by hand. Razorpay won't 
 
 The run for #85, with ids and timings, is posted on the Phase 4 PRD (#74).
 
+**Refunds on Razorpay (#210).** The adapter makes a refund on the Payment's captured Razorpay payment, with our Refund id as its `receipt` and in its notes (beside the Payment and Tenant ids), and reads that payment's refunds first, so asking again never refunds twice. `refund.processed` and `refund.failed` Rail webhooks settle the Refund their notes name; a refund made in the Razorpay Dashboard carries none of our ids and is dropped, since on one shared account it can't be traced to a Tenant (ADR-0012). What is verified: against the fake Razorpay API, making, finding again, refusing and reading refunds, and the webhooks; against the real test account (`-m contract`), the refund endpoints and how they refuse, and that a Payment still in its notice period is never sent a refund. What isn't: a refund that succeeds on Razorpay, because test mode never captures a card-recurring Payment (ADR-0017), so that path runs on the mock rail only.
+
 ## Known limitations
 
 - **An unpaid allow keeps using cap until the Tenant voids it.** Nothing voids an allow whose Payment window closed; call `POST /v1/decisions/{id}/void`.
@@ -314,7 +316,7 @@ The run for #85, with ids and timings, is posted on the Phase 4 PRD (#74).
 - **Mock Payments stay `scheduled` outside tests,** unless mock settle is on. No webhook comes from the mock rail, and the reconciliation sweep is off for it. The hosted demo sets `AGENTPAY_MOCK_SETTLE_AFTER_SECONDS`, and the worker's sweep then captures every debited mock Payment older than that, through the same path as a rail webhook (ADR-0019). It captures even a mock Payment whose token would fail, and the app won't start with it on the Razorpay rail.
 - **Disputes are reported by the Tenant,** never by the rail. No pack holds the merchant's own fulfilment evidence, so `not_received` and `not_as_described` are never better than mixed.
 - **A Dispute runs end to end only on the mock rail.** A Dispute needs a captured Payment, and a Razorpay test-mode debit can't complete (above), so demo journey 3 is `tests/api/test_end_to_end.py`, or a running stack with mock settle on (`python -m demo`, see [Demo](#demo)).
-- **Refunds are only partly built (#205).** A Tenant can refund a captured Payment on the mock rail, and a processed refund gives back Monthly cap, but a refund doesn't yet run on Razorpay (#210). A Dispute is still evidence only and never moves money.
+- **Refunds on Razorpay are untested end to end, and Dashboard refunds are invisible.** Test mode never captures a card-recurring Payment, so a Razorpay refund that succeeds is tested on the fake API only (#210). A refund made in the Razorpay Dashboard isn't ours and is dropped (ADR-0012). A Dispute is still evidence only and never moves money.
 - **Only INR and USD,** and one Policy pack for every Tenant.
 - **Scopes only help if the Agent gets only the agent key.** A Tenant that hands an Agent its tenant key, or a key with every scope, gives it back the power to grant Mandates and read Intent verdicts.
 - **New merchant has a harmless race.** Two parallel first payments to the same merchant under different Mandates can both see it as new. Both just step up.

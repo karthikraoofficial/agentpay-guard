@@ -548,14 +548,16 @@ class InMemoryUnitOfWork:
         ]
         return [(tenant_id, payment_id) for _, tenant_id, payment_id in sorted(due)]
 
-    def pending_refunds(self, created_before: datetime) -> list[tuple[TenantId, RefundId]]:
+    def pending_refunds(
+        self, created_before: datetime
+    ) -> list[tuple[TenantId, PaymentId, RefundId]]:
         due = [
-            (r.created_at, tenant_id, r.refund_id)
+            (r.created_at, tenant_id, r.payment_id, r.refund_id)
             for tenant_id, data in list(self._tenants.items())
             for r in data.refunds.values()
             if r.status == "pending" and r.created_at < created_before
         ]
-        return [(tenant_id, refund_id) for _, tenant_id, refund_id in sorted(due)]
+        return [(t, p, r) for _, t, p, r in sorted(due)]
 
     def due_debits(self, now: datetime) -> list[tuple[TenantId, PaymentId]]:
         due = [

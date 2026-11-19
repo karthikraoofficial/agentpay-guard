@@ -17,6 +17,7 @@ from core.domain.money import Money
 from core.domain.parties import TenantId
 from core.domain.payments import PaymentId
 from core.domain.rails import RAIL_NOTICE_FAILED, RailToken
+from core.domain.refunds import RefundId
 from core.ports import IdempotencyKey, RailUnavailable
 from tests.adapters.fake_razorpay import CREATED_AT, NOTICE_SECONDS, FakeRazorpay
 from tests.conftest import make_settings
@@ -375,3 +376,111 @@ def test_the_payers_contact_details_never_reach_the_logs(
     logged = "\n".join(r.getMessage() for r in caplog.records)
     assert "pmt_contact" in logged
     assert fake.EMAIL not in logged and fake.CONTACT not in logged
+
+
+# --- Refunds (#210) --------------------------------------------------------------------
+
+
+def _captured(rail: RazorpayRail, fake: FakeRazorpay, payment_id: str = "pmt_paid") -> str:
+    """A Payment whose debit Razorpay captured; returns Razorpay's payment id."""
+    _schedule(rail, payment_id)
+    return fake.settle(payment_id)
+
+
+def _refund(rail: RazorpayRail, payment_id: str, refund_id: str, minor: int = 20_000):  # type: ignore[no-untyped-def]
+    amount = Money(minor=minor, currency="INR")
+    key = IdempotencyKey(f"idem_{refund_id}")
+    return rail.refund(TENANT, PaymentId(payment_id), RefundId(refund_id), amount, key)
+
+
+def test_a_refund_is_made_on_the_captured_payment_with_our_ids_in_its_notes(
+    rail: RazorpayRail, fake: FakeRazorpay
+) -> None:
+    paid = _captured(rail, fake)
+
+    refund = _refund(rail, "pmt_paid", "rfd_one")
+
+    [made] = fake.refunds[paid]
+    assert made["notes"] == {
+        "agentpay_refund_id": "rfd_one",
+        "agentpay_payment_id": "pmt_paid",
+        "agentpay_tenant_id": "ten_rzp",
+    }
+    assert (made["receipt"], made["amount"]) == ("rfd_one", 20_000)
+    assert (refund.status, refund.rail_refund_id) == ("processed", made["id"])
+    assert refund.refund_id == "rfd_one"
+
+
+def test_asking_again_for_a_refund_finds_it_instead_of_making_another(
+    rail: RazorpayRail, fake: FakeRazorpay
+) -> None:
+    paid = _captured(rail, fake)
+    first = _refund(rail, "pmt_paid", "rfd_one")
+
+    again = _refund(rail, "pmt_paid", "rfd_one")
+
+    assert again == first
+    assert len(fake.refunds[paid]) == 1
+
+
+def test_a_refund_whose_answer_was_lost_is_found_afterwards(
+    rail: RazorpayRail, fake: FakeRazorpay
+) -> None:
+    _captured(rail, fake)
+    fake.refund_times_out_after_creating = True
+
+    with pytest.raises(RailUnavailable):
+        _refund(rail, "pmt_paid", "rfd_one")
+
+    found = rail.get_refund(TENANT, PaymentId("pmt_paid"), RefundId("rfd_one"))
+    assert found is not None and found.status == "processed"
+    assert _refund(rail, "pmt_paid", "rfd_one") == found  # a retry never refunds twice
+
+
+def test_a_refund_razorpay_refuses_fails_with_its_code(
+    rail: RazorpayRail, fake: FakeRazorpay
+) -> None:
+    _captured(rail, fake)
+
+    refund = _refund(rail, "pmt_paid", "rfd_over", minor=AMOUNT.minor + 1)
+
+    assert (refund.status, refund.failure_code) == ("failed", "BAD_REQUEST_ERROR")
+    assert refund.rail_refund_id is None
+
+
+def test_a_payment_razorpay_never_captured_is_not_sent_a_refund(
+    rail: RazorpayRail, fake: FakeRazorpay
+) -> None:
+    _schedule(rail, "pmt_scheduled")
+
+    refund = _refund(rail, "pmt_scheduled", "rfd_one")
+
+    assert (refund.status, refund.failure_code) == ("failed", "PAYMENT_NOT_CAPTURED")
+    assert not [r for r in fake.requests if r.url.path.endswith("/refund")]
+
+
+@pytest.mark.parametrize("status", ["pending", "processed", "failed"])
+def test_get_refund_reads_razorpays_status(
+    rail: RazorpayRail, fake: FakeRazorpay, status: str
+) -> None:
+    paid = _captured(rail, fake)
+    fake.refund_status = "pending"
+    made = _refund(rail, "pmt_paid", "rfd_one")
+    fake.refunds[paid][0]["status"] = status
+
+    found = rail.get_refund(TENANT, PaymentId("pmt_paid"), RefundId("rfd_one"))
+
+    assert made.status == "pending"
+    assert found is not None
+    assert (found.status, found.rail_refund_id) == (status, made.rail_refund_id)
+
+
+def test_get_refund_finds_nothing_for_an_unknown_refund_or_another_tenant(
+    rail: RazorpayRail, fake: FakeRazorpay
+) -> None:
+    _captured(rail, fake)
+    _refund(rail, "pmt_paid", "rfd_one")
+
+    assert rail.get_refund(TENANT, PaymentId("pmt_paid"), RefundId("rfd_other")) is None
+    other = TenantId("ten_other")
+    assert rail.get_refund(other, PaymentId("pmt_paid"), RefundId("rfd_one")) is None

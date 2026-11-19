@@ -652,3 +652,95 @@ def test_prompt_3_offers_the_refund_kind_and_leaves_2_as_released() -> None:
     assert '- "refund":' not in PROMPTS["dispute_narrative@2"]
     released = hashlib.sha256(PROMPTS["dispute_narrative@2"].encode()).hexdigest()
     assert released == "c365df3b43d5f0a5cc62811e9c83b4a29152f05434a508cf44be13a983c34104"
+
+
+# --- Razorpay refund webhooks (#210) -------------------------------------------------
+
+
+def refund_event(
+    hooked: Hooked, refund: dict[str, Any], kind: str = "refund.processed", **entity: Any
+) -> dict[str, Any]:
+    """A Razorpay refund webhook body for `refund`, shaped like Razorpay's own samples."""
+    notes = {
+        "agentpay_refund_id": refund["refund_id"],
+        "agentpay_payment_id": refund["payment_id"],
+        "agentpay_tenant_id": hooked.tenant_id(),
+    }
+    return {
+        "entity": "event",
+        "account_id": "acc_test",
+        "event": kind,
+        "contains": ["refund", "payment"],
+        "payload": {
+            "refund": {
+                "entity": {
+                    "id": refund["rail_refund_id"] or "rfnd_unknown",
+                    "entity": "refund",
+                    "amount": refund["amount"]["minor"],
+                    "currency": refund["amount"]["currency"],
+                    "payment_id": "pay_test",
+                    "notes": notes,
+                    "status": "processed" if kind == "refund.processed" else "failed",
+                }
+                | entity
+            }
+        },
+        "created_at": 1793000000,
+    }
+
+
+def held_refund(hooked: Hooked) -> tuple[dict[str, Any], dict[str, Any]]:
+    payment = hooked.captured()
+    hooked.api.rail.hold_refunds()
+    refund = hooked.refund(payment["payment_id"], amount=inr(10_000)).json()
+    assert refund["status"] == "pending"
+    return payment, refund
+
+
+def test_a_refund_processed_webhook_settles_the_refund_once(hooked: Hooked) -> None:
+    payment, refund = held_refund(hooked)
+
+    for _ in range(2):  # a redelivery changes nothing
+        assert hooked.deliver(refund_event(hooked, refund), "evt_rfnd_1").status_code == 200
+
+    [shown] = hooked.payment(payment["payment_id"], headers=hooked.manage).json()["refunds"]
+    assert (shown["status"], shown["rail_refund_id"]) == ("processed", refund["rail_refund_id"])
+    assert refund_statuses(hooked, payment) == ["pending", "processed"]
+    hooked.relay()
+    assert [b["type"] for b, _, _ in hooked.refund_events()] == ["refund.processed"]
+
+
+def test_a_refund_failed_webhook_fails_the_refund(hooked: Hooked) -> None:
+    payment, refund = held_refund(hooked)
+
+    hooked.deliver(refund_event(hooked, refund, "refund.failed"), "evt_rfnd_2")
+
+    [shown] = hooked.payment(payment["payment_id"], headers=hooked.manage).json()["refunds"]
+    assert (shown["status"], shown["failure_code"]) == ("failed", "REFUND_FAILED")
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"notes": {}},  # made in the dashboard: no Refund of ours
+        {"notes": {"agentpay_refund_id": "rfd_unknown", "agentpay_tenant_id": "ten_x"}},
+        {"amount": 10_001},
+        {"tenant": "ten_someone_else"},
+    ],
+    ids=["no-refund-id", "unknown-refund", "other-amount", "other-tenant"],
+)
+def test_a_refund_event_that_is_not_ours_is_dropped(
+    hooked: Hooked, changes: dict[str, Any]
+) -> None:
+    payment, refund = held_refund(hooked)
+    body = refund_event(hooked, refund)
+    entity = body["payload"]["refund"]["entity"]
+    if "tenant" in changes:
+        entity["notes"]["agentpay_tenant_id"] = changes["tenant"]
+    else:
+        entity |= changes
+
+    assert hooked.deliver(body, "evt_rfnd_x").status_code == 200
+
+    [shown] = hooked.payment(payment["payment_id"], headers=hooked.manage).json()["refunds"]
+    assert shown["status"] == "pending"

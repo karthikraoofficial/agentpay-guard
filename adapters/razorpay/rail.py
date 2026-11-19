@@ -11,6 +11,11 @@ notice.
 
 One order per Payment (ADR-0014): Razorpay orders take no idempotency key, so the order is
 looked up by receipt before one is made, and a retry after a lost answer finds it.
+
+Refunds (#210, ADR-0024) work the same way: a refund is made on the Payment's captured
+Razorpay payment with our Refund id as its `receipt` and in its notes, and that payment's
+refunds are read first, so asking again for a Refund finds the one already made. The list
+is fetched by payment id, not searched, so a new refund is in it at once.
 """
 
 import logging
@@ -22,22 +27,27 @@ import httpx
 from pydantic import SecretStr
 
 from adapters.razorpay.api import RazorpayApi, RazorpayRefused
-from adapters.razorpay.webhooks import PAYMENT_ID_NOTE
+from adapters.razorpay.webhooks import PAYMENT_ID_NOTE, REFUND_ID_NOTE, TENANT_NOTE
 from core.domain.money import Money
 from core.domain.parties import TenantId
 from core.domain.payments import PaymentId
 from core.domain.rails import RAIL_NOTICE_FAILED, RailToken
-from core.domain.refunds import RefundId
+from core.domain.refunds import RefundId, RefundStatus
 from core.ports import IdempotencyKey, PaymentRail, RailCharge, RailRefund, RailUnavailable
 from core.settings import Settings
 
 log = logging.getLogger(__name__)
 
-# The notes key that ties an order to its Tenant: one rail account serves every Tenant,
-# so a Tenant only ever sees orders carrying its own id (ADR-0012).
-TENANT_NOTE = "agentpay_tenant_id"
-# A refunded payment was captured first; refunds arrive with disputes in Phase 5.
+# A refunded payment was captured first.
 _CAPTURED = frozenset({"captured", "refunded"})
+# The failure code of a Refund whose Payment Razorpay never captured.
+PAYMENT_NOT_CAPTURED = "PAYMENT_NOT_CAPTURED"
+_REFUND_STATUSES: dict[str, RefundStatus] = {
+    "created": "pending",
+    "pending": "pending",
+    "processed": "processed",
+    "failed": "failed",
+}
 
 
 class RazorpayRail:
@@ -155,10 +165,42 @@ class RazorpayRail:
         amount: Money,
         idempotency_key: IdempotencyKey,
     ) -> RailRefund:
-        raise NotImplementedError("Razorpay refunds come with #210")
+        paid = self._captured_payment(tenant_id, payment_id)
+        if paid is None:
+            return RailRefund(
+                refund_id=refund_id,
+                status="failed",
+                amount=amount,
+                failure_code=PAYMENT_NOT_CAPTURED,
+            )
+        found = self._find_refund(tenant_id, paid, refund_id)
+        if found is not None:
+            return found
+        try:
+            made = self._api.post(
+                f"/payments/{paid}/refund",
+                {
+                    "amount": amount.minor,
+                    "speed": "normal",
+                    "receipt": refund_id,
+                    "notes": {
+                        REFUND_ID_NOTE: refund_id,
+                        PAYMENT_ID_NOTE: payment_id,
+                        TENANT_NOTE: tenant_id,
+                    },
+                },
+            )
+        except RazorpayRefused as refused:
+            return RailRefund(
+                refund_id=refund_id, status="failed", amount=amount, failure_code=refused.code
+            )
+        return _parsed(lambda: _refunded(refund_id, made))
 
-    def get_refund(self, tenant_id: TenantId, refund_id: RefundId) -> RailRefund | None:
-        raise NotImplementedError("Razorpay refunds come with #210")
+    def get_refund(
+        self, tenant_id: TenantId, payment_id: PaymentId, refund_id: RefundId
+    ) -> RailRefund | None:
+        paid = self._captured_payment(tenant_id, payment_id)
+        return None if paid is None else self._find_refund(tenant_id, paid, refund_id)
 
     def token_expires_at(self, rail_token: RailToken) -> datetime | None:
         """When Razorpay expires the token, or None if it doesn't know the token. Test
@@ -211,6 +253,28 @@ class RazorpayRail:
         # Attempted, but the payment isn't listed yet: still in flight, whatever the notice.
         scheduled = _parsed(lambda: _scheduled(payment_id, order))
         return scheduled.model_copy(update={"rail_payment_id": made["id"]}) if made else scheduled
+
+    def _captured_payment(self, tenant_id: TenantId, payment_id: PaymentId) -> str | None:
+        """Razorpay's id for the Payment's captured payment, or None if it has none."""
+        order = self._find_order(tenant_id, payment_id)
+        if order is None:
+            return None
+        charge = self._charge(payment_id, order)
+        return charge.rail_payment_id if charge.status == "captured" else None
+
+    def _find_refund(
+        self, tenant_id: TenantId, paid: str, refund_id: RefundId
+    ) -> RailRefund | None:
+        found = self._lookup(f"/payments/{paid}/refunds")
+        ours: list[dict[str, Any]] = _parsed(
+            lambda: [
+                r
+                for r in found["items"]
+                if (r.get("notes") or {}).get(REFUND_ID_NOTE) == refund_id
+                and (r.get("notes") or {}).get(TENANT_NOTE) == tenant_id
+            ]
+        )
+        return _parsed(lambda: _refunded(refund_id, ours[0])) if ours else None
 
     def _lookup(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
         """A read whose refusal says nothing about the charge, so its outcome is unknown."""
@@ -269,6 +333,17 @@ def _debited(payment_id: PaymentId, payment: dict[str, Any]) -> RailCharge:
         amount=Money(minor=payment["amount"], currency=payment["currency"]),
         rail_payment_id=payment["id"],
         failure_code=None if captured else (payment.get("error_code") or "UNKNOWN"),
+    )
+
+
+def _refunded(refund_id: RefundId, refund: dict[str, Any]) -> RailRefund:
+    status = _REFUND_STATUSES[refund["status"]]
+    return RailRefund(
+        refund_id=refund_id,
+        status=status,
+        amount=Money(minor=refund["amount"], currency=refund["currency"]),
+        rail_refund_id=refund["id"],
+        failure_code="REFUND_FAILED" if status == "failed" else None,
     )
 
 
