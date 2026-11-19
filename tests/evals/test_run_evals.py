@@ -198,6 +198,16 @@ def test_the_dispute_set_covers_every_reason_and_strength_on_1_4_0() -> None:
     assert run_dispute_cases(cases, PACKS).mismatches == []
 
 
+def test_the_refund_dispute_set_tests_the_credit_rule_on_1_5_0() -> None:
+    cases = load_dispute_cases(GOLDEN / "disputes_refunds.jsonl")
+
+    assert {(c.pack.id, c.pack.version) for c in cases} == {("default", "1.5.0")}
+    assert all(c.refunded_minor for c in cases)
+    # A full refund is strong even where the evidence was weak; a partial one isn't.
+    assert {c.expected.strength for c in cases} == {"strong", "mixed"}
+    assert run_dispute_cases(cases, PACKS).mismatches == []
+
+
 def test_a_wrong_dispute_label_fails_the_run(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

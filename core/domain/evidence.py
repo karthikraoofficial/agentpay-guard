@@ -95,7 +95,7 @@ class Assessment(_Frozen):
 
 # What a claim is about, which fixes the kinds of Audit record it may cite.
 ClaimKind = Literal[
-    "mandate", "decision", "payer_approval", "payment", "void", "dispute", "context"
+    "mandate", "decision", "payer_approval", "payment", "void", "dispute", "refund", "context"
 ]
 
 CLAIM_CITES: dict[ClaimKind, frozenset[AuditKind]] = {
@@ -105,6 +105,7 @@ CLAIM_CITES: dict[ClaimKind, frozenset[AuditKind]] = {
     "payment": frozenset({"payment"}),
     "void": frozenset({"void"}),
     "dispute": frozenset({"dispute_opened"}),
+    "refund": frozenset({"refund"}),  # money already returned on the Payment (#208)
     "context": frozenset({"decision", "payment"}),  # related Decisions, the Payer's Payments
 }
 

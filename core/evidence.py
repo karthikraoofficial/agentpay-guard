@@ -301,6 +301,18 @@ def _sentence(record: AuditRecord) -> str:
             f"On {at}, the Tenant reported a Dispute of Payment {dispute.payment_id} "
             f"as {dispute.reason}, to be answered by {_at(dispute.respond_by)}."
         )
+    if record.kind == "refund" and record.refund:
+        refund = record.refund
+        asked = refund.status == "pending"
+        rail = f" on the rail as {refund.rail_refund_id}" if refund.rail_refund_id else ""
+        failed = f" with code {refund.failure_code}" if refund.failure_code else ""
+        return (
+            f"On {at}, the Tenant asked to refund {_money(refund.amount)} of Payment "
+            f"{refund.payment_id} (Refund {refund.refund_id})."
+            if asked
+            else f"On {at}, Refund {refund.refund_id} of {_money(refund.amount)} was "
+            f"{refund.status}{rail}{failed}."
+        )
     raise ValueError(f"no sentence for a {record.kind} record")
 
 
@@ -311,6 +323,7 @@ _KIND: dict[AuditKind, ClaimKind] = {
     "void": "void",
     "dispute_opened": "dispute",
     "dispute_signed_off": "dispute",
+    "refund": "refund",
 }
 
 

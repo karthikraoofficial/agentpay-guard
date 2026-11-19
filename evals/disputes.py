@@ -15,7 +15,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.domain.audit import AuditRecord, DecisionInputs, PaymentEvidence
+from core.domain.audit import AuditRecord, DecisionInputs, PaymentEvidence, RefundEvidence
 from core.domain.consent import Attestation, ConsentRequestId, ResolutionEvidence
 from core.domain.decisions import (
     AgentPaymentRequest,
@@ -33,6 +33,7 @@ from core.domain.mandates import Mandate
 from core.domain.money import Money
 from core.domain.parties import TenantId
 from core.domain.payments import PaymentId
+from core.domain.refunds import RefundId, RefundStatus
 from core.domain.signals import IntentSignal, Signals
 from core.evidence_strength import assess
 from core.narrative_check import check_narrative
@@ -85,6 +86,8 @@ class Scenario(_Strict):
     approval: Approval | None = None
     mandate_revoked: Literal["before_decision", "before_capture", "after_capture"] | None = None
     other_payments: tuple[OtherPayment, ...] = ()
+    # A processed Refund of this much, an hour after capture and before the Dispute (#208).
+    refunded_minor: int | None = Field(default=None, gt=0)
     decided_at: datetime
     captured_at: datetime
     # Text from the Agent's side, which a live eval fills with prompt injections.
@@ -220,6 +223,11 @@ def bundle_for(case: Scenario) -> EvidenceBundle:
         )
     paid = Money(minor=case.payment_amount_minor, currency=currency)
     trail.append(_payment(len(trail) + 1, case.captured_at, "pmt_eval", paid))
+    if case.refunded_minor is not None:
+        back = Money(minor=case.refunded_minor, currency=currency)
+        refunded_at = case.captured_at + timedelta(hours=1)
+        for status in ("pending", "processed"):
+            trail.append(_refund(len(trail) + 1, refunded_at, status, back, pack))
     payer_payments = tuple(
         _payment(
             100 + i,
@@ -257,6 +265,26 @@ def _payment(seq: int, at: datetime, payment_id: str, amount: Money) -> BundleRe
             rail="mock",
             rail_payment_id=f"rail_{payment_id}",
             failure_code=None,
+        ),
+    )
+
+
+def _refund(
+    seq: int, at: datetime, status: RefundStatus, amount: Money, pack: PackRef
+) -> BundleRecord:
+    return _record(
+        seq,
+        "refund",
+        at,
+        refund=RefundEvidence(
+            refund_id=RefundId("rfd_eval"),
+            payment_id=PaymentId("pmt_eval"),
+            status=status,
+            amount=amount,
+            reason_hash=None,
+            rail_refund_id="rfnd_eval" if status == "processed" else None,
+            failure_code=None,
+            policy_pack=pack,
         ),
     )
 

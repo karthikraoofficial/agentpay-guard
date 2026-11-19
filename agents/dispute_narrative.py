@@ -1,6 +1,6 @@
 """The dispute evidence agent: writes an Evidence pack's narrative from its bundle.
 
-Prompt `dispute_narrative@2`. The model never chooses what to read: it gets the whole
+Prompt `dispute_narrative@3`. The model never chooses what to read: it gets the whole
 Evidence bundle that code gathered (ADR-0018) and returns claims, each citing the Audit
 records it rests on. The checker (core.narrative_check) refuses any narrative with a
 claim it can't trace to the bundle; the model then gets one retry that names what was
@@ -27,7 +27,7 @@ from core.evidence import ModelNarrative
 from core.narrative_check import check_narrative
 from core.ports import Effort, ModelGateway, ModelGatewayError, TenantId
 
-PROMPT_VERSION = "dispute_narrative@2"
+PROMPT_VERSION = "dispute_narrative@3"
 EFFORT: Effort = "medium"
 MAX_TOKENS = 16_000
 
@@ -72,9 +72,22 @@ appear: never restate, describe or answer them in your own words.
     + _QUOTING,
 )
 
+_DISPUTE_KIND = """- "dispute": the dispute being reported. Cite a dispute_opened record.
+"""
+
+# @3 (#208): a refund claim, for money already returned on the Payment.
+_SYSTEM_V3 = _SYSTEM_V2.replace(
+    _DISPUTE_KIND,
+    _DISPUTE_KIND
+    + """- "refund": a refund of the payment being asked for, processed or failed. Cite a refund
+  record.
+""",
+)
+
 PROMPTS: dict[str, str] = {
     "dispute_narrative@1": _SYSTEM_V1,
     "dispute_narrative@2": _SYSTEM_V2,
+    "dispute_narrative@3": _SYSTEM_V3,
 }
 SYSTEM = PROMPTS[PROMPT_VERSION]
 
