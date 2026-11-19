@@ -266,8 +266,13 @@ class InMemoryTransaction:
 
     def allowed_spend(self, mandate_id: MandateId, start: datetime, end: datetime) -> int:
         decisions, voided = self._data.decisions, self._data.voids
+        # Processed Refunds come off the Decision they refund, in the month it counts.
+        refunded: dict[DecisionId, int] = {}
+        for r in self._data.refunds.values():
+            if r.status == "processed":
+                refunded[r.decision_id] = refunded.get(r.decision_id, 0) + r.amount.minor
         allowed = sum(
-            d.amount.minor
+            d.amount.minor - refunded.get(d.decision_id, 0)
             for d in decisions.values()
             if d.mandate_id == mandate_id
             and d.outcome == "allow"
@@ -275,7 +280,7 @@ class InMemoryTransaction:
             and d.decision_id not in voided
         )
         approved = sum(
-            decisions[c.decision_id].amount.minor
+            decisions[c.decision_id].amount.minor - refunded.get(c.decision_id, 0)
             for c in self._data.consents.values()
             if c.resolution is not None
             and c.resolution.status == "approved"

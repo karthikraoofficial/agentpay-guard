@@ -19,8 +19,10 @@ from adapters.memory.workflow import InMemoryWorkflow
 from adapters.postgres.store import PostgresStore
 from api.main import create_app
 from core.domain.payments import PaymentId
+from core.ports import RailUnavailable
 from tests.api.conftest import NOW, Api, MovableClock
 from tests.api.test_disputes import DISPUTE_RULES, SECRET, Disputes
+from tests.api.test_payments import token
 from tests.api.test_rail_webhooks import event
 from tests.api.test_tenants_payers_agents import assert_problem
 from tests.conftest import make_settings
@@ -299,3 +301,88 @@ def test_two_refunds_at_once_queue_on_the_payment_and_never_overshoot(
     assert sorted(statuses) == [201, 409]
     assert rail.refunds_for(refunds.tenant_id(), PaymentId(payment["payment_id"])) == 1
     api.assert_evidence_holds()
+
+
+# --- Spent this month (#207) ---------------------------------------------------------
+
+
+def tight(refunds: Refunds, cap: int) -> str:
+    """A Mandate whose Monthly cap and per-transaction cap are both `cap` rupees."""
+    mandate = refunds.create(
+        rail_token=token(MockRail.token_that_captures()),
+        per_txn_cap=inr(cap * 100),
+        monthly_cap=inr(cap * 100),
+    )
+    mandate_id: str = mandate["mandate_id"]
+    return mandate_id
+
+
+def spent_seen_by(refunds: Refunds, decision: dict[str, Any]) -> int:
+    """Spent this month as the Decision's Audit record says the engine saw it."""
+    spent: int = refunds.audit(decision["audit_record_id"]).record.inputs.spent_this_month.minor
+    return spent
+
+
+def test_a_processed_refund_gives_back_the_monthly_cap_it_used(refunds: Refunds) -> None:
+    mandate_id = tight(refunds, 2_000)
+    payment = refunds.captured(mandate_id=mandate_id)  # INR 1,250 of 2,000
+    over = refunds.ask(mandate_id=mandate_id).json()
+    assert (over["outcome"], over["reason_codes"][0]) == ("block", "MONTHLY_CAP_EXCEEDED")
+
+    refunds.refund(payment["payment_id"], amount=payment["amount"])
+
+    after = refunds.ask(mandate_id=mandate_id).json()
+    assert after["outcome"] == "allow"
+    assert spent_seen_by(refunds, after) == 0
+
+
+def test_a_partial_refund_gives_back_exactly_its_amount(refunds: Refunds) -> None:
+    mandate_id = tight(refunds, 2_000)
+    payment = refunds.captured(mandate_id=mandate_id)
+
+    refunds.refund(payment["payment_id"], amount=inr(500_00))
+
+    later = refunds.allow(mandate_id=mandate_id, amount=inr(100_00))
+    assert spent_seen_by(refunds, later) == 1_250_00 - 500_00
+
+
+def test_a_failed_refund_gives_back_nothing(refunds: Refunds) -> None:
+    mandate_id = tight(refunds, 2_000)
+    payment = refunds.captured(mandate_id=mandate_id)
+    refunds.api.rail.forget(refunds.tenant_id(), PaymentId(payment["payment_id"]))
+
+    failed = refunds.refund(payment["payment_id"], amount=payment["amount"]).json()
+
+    assert failed["status"] == "failed"
+    later = refunds.allow(mandate_id=mandate_id, amount=inr(100_00))
+    assert spent_seen_by(refunds, later) == 1_250_00
+
+
+def test_a_pending_refund_gives_back_nothing(
+    refunds: Refunds, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mandate_id = tight(refunds, 2_000)
+    payment = refunds.captured(mandate_id=mandate_id)
+
+    def times_out(*args: Any) -> None:
+        raise RailUnavailable("timed out")
+
+    monkeypatch.setattr(refunds.api.rail, "refund", times_out)
+    pending = refunds.refund(payment["payment_id"], amount=payment["amount"]).json()
+
+    assert pending["status"] == "pending"
+    later = refunds.allow(mandate_id=mandate_id, amount=inr(100_00))
+    assert spent_seen_by(refunds, later) == 1_250_00
+
+
+def test_refunding_last_months_payment_frees_nothing_this_month(refunds: Refunds) -> None:
+    mandate_id = tight(refunds, 2_000)
+    refunds.api.clock.advance(timedelta(days=28, hours=14, minutes=25))  # 2026-11-30 23:55Z
+    november = refunds.captured(mandate_id=mandate_id)
+    refunds.api.clock.advance(timedelta(minutes=7))  # 2026-12-01 00:02Z
+    december = refunds.captured(mandate_id=mandate_id, amount=inr(500_00))
+
+    refunds.refund(november["payment_id"], amount=november["amount"])
+
+    later = refunds.allow(mandate_id=mandate_id, amount=inr(100_00))
+    assert spent_seen_by(refunds, later) == december["amount"]["minor"]
