@@ -89,6 +89,11 @@ class Settings(BaseSettings):
     reconcile_interval_seconds: int = Field(default=300, gt=0)
     # At least a minute, so the sweep never fails a Payment whose rail call is in flight.
     reconcile_after_seconds: int = Field(default=600, ge=60)
+    # The circuit breaker on the API's rail calls (#226, ADR-0025): after this many
+    # unknown outcomes in a row, payments and refunds answer 503 RAIL_UNAVAILABLE for
+    # rail_breaker_open_seconds, then one request is let through to try the rail.
+    rail_breaker_failures: int = Field(default=5, ge=1)
+    rail_breaker_open_seconds: int = Field(default=30, gt=0, le=3600)
     # Mock settle, for the hosted demo only (ADR-0019): when set, the worker's sweep
     # captures every debited mock Payment older than this many seconds, so a demo Payment can be
     # disputed. Unset, mock Payments stay scheduled. Refused with any real rail.

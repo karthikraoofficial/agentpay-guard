@@ -27,6 +27,7 @@ from fastapi import APIRouter, Request, Response
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 from api.deps import (
+    BreakerDep,
     ClockDep,
     DecideTenant,
     IdemKey,
@@ -57,6 +58,7 @@ from core.domain.refunds import (
     refund_refusal,
 )
 from core.ports import PaymentRail, RailUnavailable, TenantId
+from core.rail_breaker import RailBreaker
 from core.refunds import record_refund, request_refund
 
 router = APIRouter(prefix="/v1/payments", tags=["payments"])
@@ -144,6 +146,7 @@ def create_payment(
     pack: PackDep,
     settings: SettingsDep,
     rail: RailDep,
+    breaker: BreakerDep,
     telemetry: TelemetryDep,
     key: IdemKey,
 ) -> Response:
@@ -179,6 +182,7 @@ def create_payment(
             raise ApiError(409, refusal, _REFUSAL_TEXT[refusal])
         if mandate.rail_token is None:  # payment_refusal refuses this; keeps mypy sure
             raise RuntimeError("a payable Mandate has a Rail token")
+        _fail_fast(breaker, clock)  # last, so only a request that would reach the rail tries
         payment = Payment(
             payment_id=PaymentId(new_id("pmt")),
             tenant_id=tenant,
@@ -200,13 +204,15 @@ def create_payment(
             first = run_idempotent(tx, key, fingerprint, clock, write)
         if made:
             payment, rail_token = made[0]
-        elif first.headers.get(REPLAYED) and (
-            unanswered := _unanswered(store, tenant, first, clock, settings, rail)
+        elif (
+            first.headers.get(REPLAYED)
+            and (unanswered := _unanswered(store, tenant, first, clock, settings, rail))
+            and breaker.refusal(clock.now()) is None
         ):
             payment, rail_token = unanswered
         else:
             return first
-        return _charge(store, clock, rail, tenant, payment, rail_token, key, fingerprint)
+        return _charge(store, clock, rail, breaker, tenant, payment, rail_token, key, fingerprint)
 
 
 def _unanswered(
@@ -239,10 +245,32 @@ def _unanswered(
     return payment, mandate.rail_token
 
 
+def _fail_fast(breaker: RailBreaker, clock: ClockDep) -> None:
+    """Refuse with 503 RAIL_UNAVAILABLE while the breaker is open. Raised inside the write,
+    so nothing is written and the Idempotency-Key stays free for the retry."""
+    wait = breaker.refusal(clock.now())
+    if wait is not None:
+        raise ApiError(
+            503,
+            "RAIL_UNAVAILABLE",
+            "The rail isn't answering. Nothing was written: retry after Retry-After seconds.",
+            headers={"Retry-After": str(wait)},
+        )
+
+
+def _heard(breaker: RailBreaker, clock: ClockDep, unknown: bool) -> None:
+    """Tell the breaker how a rail call went: an answer, or an unknown outcome."""
+    if not unknown:
+        breaker.answered()
+    elif breaker.unavailable(clock.now()):
+        log.warning("rail breaker opened: payments and refunds answer 503 RAIL_UNAVAILABLE")
+
+
 def _charge(
     store: StoreDep,
     clock: ClockDep,
     rail: PaymentRail,
+    breaker: RailBreaker,
     tenant: TenantId,
     payment: Payment,
     rail_token: RailToken,
@@ -257,6 +285,7 @@ def _charge(
         # reconciliation sweep asks again by Payment id.
         log.warning("rail unavailable for Payment %s, Tenant %s", payment.payment_id, tenant)
         charge = None
+    _heard(breaker, clock, unknown=charge is None)
     with store.transaction(tenant) as tx:
         current = apply_charge(tx, payment.payment_id, charge, decision_time(clock.now()))
         body = _out(current).model_dump_json().encode("utf-8")
@@ -301,6 +330,7 @@ def create_refund(
     clock: ClockDep,
     pack: PackDep,
     rail: RailDep,
+    breaker: BreakerDep,
     key: IdemKey,
 ) -> Response:
     fingerprint = request_hash(request, body)
@@ -334,6 +364,7 @@ def create_refund(
         if refusal is not None:
             log.info("refund refused %s: Payment %s, Tenant %s", refusal, payment_id, tenant)
             raise ApiError(409, refusal, _REFUND_REFUSAL_TEXT[refusal])
+        _fail_fast(breaker, clock)  # last, so only a request that would reach the rail tries
         ref = PackRef(id=pack.pack.id, version=pack.pack.version, hash=pack.hash)
         refund = request_refund(tx, payment, body.amount, body.reason, ref, now)
         made.append(refund)
@@ -351,6 +382,7 @@ def create_refund(
         # again by its id (#209).
         log.warning("rail unavailable for Refund %s, Tenant %s", refund.refund_id, tenant)
         answer = None
+    _heard(breaker, clock, unknown=answer is None)
     with store.transaction(tenant) as tx:
         current = record_refund(tx, refund.refund_id, answer, decision_time(clock.now()))
         content = _refund_out(current).model_dump_json().encode("utf-8")
