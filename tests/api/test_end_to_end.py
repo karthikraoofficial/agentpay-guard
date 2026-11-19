@@ -1,6 +1,6 @@
 """End to end on the mock rail: demo journey 2 (Phase 4), an allow becomes a captured
-Payment; and demo journey 3 (Phase 5), that Payment is disputed and its Evidence pack is
-cited, signed off and verified.
+Payment, which the Tenant then refunds (#211); and demo journey 3 (Phase 5), that Payment
+is disputed and its Evidence pack is cited, signed off and verified.
 
 A real test-mode card debit can't complete, because Razorpay waits 36 h 5 min after the
 Pre-debit notice and a test token expires before that (ADR-0017). So this runs the whole
@@ -95,6 +95,24 @@ def test_an_allow_becomes_a_captured_payment_the_tenant_hears_about(
         if r.payment is not None and r.payment.payment_id == payment["payment_id"]
     ]
     assert statuses[0] == "scheduled" and statuses[-1] == "captured"
+
+    # The Tenant refunds it in full (#211), hears that through its webhook, and the
+    # Payment, still captured, shows the money returned.
+    manage = api.new_key(journey.tenant_id(), {"manage"})
+    refund = api.post(
+        f"/v1/payments/{payment['payment_id']}/refunds", manage, {"amount": payment["amount"]}
+    ).json()
+    assert refund["status"] == "processed"
+    shown: dict[str, Any] = journey.payment(payment["payment_id"]).json()
+    assert (shown["status"], shown["refunded"]) == ("captured", payment["amount"])
+    journey.relay()
+    [(body, raw, headers)] = [r for r in journey.received() if r[0]["type"] == "refund.processed"]
+    assert verifies(raw, headers["X-AgentPay-Signature"], secret)
+    assert body["data"]["refund_id"] == refund["refund_id"]
+    assert [r.refund.status for r in journey.chain() if r.refund is not None] == [
+        "pending",
+        "processed",
+    ]
     messages: list[str] = []
     assert verify_chain(api.store, journey.tenant_id(), messages.append) == 0, messages
 

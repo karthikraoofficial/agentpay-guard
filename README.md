@@ -7,7 +7,8 @@ payment it decides, in real time, whether to **allow** it, ask the user for fres
 > Status: `v1.0.0`, the MVP. Mandates, the deterministic policy engine and the audit log
 > (`v0.1.0`); four Signals (Phase 2); a durable step-up consent loop (`v0.2.0`); the
 > Razorpay test-mode rail (Phase 4); cited, signed-off dispute Evidence packs (`v0.3.0`);
-> and 203 golden eval cases in CI, an Ops console and a live deployment (Phase 6). The
+> 203 golden eval cases in CI, an Ops console and a live deployment (Phase 6); and refunds
+> of captured Payments (#205). The
 > active Policy pack is `default@1.5.0`. See [Deploy (hosted demo)](#deploy-hosted-demo)
 > for the live URL, [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md) for the plan and GitHub Issues
 > for PRDs and tickets.
@@ -205,7 +206,7 @@ Allow, step-up and block count decision-stage cases; approval re-checks are labe
 | `workflows/` | Temporal: the `step_up_consent` and `dispute_pack` workflows, their activities, the Workflow port adapter and the worker (the only code that imports `temporalio`) |
 | `agents/` | The dispute evidence agent: tools and versioned prompts |
 | `policy_packs/` | Released policy packs and their hash manifest |
-| `demo/` | The demo CLI: the three demo journeys over HTTP (`python -m demo`) |
+| `demo/` | The demo CLI: the four demo journeys over HTTP (`python -m demo`) |
 | `evals/` | Labelled golden cases and the eval gate; the live Intent check eval set |
 | `migrations/` | Alembic migrations |
 | `infra/` | Docker Compose for local dev, the OTel collector configs, and the hosted demo's production overlay, Caddyfile and smoke test |
@@ -389,7 +390,7 @@ What the production overlay does:
 
 ## Demo
 
-`uv run python -m demo --base-url <api>` runs the three demo journeys against any deployment on the mock rail, over HTTP, and prints each step:
+`uv run python -m demo --base-url <api>` runs the four demo journeys against any deployment on the mock rail, over HTTP, and prints each step:
 
 1. **An Agent pays within its Mandate:** a Payer, Agent and Mandate are set up, an INR 1,250 payment is allowed, and its Payment is `scheduled`.
 2. **A large payment needs the Payer's approval:** an INR 6,000 payment steps up. The CLI prints the Consent link and waits while you open it in the browser and approve. Then the Payment is made.
@@ -398,8 +399,13 @@ What the production overlay does:
    - The Payment is disputed as `unauthorised`, and the CLI waits for the worker to build the Evidence pack.
    - The CLI prints the Review link and waits while you sign off.
    - It checks the signed-off pack: the pack must parse, every claim must cite a record in its bundle, and the pack must hash to what the Sign-off approved.
+4. **A refunded Payment:**
+   - On a Mandate of its own with an INR 2,000 Monthly cap, an INR 1,250 Payment is allowed and captured (mock settle and the worker again).
+   - Another INR 1,250 is blocked with `MONTHLY_CAP_EXCEEDED`.
+   - The Tenant refunds INR 500, then the remaining INR 750. Each Refund is `processed`.
+   - The same INR 1,250 is now allowed, because the refunds gave the cap back, and the Payment is still `captured` with INR 1,250 refunded.
 
-It reads the Demo Tenant's keys from `AGENTPAY_DEMO_AGENT_KEY` and `AGENTPAY_DEMO_TENANT_KEY` in `.env`, as `create-tenant` printed them, and never prints them. `--journey 1|2|3` runs one journey. Each journey sets up its own Mandate, so any one can run alone. A failure names the step that failed and exits 1. `--interval` and `--timeout` set how often it checks and how long it waits. `tests/api/test_demo_cli.py` runs it against the in-process app with mock settle on, playing the worker, the Payer and the reviewer.
+It reads the Demo Tenant's keys from `AGENTPAY_DEMO_AGENT_KEY` and `AGENTPAY_DEMO_TENANT_KEY` in `.env`, as `create-tenant` printed them, and never prints them. `--journey 1|2|3|4` runs one journey. Each journey sets up its own Mandate, so any one can run alone. A failure names the step that failed and exits 1. `--interval` and `--timeout` set how often it checks and how long it waits. `tests/api/test_demo_cli.py` runs it against the in-process app with mock settle on, playing the worker, the Payer and the reviewer.
 
 ## Going live
 

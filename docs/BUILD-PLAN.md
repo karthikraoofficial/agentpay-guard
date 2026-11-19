@@ -313,4 +313,4 @@ None of these need a rewrite if the seams hold; each is a swap or an addition. L
 - [ ] Runbooks: rail outage (fail to step\_up or block, never allow), model outage, stuck consent workflows.
 - [ ] Rail: live Razorpay keys (the code refuses them today, ADR-0012), and UPI Reserve Pay alongside card recurring payments (the later swap ADR-0013 names).
 - [ ] Rail: Razorpay Route, a connected account per Tenant, so each Tenant is the Merchant of record instead of our one account (ADR-0012).
-- [ ] Rail: refunds. `PaymentRail.refund` is declared but not implemented. Phase 5 Disputes are evidence only and move no money (#104).
+- [x] Rail: refunds (PRD #205, ADR-0024). A Tenant refunds a captured Payment in full or in parts, on the mock rail and on Razorpay, settled by Rail webhook or Reconciliation, giving back Monthly cap and appearing in Evidence packs. Still out: refunds made in the rail's own dashboard (dropped, ADR-0012, until Razorpay Route) and a Razorpay refund that succeeds end to end (test mode never captures, ADR-0017). Disputes still move no money (#104).
