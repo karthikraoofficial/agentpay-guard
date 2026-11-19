@@ -38,6 +38,7 @@ EvidenceFact = Literal[
     "no_duplicate_payment",
     "duplicate_payment_found",  # same Payer, merchant and amount captured within the window
     "fulfilment_evidence",  # never in a bundle: only the merchant holds it
+    "credit_issued",  # processed Refunds of the whole captured amount (#208)
 ]
 
 EvidenceStrength = Literal["strong", "mixed", "weak"]

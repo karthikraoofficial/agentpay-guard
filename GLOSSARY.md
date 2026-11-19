@@ -158,6 +158,14 @@ _Avoid_: Expiry, TTL
 Releasing an allow or approved step-up from Spent this month, because its Payment failed or the Tenant cancelled it before paying. Recorded as a new Audit record and never by changing the Decision.
 _Avoid_: Cancellation, reversal, refund (a refund returns captured money)
 
+**Refund**:
+Money returned to the Payer on a captured Payment, in full or in parts, never more in all than was captured. Only the Tenant starts one, through our API (ADR-0024). It is pending until the rail answers, then processed or failed, and each step is a `refund` Audit record. The Payment stays captured.
+_Avoid_: Void (that releases a Decision that was never paid), reversal, chargeback (that is the Payer's network dispute)
+
+**Refund window**:
+How long after capture a Payment may be refunded, set in the Policy pack (180 days from `default@1.5.0`; earlier packs read as the same).
+_Avoid_: Refund period, expiry
+
 **Tenant webhook**:
 A signed notice that AgentPay Guard sends to a Tenant's own endpoint when something it cares about happens, such as a Consent request being created or a Payment being captured. Delivered at least once.
 _Avoid_: Callback, notification (that is what the Tenant sends the Payer), rail webhook

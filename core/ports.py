@@ -49,6 +49,7 @@ from core.domain.parties import (
 from core.domain.parties import TenantId as TenantId  # re-exported for adapters
 from core.domain.payments import Payment, PaymentId, RailEvent
 from core.domain.rails import RailToken
+from core.domain.refunds import Refund, RefundId, RefundStatus
 from core.domain.voids import Void
 from core.domain.webhooks import TenantEventType, WebhookEndpoint
 
@@ -90,6 +91,16 @@ class RailCharge(_Frozen):
     # The earliest the rail lets the debit happen, once the Pre-debit notice period ends
     # (ADR-0017). None when there is no such wait, as on the mock rail.
     debit_after: datetime | None = None
+
+
+class RailRefund(_Frozen):
+    """The rail's view of one Refund, keyed by our Refund id."""
+
+    refund_id: RefundId
+    status: RefundStatus
+    amount: Money
+    rail_refund_id: str | None = None
+    failure_code: str | None = None
 
 
 class RailUnavailable(Exception):
@@ -143,10 +154,13 @@ class PaymentRail(Protocol):
         self,
         tenant_id: TenantId,
         payment_id: PaymentId,
+        refund_id: RefundId,
         amount: Money,
         idempotency_key: IdempotencyKey,
-    ) -> RailCharge:
-        """Declared for Phase 5 (disputes). No adapter implements it yet."""
+    ) -> RailRefund:
+        """Return `amount` of a Payment's charge. Keyed by our Refund id, so asking again for
+        the same Refund never refunds twice. A refusal comes back as `failed`; an unknown
+        outcome raises `RailUnavailable`."""
         ...
 
 
@@ -334,6 +348,23 @@ class TenantTransaction(Protocol):
 
     def update_payment(self, payment: Payment) -> None:
         """Store a Payment's new status (see Payment.charged)."""
+        ...
+
+    def add_refund(self, refund: Refund) -> None:
+        """Store a new Refund."""
+        ...
+
+    def lock_refund(self, refund_id: RefundId) -> Refund | None:
+        """Read a Refund and hold it until this transaction ends, so two answers from the
+        rail about one Refund apply one after another."""
+        ...
+
+    def update_refund(self, refund: Refund) -> None:
+        """Store a Refund's new status (see Refund.settled)."""
+        ...
+
+    def list_refunds(self, payment_id: PaymentId) -> list[Refund]:
+        """A Payment's Refunds, oldest first."""
         ...
 
     def add_consent_request(self, consent: ConsentRequest) -> None: ...

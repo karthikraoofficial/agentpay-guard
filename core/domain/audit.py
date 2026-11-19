@@ -36,11 +36,18 @@ from core.domain.money import Money
 from core.domain.parties import Agent, TenantId
 from core.domain.payments import Payment, PaymentId, PaymentStatus
 from core.domain.rails import RailName
+from core.domain.refunds import Refund, RefundId, RefundStatus, reason_hash
 from core.domain.signals import Signals
 from core.domain.voids import VoidVia
 
 AuditKind = Literal[
-    "decision", "consent_resolution", "void", "payment", "dispute_opened", "dispute_signed_off"
+    "decision",
+    "consent_resolution",
+    "void",
+    "payment",
+    "dispute_opened",
+    "dispute_signed_off",
+    "refund",
 ]
 ZERO_HASH = "sha256:" + "00" * 32
 
@@ -110,6 +117,33 @@ class SignOffEvidence(_Frozen):
     reviewer: Reviewer
 
 
+class RefundEvidence(_Frozen):
+    """A Refund as it was asked for, then as it ended: ids, amount and outcome, with the
+    reason by its hash only (ADR-0007) and the Policy pack whose Refund window allowed it."""
+
+    refund_id: RefundId
+    payment_id: PaymentId
+    status: RefundStatus
+    amount: Money
+    reason_hash: str | None
+    rail_refund_id: str | None
+    failure_code: str | None
+    policy_pack: PackRef
+
+    @classmethod
+    def of(cls, refund: Refund) -> Self:
+        return cls(
+            refund_id=refund.refund_id,
+            payment_id=refund.payment_id,
+            status=refund.status,
+            amount=refund.amount,
+            reason_hash=reason_hash(refund.reason),
+            rail_refund_id=refund.rail_refund_id,
+            failure_code=refund.failure_code,
+            policy_pack=refund.pack,
+        )
+
+
 class AuditRecord(_Frozen):
     audit_record_id: AuditRecordId
     tenant_id: TenantId
@@ -135,10 +169,14 @@ class AuditRecord(_Frozen):
     dispute: DisputeEvidence | None = None
     # Only on a dispute_signed_off record.
     sign_off: SignOffEvidence | None = None
+    # Only on a refund record.
+    refund: RefundEvidence | None = None
 
     @model_validator(mode="after")
     def _matches_kind(self) -> Self:
         ran = (self.inputs, self.pack, self.output)
+        if (self.kind == "refund") != (self.refund is not None):
+            raise ValueError("a refund record, and only a refund record, has a refund")
         if (self.kind == "payment") != (self.payment is not None):
             raise ValueError("a payment record, and only a payment record, has a payment")
         if (self.kind == "void") != (self.void is not None):
@@ -150,7 +188,7 @@ class AuditRecord(_Frozen):
         if self.kind == "decision":
             if None in ran or self.resolution is not None:
                 raise ValueError("a decision record has inputs, pack and output, no resolution")
-        elif self.kind in ("payment", "void", "dispute_opened", "dispute_signed_off"):
+        elif self.kind in ("payment", "void", "dispute_opened", "dispute_signed_off", "refund"):
             if ran != (None, None, None) or self.resolution is not None:
                 raise ValueError(f"a {self.kind} record has no engine run and no resolution")
         elif self.kind == "consent_resolution":
@@ -175,7 +213,7 @@ class AuditRecord(_Frozen):
 
 
 _OPTIONAL = frozenset(
-    {"inputs", "pack", "output", "resolution", "payment", "void", "dispute", "sign_off"}
+    {"inputs", "pack", "output", "resolution", "payment", "void", "dispute", "sign_off", "refund"}
 )
 
 

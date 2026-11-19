@@ -16,7 +16,15 @@ from core.domain.money import Money
 from core.domain.parties import TenantId
 from core.domain.payments import PaymentId
 from core.domain.rails import RAIL_NOTICE_FAILED, RailToken
-from core.ports import Clock, IdempotencyKey, PaymentRail, RailCharge, RailUnavailable
+from core.domain.refunds import RefundId
+from core.ports import (
+    Clock,
+    IdempotencyKey,
+    PaymentRail,
+    RailCharge,
+    RailRefund,
+    RailUnavailable,
+)
 
 # Token refs that decide how a mock debit ends. Any other ref captures.
 _CAPTURES = "token_mock_captures"
@@ -40,6 +48,9 @@ class MockRail:
         self.charges_made = 0
         self._made: dict[tuple[TenantId, PaymentId], int] = {}
         self._booked: dict[tuple[TenantId, PaymentId], int] = {}
+        # (tenant, Refund id) -> (its Payment, the answer given)
+        self._refunds: dict[tuple[TenantId, RefundId], tuple[PaymentId, RailRefund]] = {}
+        self._refunds_made: dict[tuple[TenantId, PaymentId], int] = {}
         self._lock = threading.Lock()  # the API calls the rail from several threads
 
     @staticmethod
@@ -160,10 +171,46 @@ class MockRail:
         self,
         tenant_id: TenantId,
         payment_id: PaymentId,
+        refund_id: RefundId,
         amount: Money,
         idempotency_key: IdempotencyKey,
-    ) -> RailCharge:
-        raise NotImplementedError("Refunds come with disputes in Phase 5")
+    ) -> RailRefund:
+        """Processed at once, from a charge this rail debited, never beyond its amount in
+        all. The same Refund id always gets the same answer. The charges live in this
+        process, so a Payment debited before a restart can't be refunded (it fails)."""
+        with self._lock:
+            done = self._refunds.get((tenant_id, refund_id))
+            if done is not None:
+                return done[1]
+            charge = self._charges.get((tenant_id, payment_id))
+            refunded = sum(
+                r.amount.minor
+                for (t, _), (p, r) in self._refunds.items()
+                if (t, p) == (tenant_id, payment_id) and r.status == "processed"
+            )
+            ok = (
+                charge is not None
+                and charge.rail_payment_id is not None
+                and charge.amount.currency == amount.currency
+                and refunded + amount.minor <= charge.amount.minor
+            )
+            answer = RailRefund(
+                refund_id=refund_id,
+                status="processed" if ok else "failed",
+                amount=amount,
+                rail_refund_id=f"rfnd_mock_{refund_id}" if ok else None,
+                failure_code=None if ok else _FAILURE_CODE,
+            )
+            self._refunds[(tenant_id, refund_id)] = (payment_id, answer)
+            if ok:
+                made = self._refunds_made.get((tenant_id, payment_id), 0)
+                self._refunds_made[(tenant_id, payment_id)] = made + 1
+            return answer
+
+    def refunds_for(self, tenant_id: TenantId, payment_id: PaymentId) -> int:
+        """Test hook: how many refunds were ever made on this Payment's charge."""
+        with self._lock:
+            return self._refunds_made.get((tenant_id, payment_id), 0)
 
     def settle(self, tenant_id: TenantId, payment_id: PaymentId) -> None:
         """Test hook: the rail finishes the debit, as Razorpay does hours later."""

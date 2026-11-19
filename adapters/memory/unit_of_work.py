@@ -29,6 +29,7 @@ from core.domain.parties import (
     PayerId,
 )
 from core.domain.payments import Payment, PaymentId, RailEvent
+from core.domain.refunds import Refund, RefundId
 from core.domain.voids import Void
 from core.domain.webhooks import WebhookEndpoint
 from core.ports import DomainEvent, EventBus, TenantDirectory, TenantId, UnitOfWork
@@ -56,6 +57,7 @@ class _TenantData:
     # dispute_id -> pack versions, oldest first
     packs: dict[DisputeId, tuple[EvidencePack, ...]] = field(default_factory=dict)
     review_links: dict[str, ReviewLink] = field(default_factory=dict)
+    refunds: dict[RefundId, Refund] = field(default_factory=dict)
 
     def copy(self) -> "_TenantData":
         return _TenantData(
@@ -77,6 +79,7 @@ class _TenantData:
             dict(self.disputes),
             dict(self.packs),
             dict(self.review_links),
+            dict(self.refunds),
         )
 
 
@@ -337,6 +340,25 @@ class InMemoryTransaction:
         if payment.payment_id not in self._data.payments:
             raise ValueError(f"no Payment {payment.payment_id}")
         self._data.payments[payment.payment_id] = payment
+
+    def add_refund(self, refund: Refund) -> None:
+        self._own(refund.tenant_id)
+        if refund.refund_id in self._data.refunds:
+            raise ValueError(f"Refund {refund.refund_id} already exists")
+        self._data.refunds[refund.refund_id] = refund
+
+    def lock_refund(self, refund_id: RefundId) -> Refund | None:
+        return self._data.refunds.get(refund_id)
+
+    def update_refund(self, refund: Refund) -> None:
+        self._own(refund.tenant_id)
+        if refund.refund_id not in self._data.refunds:
+            raise ValueError(f"no Refund {refund.refund_id}")
+        self._data.refunds[refund.refund_id] = refund
+
+    def list_refunds(self, payment_id: PaymentId) -> list[Refund]:
+        found = [r for r in self._data.refunds.values() if r.payment_id == payment_id]
+        return sorted(found, key=lambda r: (r.created_at, r.refund_id))
 
     def add_intent_check(self, check: IntentCheck) -> None:
         self._own(check.tenant_id)

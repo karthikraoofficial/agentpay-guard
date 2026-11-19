@@ -27,6 +27,8 @@ from core.domain.money import CurrencyCode
 LEGACY_CONSENT_TTL_SECONDS = 600
 # The Payment window of packs released before `payment_window_seconds` existed.
 LEGACY_PAYMENT_WINDOW_SECONDS = 900
+# The Refund window of packs released before `refund_window_days` existed (#206).
+LEGACY_REFUND_WINDOW_DAYS = 180
 
 RuleId = Literal[
     "mandate_revoked",
@@ -118,6 +120,10 @@ class DisputeRules(_Strict):
     # for the same amount, must be to count as a duplicate.
     duplicate_window_seconds: StrictInt = Field(gt=0)
     reasons: dict[DisputeReason, DisputeReasonRules]
+    # Facts that make the evidence strong for every reason, whatever else holds (#205):
+    # e.g. a credit already issued. None, not empty, when unset, so the hash of a pack
+    # released before it existed doesn't change.
+    strong_if_any: tuple[EvidenceFact, ...] | None = None
 
     @model_validator(mode="after")
     def _every_reason(self) -> "DisputeRules":
@@ -154,6 +160,13 @@ class PolicyPack(_Strict):
     # Network codes and Evidence strength for Disputes (#106). Optional: a pack without it
     # builds Evidence packs with no codes or strength.
     disputes: DisputeRules | None = None
+    # How long after capture a Payment may be refunded (#206). No rule reads it: the API
+    # checks it. Unset means LEGACY_REFUND_WINDOW_DAYS.
+    refund_window_days: StrictInt | None = Field(default=None, gt=0)
+
+    @property
+    def refund_window(self) -> timedelta:
+        return timedelta(days=self.refund_window_days or LEGACY_REFUND_WINDOW_DAYS)
 
     @property
     def consent_ttl(self) -> timedelta:
