@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -33,6 +34,7 @@ from api.routes import (
 from core.model_spend import CappedGateway, daily_caps
 from core.policy.packs import load_active_pack
 from core.ports import Clock, ModelGateway, PaymentRail, SecretBox, Telemetry, Workflow
+from core.rail_breaker import RailBreaker
 from core.settings import Settings, get_settings
 from workflows.client import TemporalWorkflow
 
@@ -88,6 +90,9 @@ def create_app(
     app.state.workflow = workflow or TemporalWorkflow.from_settings(settings)
     app.state.secret_box = secret_box or build_secret_box(settings)
     app.state.rail = rail or build_rail(settings)
+    app.state.rail_breaker = RailBreaker(
+        settings.rail_breaker_failures, timedelta(seconds=settings.rail_breaker_open_seconds)
+    )
     errors.install(app)
     app.include_router(parties.router)
     app.include_router(mandates.router)

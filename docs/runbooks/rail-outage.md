@@ -4,7 +4,11 @@ The rail (Razorpay, or the mock rail on the hosted demo) is down, slow, rate-lim
 
 ## How you'd notice
 
-- `POST /v1/payments` answers `202` with a Payment that stays `scheduled` with no `rail_payment_id`, and the API log has `rail unavailable for Payment …`.
+- `POST /v1/payments` answers `202` with a Payment that stays `scheduled` with no `rail_payment_id`, and the API log has `rail unavailable for Payment …`. After a few of those in a row, payments and refunds answer `503 RAIL_UNAVAILABLE`, and the log has `rail breaker opened`:
+
+  ```bash
+  $C logs --since 1h api | grep -E "rail unavailable|rail breaker opened"
+  ```
 - `POST /v1/payments/{id}/refunds` answers `201` with a Refund that stays `pending`, and the log has `rail unavailable for Refund …`.
 - The worker's sweep reports errors:
 
@@ -37,6 +41,10 @@ The rail (Razorpay, or the mock rail on the hosted demo) is down, slow, rate-lim
   - **The rail answered once but can't find it now:** that's treated as a lookup fault and retried, never failed.
   - **The rail errors:** that's logged and retried next interval.
 - **Rail webhooks are retried by Razorpay.** Each is acted on at most once, so a burst after an outage settles each Payment once.
+- **The circuit breaker fails fast (ADR-0025).**
+  - **Opening:** after `AGENTPAY_RAIL_BREAKER_FAILURES` (5) unknown outcomes in a row, it opens. The API logs `rail breaker opened: payments and refunds answer 503 RAIL_UNAVAILABLE`.
+  - **While open:** for `AGENTPAY_RAIL_BREAKER_OPEN_SECONDS` (30), `POST /v1/payments` and `POST /v1/payments/{id}/refunds` answer `503 RAIL_UNAVAILABLE` with `Retry-After` at once, and write nothing. Agents and Tenants retry after that, with the same Idempotency-Key.
+  - **After the open period:** one request is let through to try the rail. An answer closes the breaker, and another timeout reopens it.
 - **Keys:** a `401`/`403` from Razorpay is treated as "unknown" (`RailUnavailable`), not as a refusal, so bad keys stall Payments rather than failing them.
 
 ## What to do

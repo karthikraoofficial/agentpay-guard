@@ -22,6 +22,7 @@ from core.ports import (
     UnitOfWork,
     Workflow,
 )
+from core.rail_breaker import RailBreaker
 from core.settings import Settings
 
 
@@ -58,6 +59,11 @@ def get_gateway(request: Request) -> ModelGateway:
 def get_rail(request: Request) -> PaymentRail:
     rail: PaymentRail = request.app.state.rail
     return rail
+
+
+def get_rail_breaker(request: Request) -> RailBreaker:
+    breaker: RailBreaker = request.app.state.rail_breaker
+    return breaker
 
 
 def get_secret_box(request: Request) -> SecretBox:
@@ -132,6 +138,7 @@ TelemetryDep = Annotated[Telemetry, Depends(get_telemetry)]
 GatewayDep = Annotated[ModelGateway, Depends(get_gateway)]
 SettingsDep = Annotated[Settings, Depends(get_app_settings)]
 RailDep = Annotated[PaymentRail, Depends(get_rail)]
+BreakerDep = Annotated[RailBreaker, Depends(get_rail_breaker)]
 WorkflowDep = Annotated[Workflow, Depends(get_workflow)]
 SecretBoxDep = Annotated[SecretBox, Depends(get_secret_box)]
 IdemKey = Annotated[IdempotencyKey, Depends(idempotency_key)]
