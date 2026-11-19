@@ -10,6 +10,12 @@ Otherwise the Payment, and through it the Tenant, is found by our Payment id, an
 transaction applies the report through the shared transition and keeps the event. The
 event id plays the part of the Idempotency-Key (non-negotiable 4): a redelivery of an
 event that was applied changes nothing.
+
+`refund.processed` and `refund.failed` (#210) settle the Refund their notes name, through
+the same transition Reconciliation uses. One is dropped unless that Refund exists on that
+Payment, of that Tenant, for that amount, and isn't tied to another Razorpay refund. A
+refund made in the dashboard carries none of our ids and is dropped (ADR-0012). A
+settled Refund never reopens, so a redelivery changes nothing.
 """
 
 import logging
@@ -17,13 +23,15 @@ import logging
 from fastapi import APIRouter, Header, Request, Response
 from starlette.concurrency import run_in_threadpool
 
-from adapters.razorpay.webhooks import payment_report, signature_ok
+from adapters.razorpay.webhooks import payment_report, refund_report, signature_ok
 from api.deps import ClockDep, SettingsDep, Store, StoreDep
 from api.errors import ApiError
 from core.charges import apply_charge
 from core.domain.decisions import decision_time
 from core.domain.payments import Payment, RailReport
-from core.ports import Clock, RailCharge, TenantId
+from core.domain.refunds import RefundReport
+from core.ports import Clock, RailCharge, RailRefund, TenantId
+from core.refunds import record_refund
 
 router = APIRouter(prefix="/v1/rail/razorpay", tags=["rail"])
 log = logging.getLogger(__name__)
@@ -47,7 +55,11 @@ async def razorpay_webhook(
         raise ApiError(400, "EVENT_ID_MISSING", "Send the X-Razorpay-Event-Id header.")
     report = payment_report(raw)
     if report is None:
-        log.info("rail webhook %s dropped: not a payment event of ours", event_id)
+        refunded = refund_report(raw)
+        if refunded is None:
+            log.info("rail webhook %s dropped: not a payment or refund event of ours", event_id)
+        else:
+            await run_in_threadpool(_apply_refund, store, clock, event_id, refunded)
         return Response(status_code=200)
     # The store is synchronous: keep it off the event loop.
     await run_in_threadpool(_apply, store, clock, event_id, report)
@@ -79,6 +91,40 @@ def _apply(store: Store, clock: Clock, event_id: str, report: RailReport) -> Non
             return
         apply_charge(tx, report.payment_id, _charge(report), now)
         tx.add_rail_event(report.to_event(event_id, TenantId(tenant), now))
+
+
+def _apply_refund(store: Store, clock: Clock, event_id: str, report: RefundReport) -> None:
+    tenant = store.payment_tenant(report.payment_id)
+    if tenant is None or tenant != report.tenant_id:
+        log.info(
+            "rail webhook %s dropped: no Payment %s of its Tenant", event_id, report.payment_id
+        )
+        return
+    now = decision_time(clock.now())
+    with store.transaction(tenant) as tx:
+        payment = tx.get_payment(report.payment_id)
+        if payment is None:
+            return
+        tx.lock_mandate(payment.mandate_id)  # as the refund request does, so the two queue
+        refund = tx.lock_refund(report.refund_id)
+        if (
+            refund is None
+            or refund.payment_id != report.payment_id
+            or refund.amount != report.amount
+            or refund.rail_refund_id not in (None, report.rail_refund_id)
+        ):
+            log.warning(
+                "rail webhook %s dropped: it doesn't match Refund %s", event_id, report.refund_id
+            )
+            return
+        answer = RailRefund(
+            refund_id=report.refund_id,
+            status=report.status,
+            amount=report.amount,
+            rail_refund_id=report.rail_refund_id,
+            failure_code="REFUND_FAILED" if report.status == "failed" else None,
+        )
+        record_refund(tx, report.refund_id, answer, now)
 
 
 def _mismatch(payment: Payment, report: RailReport) -> str | None:

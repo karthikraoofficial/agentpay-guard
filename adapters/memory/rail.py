@@ -179,7 +179,8 @@ class MockRail:
         idempotency_key: IdempotencyKey,
     ) -> RailRefund:
         """Processed at once, from a charge this rail debited, never beyond its amount in
-        all. The same Refund id always gets the same answer. The charges live in this
+        all. A refund made is found again by its Refund id; a refused one is not kept. The
+        charges live in this
         process, so a Payment debited before a restart can't be refunded (it fails).
         After `hold_refunds` a refund answers pending until `finish_refund`; after
         `time_out_refunds` it is made and then the call times out."""
@@ -206,15 +207,18 @@ class MockRail:
                 rail_refund_id=f"rfnd_mock_{refund_id}" if ok else None,
                 failure_code=None if ok else _FAILURE_CODE,
             )
+            if not ok:
+                return answer  # refused: no refund was made, so there's none to find later
             self._refunds[(tenant_id, refund_id)] = (payment_id, answer)
-            if ok:
-                made = self._refunds_made.get((tenant_id, payment_id), 0)
-                self._refunds_made[(tenant_id, payment_id)] = made + 1
+            made = self._refunds_made.get((tenant_id, payment_id), 0)
+            self._refunds_made[(tenant_id, payment_id)] = made + 1
             if self._time_out_refunds:
                 raise RailUnavailable("mock refund timed out after it was made")
             return answer
 
-    def get_refund(self, tenant_id: TenantId, refund_id: RefundId) -> RailRefund | None:
+    def get_refund(
+        self, tenant_id: TenantId, payment_id: PaymentId, refund_id: RefundId
+    ) -> RailRefund | None:
         with self._lock:
             done = self._refunds.get((tenant_id, refund_id))
         return None if done is None else done[1]

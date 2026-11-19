@@ -104,6 +104,21 @@ def refund_refusal(
     return None
 
 
+class RefundReport(BaseModel):
+    """What a rail event says about one of our Refunds, read from the rail's own format by
+    its adapter. The ids come from the notes we set when the refund was made."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: str
+    refund_id: RefundId
+    payment_id: PaymentId
+    tenant_id: TenantId
+    rail_refund_id: str
+    status: Literal["processed", "failed"]
+    amount: Money
+
+
 def reason_hash(reason: str | None) -> str | None:
     """What the Audit chain holds of a Refund's reason: its SHA-256, never the words."""
     if reason is None:

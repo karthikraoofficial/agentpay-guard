@@ -163,8 +163,11 @@ class PaymentRail(Protocol):
         outcome raises `RailUnavailable`."""
         ...
 
-    def get_refund(self, tenant_id: TenantId, refund_id: RefundId) -> RailRefund | None:
-        """A Refund as the rail sees it now, or None if the rail has none by that id."""
+    def get_refund(
+        self, tenant_id: TenantId, payment_id: PaymentId, refund_id: RefundId
+    ) -> RailRefund | None:
+        """A Refund of a Payment as the rail sees it now, or None if the rail has none by
+        that id."""
         ...
 
 
@@ -562,7 +565,9 @@ class TenantDirectory(Protocol):
         reconciliation sweep asks the rail about."""
         ...
 
-    def pending_refunds(self, created_before: datetime) -> list[tuple[TenantId, RefundId]]:
+    def pending_refunds(
+        self, created_before: datetime
+    ) -> list[tuple[TenantId, PaymentId, RefundId]]:
         """Refunds still pending that were asked for before `created_before`, in every
         Tenant, oldest first: what the reconciliation sweep asks the rail about (#209)."""
         ...

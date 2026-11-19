@@ -10,6 +10,9 @@ returned when probed:
 - A recurring payment before the notice is delivered fails `pre_debit_notification_failed`;
   after delivery but before `payment_after`, `input_validation_failed` ("Debit can be
   attempted 36 hours after..."). Neither creates a payment.
+- Refunds (#210): `POST /payments/{id}/refund` on a captured payment makes a refund,
+  `GET /payments/{id}/refunds` lists them. A refund of an uncaptured payment, or beyond
+  what is left of it, is a 400 `BAD_REQUEST_ERROR`.
 """
 
 import json
@@ -45,6 +48,11 @@ class FakeRazorpay:
     refuse_debits: bool = False
     # Tokens whose notices Razorpay marks failed, just after the order is made.
     failed_notices: set[str] = field(default_factory=set)
+    # Razorpay payment id -> its refunds; the status a new refund answers with; and
+    # whether the next refund call times out after the refund is made.
+    refunds: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    refund_status: str = "processed"
+    refund_times_out_after_creating: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def transport(self) -> httpx.MockTransport:
@@ -93,6 +101,10 @@ class FakeRazorpay:
             return (
                 httpx.Response(200, json=order) if order else _error(400, "BAD_REQUEST_ERROR", "NA")
             )
+        if request.method == "POST" and len(parts) == 3 and parts[2] == "refund":
+            return self._refund(parts[1], json.loads(request.content))
+        if request.method == "GET" and len(parts) == 3 and parts[2] == "refunds":
+            return _collection(self.refunds.get(parts[1], []))
         if request.method == "GET" and len(parts) == 3 and parts[2] == "payments":
             return _collection(self.payments.get(parts[1], []))
         if request.method == "GET" and len(parts) == 2 and parts[0] == "customers":
@@ -163,6 +175,38 @@ class FakeRazorpay:
                 "razorpay_signature": "fake",
             },
         )
+
+    def _refund(self, payment_id: str, body: dict[str, Any]) -> httpx.Response:
+        payment = next(
+            (p for items in self.payments.values() for p in items if p["id"] == payment_id), None
+        )
+        if payment is None or payment["status"] != "captured":
+            return _error(400, "BAD_REQUEST_ERROR", "NA", "The payment has not been captured")
+        made = self.refunds.setdefault(payment_id, [])
+        left = payment["amount"] - sum(r["amount"] for r in made if r["status"] != "failed")
+        if body["amount"] > left:
+            return _error(
+                400,
+                "BAD_REQUEST_ERROR",
+                "NA",
+                "The refund amount provided is greater than amount captured",
+            )
+        refund = {
+            "id": f"rfnd_fake{len(made) + 1:03d}{payment_id[-6:]}",
+            "entity": "refund",
+            "amount": body["amount"],
+            "currency": payment["currency"],
+            "payment_id": payment_id,
+            "notes": body.get("notes", {}),
+            "receipt": body.get("receipt"),
+            "status": self.refund_status,
+            "created_at": self.now,
+        }
+        made.append(refund)
+        if self.refund_times_out_after_creating:
+            self.refund_times_out_after_creating = False
+            raise httpx.ReadTimeout("fake timeout after creating the refund")
+        return httpx.Response(200, json=refund)
 
     def _payment(self, order: dict[str, Any], notes: dict[str, Any]) -> dict[str, Any]:
         items = self.payments.setdefault(order["id"], [])

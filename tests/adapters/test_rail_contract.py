@@ -22,11 +22,13 @@ import pytest
 from pydantic import SecretStr
 
 from adapters.memory.rail import MockRail
+from adapters.razorpay.api import RazorpayApi, RazorpayRefused
 from adapters.razorpay.rail import RazorpayRail
 from core.domain.money import Money
 from core.domain.parties import TenantId
 from core.domain.payments import PaymentId
 from core.domain.rails import RAIL_NOTICE_FAILED, RailToken
+from core.domain.refunds import RefundId
 from core.ports import IdempotencyKey, PaymentRail, RailCharge
 from core.settings import get_settings
 from tests.adapters.fake_razorpay import NOTICE_SECONDS, FakeRazorpay
@@ -354,3 +356,70 @@ def test_a_failed_notice_fails_the_charge_and_no_debit_is_made(harness: RailHarn
 
 def test_there_is_nothing_to_debit_for_a_payment_the_rail_never_saw(harness: RailHarness) -> None:
     assert _debit(harness, harness.payment_id("pmt_never_debited")) is None
+
+
+# --- Refunds (#210) ---------------------------------------------------------------------
+
+
+def _refund(h: RailHarness, payment_id: PaymentId, refund_id: str, minor: int = 10_000):  # type: ignore[no-untyped-def]
+    amount = Money(minor=minor, currency=AMOUNT.currency)
+    rid = RefundId(f"{refund_id}{h.run}")
+    return h.rail.refund(TENANT, payment_id, rid, amount, IdempotencyKey(f"r_{rid}"))
+
+
+def test_a_refund_of_a_payment_the_rail_never_saw_fails_with_a_code(harness: RailHarness) -> None:
+    payment_id = harness.payment_id("pmt_never_paid")
+
+    refund = _refund(harness, payment_id, "rfd_never")
+
+    assert (refund.status, bool(refund.failure_code)) == ("failed", True)
+    assert harness.rail.get_refund(TENANT, payment_id, refund.refund_id) is None
+
+
+def test_a_payment_still_in_its_notice_period_cannot_be_refunded(harness: RailHarness) -> None:
+    if not harness.has_notice:
+        pytest.skip("this rail debits at once: there is no undebited charge to refund")
+    payment_id = harness.payment_id("pmt_in_notice")
+    _schedule(harness, payment_id)
+    _seen(harness, payment_id)
+
+    refund = _refund(harness, payment_id, "rfd_in_notice")
+
+    assert (refund.status, bool(refund.failure_code)) == ("failed", True)
+    assert refund.rail_refund_id is None
+
+
+def test_a_settled_payment_is_refunded_once_however_often_it_is_asked(
+    harness: RailHarness,
+) -> None:
+    payment_id = harness.payment_id("pmt_to_refund")
+    _schedule(harness, payment_id)
+    _settle(harness, payment_id)
+
+    first = _refund(harness, payment_id, "rfd_once")
+    again = _refund(harness, payment_id, "rfd_once")
+    rest = _refund(harness, payment_id, "rfd_rest", AMOUNT.minor - 10_000)
+    over = _refund(harness, payment_id, "rfd_over", 1)
+
+    assert first.status == "processed" and again == first
+    assert rest.status == "processed"
+    assert (over.status, bool(over.failure_code)) == ("failed", True)
+    assert harness.rail.get_refund(TENANT, payment_id, first.refund_id) == first
+
+
+@pytest.mark.contract
+def test_razorpay_refuses_a_refund_of_a_payment_it_does_not_have_with_a_final_4xx() -> None:
+    settings = get_settings()
+    if settings.razorpay_key_id is None or settings.razorpay_key_secret is None:
+        pytest.skip("no Razorpay test keys")
+    api = RazorpayApi(settings.razorpay_key_id, settings.razorpay_key_secret)
+    # Well formed (`pay_` and 14 characters): the refund routes answer a malformed id with
+    # a bare 404 instead, as a probe on 2026-11-19 showed.
+    unknown = "pay_DoesNotExist01"
+
+    with pytest.raises(RazorpayRefused) as refused:
+        api.post(f"/payments/{unknown}/refund", {"amount": 100})
+    listed = api.get(f"/payments/{unknown}/refunds")
+
+    assert (refused.value.status, refused.value.code) == (400, "BAD_REQUEST_ERROR")
+    assert listed["items"] == []  # nothing refunded: what the adapter reads first

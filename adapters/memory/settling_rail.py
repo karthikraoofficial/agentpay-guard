@@ -72,7 +72,9 @@ class SettlingMockRail:
         # Refunds are made by the API's MockRail; this rail only answers the sweep.
         raise NotImplementedError("the settling rail only answers the worker's sweep")
 
-    def get_refund(self, tenant_id: TenantId, refund_id: RefundId) -> RailRefund | None:
+    def get_refund(
+        self, tenant_id: TenantId, payment_id: PaymentId, refund_id: RefundId
+    ) -> RailRefund | None:
         # The API's MockRail answers every refund at once, so a pending mock Refund is one
         # the API stopped before asking about: the rail never had it, and the sweep fails it.
         return None
