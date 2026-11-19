@@ -301,7 +301,7 @@ for deployment, and a README with architecture, how to run, and the eval results
 None of these need a rewrite if the seams hold; each is a swap or an addition. Listing them in the README shows you know the gap between demo and production.
 
 - [ ] Temporal: dev server → Temporal Cloud, which needs its TLS or API-key settings added. The hosted demo runs the dev server on its VM (ADR-0021).
-- [ ] Postgres: Docker → managed Postgres with backups, point-in-time recovery and a read replica for the ops console. The hosted demo's Postgres is a container on one VM, with no backups (ADR-0021).
+- [ ] Postgres: Docker → managed Postgres with backups, point-in-time recovery and a read replica for the ops console. The hosted demo's Postgres is a container on one VM, with nightly dumps copied off it but no point-in-time recovery (ADR-0021, ADR-0023).
 - [ ] Redis for rate limits and the intent-signal cache; outbox worker → managed queue.
 - [ ] Horizontal scale: stateless API pods behind a load balancer; workers scaled on Temporal task-queue depth.
 - [ ] Model gateway: fallback chain, prompt caching, per-tenant token budgets and a kill switch per tenant and per tool.
