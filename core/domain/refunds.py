@@ -53,13 +53,17 @@ class Refund(BaseModel):
         at: datetime,
     ) -> Self | None:
         """This Refund after the rail answered, or None when that changes nothing. A settled
-        Refund never reopens, so a late or repeated answer is a no-op."""
-        if self.status != "pending" or status == "pending":
+        Refund never reopens, so a late or repeated answer is a no-op. While pending, only
+        news is applied: a first rail refund id, which says the rail has it."""
+        if self.status != "pending":
+            return None
+        news = rail_refund_id is not None and self.rail_refund_id is None
+        if status == "pending" and not news:
             return None
         return self.model_copy(
             update={
                 "status": status,
-                "rail_refund_id": rail_refund_id,
+                "rail_refund_id": self.rail_refund_id or rail_refund_id,
                 "failure_code": failure_code if status == "failed" else None,
                 "updated_at": at,
             }

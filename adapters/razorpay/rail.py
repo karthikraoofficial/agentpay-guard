@@ -157,6 +157,9 @@ class RazorpayRail:
     ) -> RailRefund:
         raise NotImplementedError("Razorpay refunds come with #210")
 
+    def get_refund(self, tenant_id: TenantId, refund_id: RefundId) -> RailRefund | None:
+        raise NotImplementedError("Razorpay refunds come with #210")
+
     def token_expires_at(self, rail_token: RailToken) -> datetime | None:
         """When Razorpay expires the token, or None if it doesn't know the token. Test
         tokens last until 23:59:59 IST the day after registration."""

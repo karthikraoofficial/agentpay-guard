@@ -41,6 +41,8 @@ TenantEventType = Literal[
     "dispute.in_review",
     "dispute.ready",
     "dispute.expired",
+    "refund.processed",
+    "refund.failed",
 ]
 TENANT_EVENT_TYPES: frozenset[str] = frozenset(get_args(TenantEventType))
 

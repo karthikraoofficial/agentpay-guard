@@ -163,6 +163,10 @@ class PaymentRail(Protocol):
         outcome raises `RailUnavailable`."""
         ...
 
+    def get_refund(self, tenant_id: TenantId, refund_id: RefundId) -> RailRefund | None:
+        """A Refund as the rail sees it now, or None if the rail has none by that id."""
+        ...
+
 
 # --- ModelGateway ------------------------------------------------------------
 
@@ -556,6 +560,11 @@ class TenantDirectory(Protocol):
         """Payments still scheduled that were made before `created_before` and are not in
         a Pre-debit notice period at `now`, in every Tenant, oldest first: what the
         reconciliation sweep asks the rail about."""
+        ...
+
+    def pending_refunds(self, created_before: datetime) -> list[tuple[TenantId, RefundId]]:
+        """Refunds still pending that were asked for before `created_before`, in every
+        Tenant, oldest first: what the reconciliation sweep asks the rail about (#209)."""
         ...
 
     def due_debits(self, now: datetime) -> list[tuple[TenantId, PaymentId]]:

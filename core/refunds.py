@@ -14,6 +14,7 @@ from core.domain.parties import new_id
 from core.domain.payments import Payment
 from core.domain.refunds import Refund, RefundId
 from core.ports import RailRefund, TenantTransaction
+from core.tenant_events import refund_settled
 
 
 def request_refund(
@@ -58,7 +59,9 @@ def record_refund(
     if moved is None:
         return refund
     tx.update_refund(moved)
-    _audit(tx, moved, now)
+    if moved.status != refund.status:
+        _audit(tx, moved, now)
+        tx.publish(refund_settled(moved, now))
     return moved
 
 

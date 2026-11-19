@@ -5,7 +5,9 @@ replays every Decision when each test ends, so `refund` records must keep the ch
 intact."""
 
 import hashlib
+import json
 import threading
+import uuid
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -19,11 +21,15 @@ from adapters.memory.workflow import InMemoryWorkflow
 from adapters.postgres.store import PostgresStore
 from api.main import create_app
 from core.domain.payments import PaymentId
+from core.domain.refunds import RefundId
 from core.ports import RailUnavailable
-from tests.api.conftest import NOW, Api, MovableClock
+from core.reconcile import sweep
+from core.relay import relay_once
+from tests.api.conftest import NOW, Api, MovableClock, RecordingSender, tenant_webhooks
 from tests.api.test_disputes import DISPUTE_RULES, SECRET, Disputes
 from tests.api.test_payments import token
 from tests.api.test_rail_webhooks import event
+from tests.api.test_tenant_webhooks import EVERYTHING, verifies
 from tests.api.test_tenants_payers_agents import assert_problem
 from tests.conftest import make_settings
 from tests.packs import release_test_pack
@@ -386,3 +392,158 @@ def test_refunding_last_months_payment_frees_nothing_this_month(refunds: Refunds
 
     later = refunds.allow(mandate_id=mandate_id, amount=inr(100_00))
     assert spent_seen_by(refunds, later) == december["amount"]["minor"]
+
+
+# --- Refund outcomes and Tenant webhooks (#209) --------------------------------------
+
+
+class Hooked(Refunds):
+    """A Refunds Tenant with a webhook endpoint that records what it receives."""
+
+    def __init__(self, api: Api) -> None:
+        super().__init__(api)
+        self.url = f"https://hooks.example/{uuid.uuid4().hex}"
+        self.sender = RecordingSender()
+        self.secret: str = self.api.post(
+            "/v1/webhook-endpoint", self.tenant, {"url": self.url}
+        ).json()["secret"]
+
+    def relay(self) -> None:
+        webhooks = tenant_webhooks(self.api.store, self.api.clock, self.sender)
+        relay_once(self.api.store, self.api.workflow, self.api.clock, webhooks, limit=EVERYTHING)
+
+    def refund_events(self) -> list[tuple[dict[str, Any], bytes, dict[str, str]]]:
+        sent = [(json.loads(b), b, h) for url, b, h in self.sender.sent if url == self.url]
+        return [s for s in sent if s[0]["type"].startswith("refund.")]
+
+
+@pytest.fixture
+def hooked(refunds: Refunds) -> Hooked:
+    return Hooked(refunds.api)
+
+
+def test_a_settled_refund_sends_a_signed_refund_webhook(hooked: Hooked) -> None:
+    payment = hooked.captured()
+    pid = payment["payment_id"]
+    done = hooked.refund(pid, amount=inr(10_000), reason="Returned item").json()
+    hooked.api.rail.forget(hooked.tenant_id(), PaymentId(pid))
+    failed = hooked.refund(pid, amount=inr(10_000)).json()
+
+    hooked.relay()
+
+    events = {body["data"]["refund_id"]: (body, raw, h) for body, raw, h in hooked.refund_events()}
+    assert {r: body["type"] for r, (body, _, _) in events.items()} == {
+        done["refund_id"]: "refund.processed",
+        failed["refund_id"]: "refund.failed",
+    }
+    for body, raw, headers in events.values():
+        assert verifies(raw, headers["X-AgentPay-Signature"], hooked.secret)
+        assert body["data"]["payment_id"] == pid
+        assert body["data"]["amount_minor"] == 10_000
+        assert b"Returned item" not in raw  # no free text in a webhook
+    assert events[failed["refund_id"]][0]["data"]["failure_code"] == failed["failure_code"]
+
+
+AGE = timedelta(minutes=10)  # how old a pending Refund is before the sweep asks about it
+
+
+def test_a_refund_the_rail_finishes_later_is_settled_by_the_sweep(hooked: Hooked) -> None:
+    payment = hooked.captured()
+    rail, tenant = hooked.api.rail, hooked.tenant_id()
+    rail.hold_refunds()
+
+    pending = hooked.refund(payment["payment_id"], amount=inr(10_000)).json()
+    assert pending["status"] == "pending"
+    sweep(hooked.api.store, rail, hooked.api.clock, AGE)  # too young to be asked about
+    rail.finish_refund(tenant, RefundId(pending["refund_id"]), "processed")
+    hooked.api.clock.advance(AGE + timedelta(seconds=1))
+    sweep(hooked.api.store, rail, hooked.api.clock, AGE)
+
+    shown = hooked.payment(payment["payment_id"], headers=hooked.manage).json()
+    [refund] = shown["refunds"]
+    assert (refund["status"], refund["rail_refund_id"]) == ("processed", pending["rail_refund_id"])
+    statuses = [
+        hooked.audit(i).record.refund.status for i in hooked.trail(payment["decision_id"])["refund"]
+    ]
+    assert statuses == ["pending", "processed"]
+    hooked.relay()
+    assert [b["type"] for b, _, _ in hooked.refund_events()] == ["refund.processed"]
+
+
+def later(hooked: Hooked) -> None:
+    """Past the age at which the sweep asks about a pending Refund."""
+    hooked.api.clock.advance(AGE + timedelta(seconds=1))
+
+
+def refund_statuses(hooked: Hooked, payment: dict[str, Any]) -> list[str]:
+    trail = hooked.trail(payment["decision_id"]).get("refund", [])
+    return [hooked.audit(i).record.refund.status for i in trail]
+
+
+def test_a_refund_the_rail_refuses_later_fails_and_says_so(hooked: Hooked) -> None:
+    payment = hooked.captured()
+    rail = hooked.api.rail
+    rail.hold_refunds()
+    pending = hooked.refund(payment["payment_id"], amount=inr(10_000)).json()
+
+    rail.finish_refund(hooked.tenant_id(), RefundId(pending["refund_id"]), "failed")
+    later(hooked)
+    sweep(hooked.api.store, rail, hooked.api.clock, AGE)
+
+    [refund] = hooked.payment(payment["payment_id"], headers=hooked.manage).json()["refunds"]
+    assert (refund["status"], refund["failure_code"]) == ("failed", "BAD_REQUEST_ERROR")
+    assert refund_statuses(hooked, payment) == ["pending", "failed"]
+    hooked.relay()
+    assert [b["type"] for b, _, _ in hooked.refund_events()] == ["refund.failed"]
+
+
+def test_a_refund_whose_answer_was_lost_is_settled_once_by_the_sweep(hooked: Hooked) -> None:
+    payment = hooked.captured()
+    rail, pid = hooked.api.rail, PaymentId(payment["payment_id"])
+    rail.time_out_refunds()  # the rail refunds, then the call times out
+
+    pending = hooked.refund(payment["payment_id"], amount=inr(10_000)).json()
+    assert pending["status"] == "pending"
+    later(hooked)
+    sweep(hooked.api.store, rail, hooked.api.clock, AGE)
+    sweep(hooked.api.store, rail, hooked.api.clock, AGE)
+
+    [refund] = hooked.payment(payment["payment_id"], headers=hooked.manage).json()["refunds"]
+    assert refund["status"] == "processed"
+    assert refund_statuses(hooked, payment) == ["pending", "processed"]
+    assert rail.refunds_for(hooked.tenant_id(), pid) == 1
+
+
+def test_a_refund_that_never_reached_the_rail_is_failed_by_the_sweep(
+    hooked: Hooked, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payment = hooked.captured()
+
+    def unreached(*args: Any) -> None:
+        raise RailUnavailable("connection refused")
+
+    monkeypatch.setattr(hooked.api.rail, "refund", unreached)
+    hooked.refund(payment["payment_id"], amount=inr(10_000))
+    later(hooked)
+    sweep(hooked.api.store, hooked.api.rail, hooked.api.clock, AGE)
+
+    [refund] = hooked.payment(payment["payment_id"], headers=hooked.manage).json()["refunds"]
+    assert (refund["status"], refund["failure_code"]) == ("failed", "RAIL_REFUND_MISSING")
+    assert hooked.refund(payment["payment_id"], amount=inr(10_000)).status_code == 201
+
+
+def test_a_refund_the_rail_answered_for_but_cannot_find_is_left_pending(
+    hooked: Hooked, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payment = hooked.captured()
+    rail = hooked.api.rail
+    rail.hold_refunds()
+    hooked.refund(payment["payment_id"], amount=inr(10_000))
+    monkeypatch.setattr(rail, "get_refund", lambda *args: None)  # a faulty lookup
+
+    later(hooked)
+    result = sweep(hooked.api.store, rail, hooked.api.clock, AGE)
+
+    [refund] = hooked.payment(payment["payment_id"], headers=hooked.manage).json()["refunds"]
+    assert refund["status"] == "pending"  # tried again next sweep, never failed by guess
+    assert result.errors >= 1  # other tests' leftovers share the Postgres run
