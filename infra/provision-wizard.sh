@@ -201,7 +201,7 @@ finish() {
 
 run_wizard() {
 
-TOTAL_STAGES=11
+TOTAL_STAGES=12
 
 # Run from the repo root. Two git-ignored files:
 #   .env.production  the VM's .env (every AGENTPAY_ hosted setting), copied to the VM
@@ -479,6 +479,31 @@ else
 fi
 say "Live: API https://$API_HOST · web $WEB_URL"
 note "Tell Claude these URLs so the README gets them (ticket #140)."
+pause
+
+# ── 12 ─────────────────────────────────────────────────────────────────────
+stage "Nightly backups"
+say "A nightly pg_dump on the VM at 02:30 UTC (the newest 14 kept), a restore check every"
+say "Sunday, and a copy of each dump in a private Object Storage bucket, deleted after 30"
+say "days (#200, ADR-0023). The VM gets only a write-only upload link, no OCI credentials."
+if confirm "Create (or check) the backup bucket and its upload link with the OCI CLI?"; then
+  if bash infra/oci-create-backup-bucket.sh "$PROD"; then
+    scp -i "$SSH_KEY" -q "$PROD" "$VM_USER@$VM_IP:agentpay-guard/.env"
+    vm 'chmod 600 agentpay-guard/.env'
+    printf '  %s✓ copied%s %s → %s:agentpay-guard/.env
+' "$GREEN" "$RESET" "$PROD" "$VM_IP"
+  else
+    SKIPPED+=("the backup bucket: bash infra/oci-create-backup-bucket.sh $PROD, then copy $PROD to the VM")
+  fi
+fi
+if confirm "Install the backup jobs on the VM and take the first dump now?"; then
+  if vm "cd agentpay-guard && git pull --ff-only && bash infra/pg-backup.sh install-cron && bash infra/pg-backup.sh dump"; then
+    printf '  %s✓ backups on%s: logs in ~/agentpay-backups on the VM
+' "$GREEN" "$RESET"
+  else
+    SKIPPED+=("backups: on the VM, cd agentpay-guard && bash infra/pg-backup.sh install-cron && bash infra/pg-backup.sh dump")
+  fi
+fi
 pause
 
 finish

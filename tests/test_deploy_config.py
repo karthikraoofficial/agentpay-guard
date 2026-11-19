@@ -6,13 +6,15 @@ from pathlib import Path
 from core.settings import Settings
 
 EXAMPLE = Path(".env.production.example")
-# Read by docker compose, never by the app.
+# Read by docker compose or the infra scripts, never by the app.
 COMPOSE_ONLY = {
     "AGENTPAY_API_HOST",
     "AGENTPAY_POSTGRES_PASSWORD",
     "AGENTPAY_LANGFUSE_PUBLIC_KEY",
     "AGENTPAY_LANGFUSE_SECRET_KEY",
     "AGENTPAY_LANGFUSE_HOST",
+    "AGENTPAY_BACKUP_PAR_URL",  # infra/pg-backup.sh (#200)
+    "AGENTPAY_BACKUP_PAR_EXPIRES",
 }
 # Set by infra/docker-compose.prod.yml itself.
 FROM_COMPOSE = {

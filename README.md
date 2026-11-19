@@ -333,7 +333,7 @@ The hosted demo costs nothing except model calls (ADR-0021):
 - The web app is on Vercel Hobby.
 - Traces go to Langfuse Hobby.
 
-To put it live, run `bash infra/provision-wizard.sh` from the repo root. It walks you through 11 stages:
+To put it live, run `bash infra/provision-wizard.sh` from the repo root. It walks you through 12 stages:
 - creating the Oracle VM and opening ports 80 and 443 (in Oracle's security list and on the VM's own firewall). With the OCI CLI installed (`uv tool install oci-cli`), stage 1 runs `infra/oci-create-vm.sh`, which:
   - creates the network and the VM;
   - keeps retrying while the region is out of Ampere capacity;
@@ -341,7 +341,8 @@ To put it live, run `bash infra/provision-wizard.sh` from the repo root. It walk
 - installing Docker;
 - creating the Langfuse project, the Anthropic key and the Vercel project;
 - writing the VM's `.env`, starting the stack and creating the Demo Tenant;
-- checking it's live.
+- checking it's live;
+- turning on nightly backups (below).
 
 It never shows a secret. Generated passwords and keys go into the git-ignored `.env.production`, which is copied to the VM. The Demo Tenant's keys go into your local `.env` for `python -m demo`. Re-running it keeps the values already saved.
 
@@ -355,6 +356,24 @@ docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compo
 ```
 
 To move the hosted demo's Postgres to a new major version, run `bash infra/pg-upgrade.sh --prod` on the VM after pulling, then the `up -d --build` step below. It stops the stack, copies the database into the new volume, and checks every table's row count. The `migrate` service then runs on the new database. The old volume and the dump stay as the rollback (ADR-0022).
+
+**Backups** (ADR-0023). `infra/pg-backup.sh` runs from the VM's crontab, installed by the wizard's last stage:
+- **Nightly, 02:30 UTC:** a `pg_dump` of the running database to `~/agentpay-backups`, keeping the newest 14. Each one is also uploaded to the private Object Storage bucket `agentpay-guard-backups`, which deletes objects after 30 days.
+- **Sundays, 03:00 UTC:** the newest dump is restored into a throwaway Postgres, and `api.admin verify` must pass for every Tenant.
+
+Results go to `~/agentpay-backups/backup.log` and `check.log`. Nothing alerts on a failure, so look at those now and then. The VM uploads through a write-only link (`AGENTPAY_BACKUP_PAR_URL`), not OCI credentials. `infra/oci-create-backup-bucket.sh` makes the bucket and the link, and the link expires after a year. The nightly log warns 30 days ahead, and re-running the wizard's last stage replaces it.
+
+To restore a dump on the VM (one from the bucket: download it in the Oracle console, then `scp` it over):
+
+```bash
+C="docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.prod.yml"
+$C stop caddy api worker                     # nothing writes during the restore
+$C exec -T postgres dropdb -U agentpay --force agentpay
+$C exec -T postgres createdb -U agentpay agentpay
+$C exec -T postgres pg_restore -U agentpay -d agentpay --single-transaction --exit-on-error   < ~/agentpay-backups/agentpay-<time>.dump
+$C up -d                                     # migrate brings it to head; then check:
+$C exec api python -m api.admin verify --tenant <id>
+```
 
 What the production overlay does:
 - **One image, three services.** The root `Dockerfile` builds a single image that runs the API, the worker and a one-shot `migrate` service. The API and worker wait until migrations have finished.
