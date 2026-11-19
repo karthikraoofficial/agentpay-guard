@@ -14,6 +14,9 @@
 #     left is kept rather than replaced.
 # No OCI credential goes to the VM: only that URL, which can add objects and nothing else.
 set -uo pipefail
+# shellcheck disable=SC1091  # sourced by path; see infra/wsl-guard.sh
+source "$(dirname "$0")/wsl-guard.sh"
+wsl_guard "oci" "$@"
 export SUPPRESS_LABEL_WARNING=True PYTHONWARNINGS=ignore OCI_CLI_AUTH="${OCI_CLI_AUTH:-security_token}"
 ENV_FILE="${1:?usage: bash infra/oci-create-backup-bucket.sh <env-file>}"
 BUCKET=agentpay-guard-backups

@@ -207,6 +207,10 @@ TOTAL_STAGES=12
 #   .env.production  the VM's .env (every AGENTPAY_ hosted setting), copied to the VM
 #   .env.provision   this wizard's own notes: the VM's address, SSH key and the live URLs
 # The Demo Tenant's keys go into the local .env, for `python -m demo`.
+# Under WSL (PowerShell's "bash") without these, stop and say to use Git Bash (#203).
+# shellcheck disable=SC1091  # sourced by path; see infra/wsl-guard.sh
+source "$(dirname "$0")/wsl-guard.sh"
+wsl_guard "oci uv ssh scp openssl curl" "$@"
 cd "$(dirname "$0")/.."
 PROD=.env.production
 NOTES=.env.provision

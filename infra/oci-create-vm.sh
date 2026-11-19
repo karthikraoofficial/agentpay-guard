@@ -17,6 +17,9 @@
 # Free accounts often get "Out of host capacity"; it retries every 10 minutes (15 after a
 # throttle) until the VM launches. The last line printed is PUBLIC_IP=<ip>.
 set -uo pipefail
+# shellcheck disable=SC1091  # sourced by path; see infra/wsl-guard.sh
+source "$(dirname "$0")/wsl-guard.sh"
+wsl_guard "oci ssh-keygen" "$@"
 # A browser session by default; OCI_CLI_AUTH=api_key (with OCI_CLI_PROFILE) uses an API key instead.
 export SUPPRESS_LABEL_WARNING=True PYTHONWARNINGS=ignore OCI_CLI_AUTH="${OCI_CLI_AUTH:-security_token}"
 

@@ -39,7 +39,7 @@ Enforced by code from the first commit:
 
 ## Run it locally
 
-Prerequisites: [uv](https://docs.astral.sh/uv/), Docker Desktop, and Node 22+ for `web/` (what CI runs).
+Prerequisites: [uv](https://docs.astral.sh/uv/), Docker Desktop, and Node 22+ for `web/` (what CI runs). On Windows, run the `bash infra/…` scripts from Git Bash. In PowerShell, `bash` is WSL's, which can't see your Windows tools, so use `& "C:\Program Files\Git\bin\bash.exe" infra/<script>.sh` (the scripts say so if you forget, #203).
 
 ```bash
 uv sync                                           # Python 3.12 + locked dependencies
@@ -333,7 +333,7 @@ The hosted demo costs nothing except model calls (ADR-0021):
 - The web app is on Vercel Hobby.
 - Traces go to Langfuse Hobby.
 
-To put it live, run `bash infra/provision-wizard.sh` from the repo root. It walks you through 12 stages:
+To put it live, run `bash infra/provision-wizard.sh` from the repo root (on Windows, from Git Bash; see Run it locally). It walks you through 12 stages:
 - creating the Oracle VM and opening ports 80 and 443 (in Oracle's security list and on the VM's own firewall). With the OCI CLI installed (`uv tool install oci-cli`), stage 1 runs `infra/oci-create-vm.sh`, which:
   - creates the network and the VM;
   - keeps retrying while the region is out of Ampere capacity;
