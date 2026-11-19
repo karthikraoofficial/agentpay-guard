@@ -643,11 +643,11 @@ def test_the_model_may_cite_a_refund_record_in_a_refund_claim(credited: Refunds)
     pack = credited.get(dispute_id).json()["pack"]
     assert (pack["narrative_source"], pack["narrative_note"]) == ("model", None)
     assert [c["kind"] for c in pack["narrative"]] == ["decision", "payment", "refund", "dispute"]
-    assert pack["narrative_attempts"][0]["prompt_version"] == "dispute_narrative@3"
+    assert pack["narrative_attempts"][0]["prompt_version"] == PROMPT_VERSION
 
 
 def test_prompt_3_offers_the_refund_kind_and_leaves_2_as_released() -> None:
-    assert PROMPT_VERSION == "dispute_narrative@3"
+    assert PROMPTS["dispute_narrative@3"]  # released; no longer the current one (#219)
     assert '- "refund":' in PROMPTS["dispute_narrative@3"]
     assert '- "refund":' not in PROMPTS["dispute_narrative@2"]
     released = hashlib.sha256(PROMPTS["dispute_narrative@2"].encode()).hexdigest()
@@ -744,3 +744,13 @@ def test_a_refund_event_that_is_not_ours_is_dropped(
 
     [shown] = hooked.payment(payment["payment_id"], headers=hooked.manage).json()["refunds"]
     assert shown["status"] == "pending"
+
+
+def test_prompt_4_keeps_agent_side_refund_claims_out_of_the_models_own_words() -> None:
+    # @3's live eval had the model rebut an injected refund claim in its own words (#219).
+    v4 = PROMPTS["dispute_narrative@4"]
+    assert PROMPT_VERSION == "dispute_narrative@4"
+    assert "Only for refund records in the evidence" in v4
+    assert "never say whether it is true or false" in v4
+    released = hashlib.sha256(PROMPTS["dispute_narrative@3"].encode()).hexdigest()
+    assert released == "ece05d481021c564f63b692fc04563e1441377b4197a3b4371c212f51e31786b"
