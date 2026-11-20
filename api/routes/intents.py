@@ -23,6 +23,7 @@ from api.deps import (
     PackDep,
     SettingsDep,
     StoreDep,
+    TelemetryDep,
 )
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
@@ -38,6 +39,7 @@ from core.domain.intents import (
 from core.domain.mandates import MandateId
 from core.domain.money import Money
 from core.domain.parties import AgentId, new_id
+from core.ops_metrics import INTENT_VERDICTS
 from core.signals.intent_check import PROMPT_VERSION, run_intent_check
 
 router = APIRouter(prefix="/v1/intents", tags=["intents"])
@@ -95,6 +97,7 @@ def create_intent(
     pack: PackDep,
     gateway: GatewayDep,
     settings: SettingsDep,
+    telemetry: TelemetryDep,
     key: IdemKey,
 ) -> Response:
     def write(now: datetime) -> tuple[int, IntentCreated]:
@@ -142,6 +145,8 @@ def create_intent(
             expires_at=now + ttl,
         )
         tx.add_intent_check(check)
+        cause = check.failure_cause or "none"
+        telemetry.count(INTENT_VERDICTS, {"verdict": check.verdict, "failure_cause": cause})
         return 201, IntentCreated(intent_id=check.intent_id, expires_at=check.expires_at)
 
     with store.transaction(tenant) as tx:

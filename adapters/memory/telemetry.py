@@ -21,6 +21,7 @@ class RecordedMetric:
     name: str
     value: float
     attributes: dict[str, AttributeValue]
+    kind: str = "histogram"  # or "counter", "gauge"
 
 
 class InMemoryTelemetry:
@@ -36,3 +37,26 @@ class InMemoryTelemetry:
 
     def record_metric(self, name: str, value: float, attributes: Attributes) -> None:
         self.metrics.append(RecordedMetric(name, value, dict(attributes)))
+
+    def count(self, name: str, attributes: Attributes, value: int = 1) -> None:
+        self.metrics.append(RecordedMetric(name, value, dict(attributes), "counter"))
+
+    def set_gauge(self, name: str, value: float, attributes: Attributes) -> None:
+        self.metrics.append(RecordedMetric(name, value, dict(attributes), "gauge"))
+
+    def recorded(self, name: str, **attributes: AttributeValue) -> list[RecordedMetric]:
+        """Every recording of `name` whose attributes include `attributes`."""
+        return [
+            m
+            for m in self.metrics
+            if m.name == name and all(m.attributes.get(k) == v for k, v in attributes.items())
+        ]
+
+    def total(self, name: str, **attributes: AttributeValue) -> float:
+        """What a counter adds up to, over the attribute sets that include `attributes`."""
+        return sum(m.value for m in self.recorded(name, **attributes))
+
+    def last(self, name: str, **attributes: AttributeValue) -> float | None:
+        """A gauge's latest value, or None if it was never set."""
+        found = self.recorded(name, **attributes)
+        return found[-1].value if found else None

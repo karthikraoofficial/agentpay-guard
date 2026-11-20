@@ -201,7 +201,7 @@ finish() {
 
 run_wizard() {
 
-TOTAL_STAGES=13
+TOTAL_STAGES=14
 
 # Run from the repo root. Two git-ignored files:
 #   .env.production  the VM's .env (every AGENTPAY_ hosted setting), copied to the VM
@@ -535,8 +535,7 @@ heartbeat_url AGENTPAY_BACKUP_HEARTBEAT_URL "Ping URL of 'agentpay nightly dump'
 heartbeat_url AGENTPAY_RESTORE_CHECK_HEARTBEAT_URL "Ping URL of 'agentpay restore check' (hidden):"
 scp -i "$SSH_KEY" -q "$PROD" "$VM_USER@$VM_IP:agentpay-guard/.env"
 vm 'chmod 600 agentpay-guard/.env'
-printf '  %s✓ copied%s %s → %s:agentpay-guard/.env
-' "$GREEN" "$RESET" "$PROD" "$VM_IP"
+printf '  %s✓ copied%s %s → %s:agentpay-guard/.env\n' "$GREEN" "$RESET" "$PROD" "$VM_IP"
 if confirm "Take a dump on the VM now, so 'agentpay nightly dump' gets its first ping?"; then
   if vm "cd agentpay-guard && bash infra/pg-backup.sh dump"; then
     step "Healthchecks.io: 'agentpay nightly dump' should turn green within a minute."
@@ -557,6 +556,69 @@ if confirm "Did the test alert reach your inbox?"; then
   note_write ALERT_EMAIL_TESTED "yes"
 else
   SKIPPED+=("a test alert by email: Healthchecks.io → Integrations → Email → Test (check spam)")
+fi
+pause
+
+# ── 14 ─────────────────────────────────────────────────────────────────────
+stage "Metric alerts: Grafana Cloud"
+say "The API and worker export metrics for each runbook symptom; the collector sends them"
+say "to Grafana Cloud's free plan, and alert rules there email you (#228, ADR-0026)."
+open_url "https://grafana.com/auth/sign-up/create-user"
+step "Sign up or log in, and create a stack (the free plan is enough)."
+step "grafana.com → My Account → your stack → OpenTelemetry → Configure."
+step "Generate a token there (scope metrics:write). Copy the endpoint, the Instance ID and the token."
+pause "Press Enter when you have them"
+while :; do
+  prod_ask AGENTPAY_GRAFANA_OTLP_ENDPOINT "OTLP endpoint (https://otlp-gateway-….grafana.net/otlp):"
+  [[ "$AGENTPAY_GRAFANA_OTLP_ENDPOINT" =~ ^https://[^[:space:]]+/otlp/?$ ]] && break
+  warn "That isn't the OTLP endpoint; it starts with https:// and ends in /otlp."
+done
+prod_write AGENTPAY_GRAFANA_OTLP_ENDPOINT "${AGENTPAY_GRAFANA_OTLP_ENDPOINT%/}"
+note_ask GRAFANA_INSTANCE_ID "Instance ID (digits):"
+grafana_token=""
+read -rs -p "  ${BOLD}Token (hidden):${RESET} " grafana_token || true
+printf '\n'
+if [[ -n "$grafana_token" ]]; then
+  # Basic auth for the collector's header. tr drops base64's line breaks.
+  prod_write AGENTPAY_GRAFANA_OTLP_AUTH "$(printf '%s:%s' "$GRAFANA_INSTANCE_ID" "$grafana_token" | base64 | tr -d '\n')"
+else
+  note "keeping the existing AGENTPAY_GRAFANA_OTLP_AUTH"
+fi
+unset grafana_token
+scp -i "$SSH_KEY" -q "$PROD" "$VM_USER@$VM_IP:agentpay-guard/.env"
+vm 'chmod 600 agentpay-guard/.env'
+if vm "cd agentpay-guard && git pull --ff-only && $COMPOSE up -d --build"; then
+  printf '  %s✓ the collector now sends metrics to Grafana Cloud%s\n' "$GREEN" "$RESET"
+else
+  SKIPPED+=("restart the stack on the VM: cd agentpay-guard && $COMPOSE up -d --build")
+fi
+say ""
+say "Now the alert rules, pushed from here with a Grafana service account token:"
+step "Your stack's Grafana (https://<stack>.grafana.net) → Administration → Users and access"
+step "  → Service accounts → Add service account, role Editor → Add service account token."
+ENV_FILE=.env ask AGENTPAY_GRAFANA_URL "Stack URL (https://<stack>.grafana.net):"
+ENV_FILE=.env write_env AGENTPAY_GRAFANA_URL "${AGENTPAY_GRAFANA_URL%/}"
+ENV_FILE=.env ask_secret AGENTPAY_GRAFANA_API_TOKEN "Service account token (hidden):"
+ENV_FILE=.env write_env AGENTPAY_GRAFANA_API_TOKEN "$AGENTPAY_GRAFANA_API_TOKEN"
+unset AGENTPAY_GRAFANA_API_TOKEN
+ENV_FILE=.env ask AGENTPAY_ALERT_EMAIL "Email the alerts go to:"
+ENV_FILE=.env write_env AGENTPAY_ALERT_EMAIL "$AGENTPAY_ALERT_EMAIL"
+if uv run python -m adapters.grafana.alerts; then
+  printf '  %s✓ alert rules in Grafana%s: Alerting → Alert rules → AgentPay Guard\n' "$GREEN" "$RESET"
+else
+  SKIPPED+=("the alert rules: uv run python -m adapters.grafana.alerts")
+fi
+step "Grafana → Explore → Prometheus: query agentpay_rail_breaker_open. It should show 0 within 2 minutes."
+if confirm "Do you see agentpay_rail_breaker_open in Grafana?"; then
+  note_write GRAFANA_METRICS_SEEN "yes"
+else
+  SKIPPED+=("metrics in Grafana: on the VM, $COMPOSE logs otel-collector | grep -i grafana")
+fi
+step "Send yourself one test alert: Alerting → Contact points → agentpay-email → Test."
+if confirm "Did the Grafana test alert reach your inbox?"; then
+  note_write GRAFANA_ALERT_TESTED "yes"
+else
+  SKIPPED+=("a Grafana test alert: Alerting → Contact points → agentpay-email → Test (check spam)")
 fi
 pause
 

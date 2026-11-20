@@ -41,3 +41,50 @@ def test_with_no_exporter_spans_still_work_and_nothing_is_sent() -> None:
     with telemetry.start_span("decision", {"tenant_id": "ten_1"}) as span:
         span.set_attribute("outcome", "block")
     telemetry.shutdown()
+
+
+def _points(reader: InMemoryMetricReader) -> dict[str, list[tuple[dict[str, object], float]]]:
+    data = reader.get_metrics_data()
+    assert data is not None
+    return {
+        m.name: [(dict(p.attributes or {}), p.value) for p in m.data.data_points]
+        for rm in data.resource_metrics
+        for sm in rm.scope_metrics
+        for m in sm.metrics
+    }
+
+
+def test_a_count_adds_up_per_attribute_set() -> None:
+    reader = InMemoryMetricReader()
+    telemetry = OtelTelemetry("svc", "1.2.3", metric_reader=reader)
+
+    telemetry.count("agentpay.intent.verdicts", {"verdict": "unknown"})
+    telemetry.count("agentpay.intent.verdicts", {"verdict": "unknown"})
+    telemetry.count("agentpay.intent.verdicts", {"verdict": "match"})
+
+    points = sorted(_points(reader)["agentpay.intent.verdicts"], key=lambda p: str(p[0]))
+    assert points == [({"verdict": "match"}, 1), ({"verdict": "unknown"}, 2)]
+
+
+def test_a_gauge_keeps_its_last_value_until_set_again() -> None:
+    reader = InMemoryMetricReader()
+    telemetry = OtelTelemetry("svc", "1.2.3", metric_reader=reader)
+
+    telemetry.set_gauge("agentpay.rail.breaker_open", 1, {})
+    assert _points(reader)["agentpay.rail.breaker_open"] == [({}, 1)]
+    assert _points(reader)["agentpay.rail.breaker_open"] == [({}, 1)]  # a later export
+    telemetry.set_gauge("agentpay.rail.breaker_open", 0, {})
+    assert _points(reader)["agentpay.rail.breaker_open"] == [({}, 0)]
+
+
+def test_decision_durations_get_buckets_around_the_latency_budget() -> None:
+    reader = InMemoryMetricReader()
+    telemetry = OtelTelemetry("svc", "1.2.3", metric_reader=reader)
+
+    telemetry.record_metric("agentpay.decision.duration", 120.0, {})
+
+    data = reader.get_metrics_data()
+    assert data is not None
+    (metric,) = [m for rm in data.resource_metrics for sm in rm.scope_metrics for m in sm.metrics]
+    (point,) = metric.data.data_points
+    assert 150.0 in point.explicit_bounds  # the API's p95 budget, so p95 alerts are exact there

@@ -58,13 +58,17 @@ jobs:
           git fetch --no-tags --depth=1 origin "$BASE_REF"
           bash .github/scripts/check-released-packs.sh FETCH_HEAD
 
-      - name: Collector configs are valid (console only, and with the Langfuse overlay)
+      - name: Collector configs are valid (console only, with the Langfuse overlay, and with both overlays)
         run: |
           image=otel/opentelemetry-collector-contrib:0.165.0
           docker run --rm -v "$PWD/infra:/cfg:ro" "$image" validate --config=/cfg/otel-collector.yaml
           docker run --rm -v "$PWD/infra:/cfg:ro" \
             -e LANGFUSE_PUBLIC_KEY=pk -e LANGFUSE_SECRET_KEY=sk -e LANGFUSE_HOST=https://cloud.langfuse.com \
             "$image" validate --config=/cfg/otel-collector.yaml --config=/cfg/otel-collector.langfuse.yaml
+          docker run --rm -v "$PWD/infra:/cfg:ro" \
+            -e LANGFUSE_PUBLIC_KEY=pk -e LANGFUSE_SECRET_KEY=sk -e LANGFUSE_HOST=https://cloud.langfuse.com \
+            -e GRAFANA_OTLP_ENDPOINT=https://otlp-gateway-prod-ap-south-1.grafana.net/otlp -e GRAFANA_OTLP_AUTH=YTpi \
+            "$image" validate --config=/cfg/otel-collector.yaml --config=/cfg/otel-collector.langfuse.yaml --config=/cfg/otel-collector.grafana.yaml
 
       - name: Migrations
         run: uv run alembic upgrade head

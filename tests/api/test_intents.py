@@ -214,3 +214,18 @@ def test_the_check_runs_at_low_effort_with_room_to_think(intents: Intents) -> No
 
     (call,) = intents.api.gateway.calls
     assert (call.effort, call.max_tokens) == ("low", 1024)
+
+
+def test_each_new_check_counts_its_verdict_and_cause(intents: Intents) -> None:
+    intents.api.gateway.script.extend(["MATCH", ModelTimeout("slow")])
+
+    intents.check(key="intent-1")
+    intents.check(key="intent-1")  # a replay: no new check, no new count
+    intents.check()
+
+    telemetry = intents.api.telemetry
+    counted = [(m.attributes, m.value) for m in telemetry.recorded("agentpay.intent.verdicts")]
+    assert counted == [
+        ({"verdict": "match", "failure_cause": "none"}, 1),
+        ({"verdict": "unknown", "failure_cause": "timeout"}, 1),
+    ]

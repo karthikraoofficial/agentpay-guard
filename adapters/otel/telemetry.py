@@ -12,9 +12,14 @@ from contextlib import contextmanager
 
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.metrics import Histogram
+from opentelemetry.metrics import (  # create_gauge's type; no public name yet
+    Counter,
+    Histogram,
+    _Gauge,
+)
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import MetricReader, PeriodicExportingMetricReader
+from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
@@ -22,6 +27,10 @@ from opentelemetry.trace import Span
 
 from core.ports import Attributes
 from core.settings import Settings
+
+# Milliseconds, dense around the API's latency budget (POST /v1/decisions p95 < 150 ms), so
+# a p95 read from the buckets is exact where it matters.
+DECISION_BUCKETS = (5, 10, 25, 50, 75, 100, 125, 150, 200, 300, 500, 1000, 2500)
 
 
 class OtelTelemetry:
@@ -41,10 +50,18 @@ class OtelTelemetry:
         if span_processor is not None:
             self._tracer_provider.add_span_processor(span_processor)
         readers = [metric_reader] if metric_reader is not None else []
-        self._meter_provider = MeterProvider(resource=resource, metric_readers=readers)
+        decisions = View(
+            instrument_name="agentpay.decision.duration",
+            aggregation=ExplicitBucketHistogramAggregation(DECISION_BUCKETS),
+        )
+        self._meter_provider = MeterProvider(
+            resource=resource, metric_readers=readers, views=[decisions]
+        )
         self._tracer = self._tracer_provider.get_tracer("agentpay_guard")
         self._meter = self._meter_provider.get_meter("agentpay_guard")
         self._histograms: dict[str, Histogram] = {}
+        self._counters: dict[str, Counter] = {}
+        self._gauges: dict[str, _Gauge] = {}
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "OtelTelemetry":
@@ -71,6 +88,18 @@ class OtelTelemetry:
         if histogram is None:
             histogram = self._histograms[name] = self._meter.create_histogram(name)
         histogram.record(value, attributes=dict(attributes))
+
+    def count(self, name: str, attributes: Attributes, value: int = 1) -> None:
+        counter = self._counters.get(name)
+        if counter is None:
+            counter = self._counters[name] = self._meter.create_counter(name)
+        counter.add(value, attributes=dict(attributes))
+
+    def set_gauge(self, name: str, value: float, attributes: Attributes) -> None:
+        gauge = self._gauges.get(name)
+        if gauge is None:
+            gauge = self._gauges[name] = self._meter.create_gauge(name)
+        gauge.set(value, attributes=dict(attributes))
 
     def shutdown(self) -> None:
         """Flush and stop exporting. Called when the app shuts down."""

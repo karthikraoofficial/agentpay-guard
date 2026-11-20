@@ -4,7 +4,11 @@ A step_up's `step_up_consent` workflow isn't running: the worker or Temporal is 
 
 ## How you'd notice
 
-- **An alert fires only if the whole VM is down.** The uptime check (ADR-0026) emails when `/healthz` stops answering. A worker or Temporal that's down on its own sends no alert, since the API keeps answering.
+- **The alerts (ADR-0026).** On the hosted demo, Grafana Cloud emails one of these. Thresholds are in `infra/grafana/alert-rules.yaml`.
+  - **Consent: workflow events waiting:** a workflow event over a minute old has waited in the outbox for 5 minutes. It also fires when the worker has reported nothing for 5 minutes, because the worker reports the backlog every 30 s and only a worker that's down goes quiet.
+  - **Consent: requests expired with no resolution:** a Consent request more than 5 minutes past its expiry has had no resolution for 5 minutes.
+
+  The uptime check fires only if the whole VM or the API is down.
 - **Payers aren't notified.** The `consent_requested` event isn't delivered to start the workflow:
 
   ```bash

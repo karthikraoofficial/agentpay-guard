@@ -13,6 +13,7 @@ replay are unaffected; only what the Intent check or narrative writer gets back 
 from collections.abc import Mapping
 from datetime import UTC
 
+from core.ops_metrics import MODEL_CALLS
 from core.ports import (
     AttributeValue,
     Clock,
@@ -56,7 +57,17 @@ class CappedGateway:
     ) -> Completion:
         limit = self._limits.get(purpose, 0)
         day = self._clock.now().astimezone(UTC).date()
-        if not self._counter.take_model_call(tenant_id, purpose, day, limit):
+        taken = self._counter.take_model_call(tenant_id, purpose, day, limit)
+        self._telemetry.count(
+            MODEL_CALLS,
+            {
+                "tenant_id": tenant_id,
+                "purpose": purpose,
+                "outcome": "counted" if taken else "capped",
+                "daily_cap": limit,
+            },
+        )
+        if not taken:
             attributes: dict[str, AttributeValue] = {
                 "tenant_id": tenant_id,
                 "purpose": purpose,

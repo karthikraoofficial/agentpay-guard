@@ -48,6 +48,9 @@ class SweepStore(UnitOfWork, TenantDirectory, Protocol):
 class SweepResult:
     checked: int
     errors: int
+    # Still scheduled or pending past the sweep age once the pass is done (#228).
+    unsettled_payments: int = 0
+    unsettled_refunds: int = 0
 
 
 def sweep(store: SweepStore, rail: PaymentRail, clock: Clock, older_than: timedelta) -> SweepResult:
@@ -84,8 +87,14 @@ def sweep(store: SweepStore, rail: PaymentRail, clock: Clock, older_than: timede
                 type(exc).__name__,
                 exc_info=True,
             )
-    refunds = _sweep_refunds(store, rail, now - max(older_than, rail.lookup_lag), now)
-    return SweepResult(checked=len(due) + refunds.checked, errors=errors + refunds.errors)
+    created_before = now - max(older_than, rail.lookup_lag)
+    refunds = _sweep_refunds(store, rail, created_before, now)
+    return SweepResult(
+        checked=len(due) + refunds.checked,
+        errors=errors + refunds.errors,
+        unsettled_payments=len(store.scheduled_payments(created_before, now)),
+        unsettled_refunds=len(store.pending_refunds(created_before)),
+    )
 
 
 def _sweep_refunds(

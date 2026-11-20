@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from adapters.memory.rail import MockRail
+from adapters.postgres.store import PostgresStore
 from core.domain.payments import PaymentId
 from core.ports import TenantId
 from core.reconcile import sweep
@@ -149,6 +150,29 @@ def test_a_rail_error_leaves_that_payment_scheduled_and_the_sweep_goes_on(
     assert payments.payment(broken["payment_id"]).json()["status"] == "captured"
 
 
+def exact_counts(api: Api) -> None:
+    if isinstance(api.store, PostgresStore):
+        pytest.skip("the sweep counts every Tenant's Payments in the shared test database")
+
+
+def test_a_sweep_counts_its_errors_and_what_it_left_unsettled(api: Api, tmp_path: Path) -> None:
+    exact_counts(api)
+    api.rail = FlakyRail()
+    api.use_packs(phase_1_packs(tmp_path))
+    payments = Payments(api)
+    broken, waiting, fine = paid(payments), paid(payments), paid(payments)
+    for payment in (broken, fine):
+        settle(payments, payment)
+    api.rail.broken = PaymentId(broken["payment_id"])
+    api.clock.advance(timedelta(minutes=11))
+
+    result = run(api)
+
+    assert (result.checked, result.errors) == (3, 1)
+    assert (result.unsettled_payments, result.unsettled_refunds) == (2, 0)  # broken, waiting
+    assert waiting["status"] == "scheduled"
+
+
 def test_a_payment_the_rail_never_saw_is_failed_and_voided(api: Api, tmp_path: Path) -> None:
     api.rail = CrashesBeforeCharging()
     api.use_packs(phase_1_packs(tmp_path))
@@ -273,12 +297,52 @@ def test_the_worker_sweeps_on_its_interval(
     with pytest.raises(_Stop):
         asyncio.run(
             worker.sweep_forever(
-                payments.api.store, payments.api.rail, payments.api.clock, settings
+                payments.api.store,
+                payments.api.rail,
+                payments.api.clock,
+                settings,
+                payments.api.telemetry,
             )
         )
 
     assert payments.payment(payment["payment_id"]).json()["status"] == "captured"
     assert waits == [300]
+
+
+def test_each_worker_sweep_reports_its_metrics(
+    api: Api, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from workflows import worker
+
+    exact_counts(api)
+    api.rail = FlakyRail()
+    api.use_packs(phase_1_packs(tmp_path))
+    payments = Payments(api)
+    broken = paid(payments)
+    api.rail.broken = PaymentId(broken["payment_id"])
+    api.clock.advance(timedelta(minutes=11))
+
+    async def stop(seconds: float) -> None:
+        raise _Stop
+
+    monkeypatch.setattr(worker.asyncio, "sleep", stop)
+    with pytest.raises(_Stop):
+        asyncio.run(
+            worker.sweep_forever(api.store, api.rail, api.clock, make_settings(), api.telemetry)
+        )
+
+    telemetry = api.telemetry
+    assert telemetry.last("agentpay.sweep.checked") == 1
+    assert telemetry.last("agentpay.sweep.errors") == 1
+    assert telemetry.last("agentpay.payments.unsettled") == 1
+    assert telemetry.last("agentpay.refunds.unsettled") == 0
+    swept = [
+        m
+        for m in telemetry.metrics
+        if m.name.startswith(("agentpay.sweep", "agentpay.pay", "agentpay.ref"))
+    ]
+    assert {m.kind for m in swept} == {"gauge"}
+    assert all(m.attributes == {} for m in swept)  # nothing about a Payment
 
 
 def test_the_worker_does_not_sweep_the_mock_rail(api: Api) -> None:

@@ -10,18 +10,24 @@ next request after another `open_for`.
 
 Any answer from the rail, `failed` included, is an answer: only unknown outcomes
 (`RailUnavailable`) count. The state lives in one API process, which is enough for one
-API on one VM (ADR-0021).
+API on one VM (ADR-0021). It reports whether it is open as a gauge, set when it opens or
+closes (#228).
 """
 
 import math
 import threading
 from datetime import datetime, timedelta
 
+from core.ops_metrics import report_breaker
+from core.ports import Telemetry
+
 
 class RailBreaker:
-    def __init__(self, failures: int, open_for: timedelta) -> None:
+    def __init__(self, failures: int, open_for: timedelta, telemetry: Telemetry) -> None:
         if failures < 1:
             raise ValueError("the breaker opens after at least one failure")
+        self._telemetry = telemetry
+        report_breaker(telemetry, is_open=False)
         self._failures = failures
         self._open_for = open_for
         self._lock = threading.Lock()  # the API calls the rail from several threads
@@ -42,12 +48,17 @@ class RailBreaker:
             self._trial_since = now
             return None
 
-    def answered(self) -> None:
-        """The rail answered (captured, scheduled, failed or processed): it is up."""
+    def answered(self) -> bool:
+        """The rail answered (captured, scheduled, failed or processed): it is up. Returns
+        whether this closed the breaker."""
         with self._lock:
+            was_open = self._open_until is not None
             self._in_a_row = 0
             self._open_until = None
             self._trial_since = None
+        if was_open:
+            report_breaker(self._telemetry, is_open=False)
+        return was_open
 
     def unavailable(self, now: datetime) -> bool:
         """The rail call's outcome is unknown. Returns whether this opened the breaker."""
@@ -59,7 +70,9 @@ class RailBreaker:
             was_closed = self._open_until is None
             self._open_until = now + self._open_for
             self._trial_since = None
-            return was_closed
+        if was_closed:
+            report_breaker(self._telemetry, is_open=True)
+        return was_closed
 
 
 def _seconds(wait: timedelta) -> int:

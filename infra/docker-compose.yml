@@ -32,16 +32,20 @@ services:
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.165.0
-    # Langfuse is added only when its public key is set. Keys reach the collector by
-    # environment and are never written in its config.
-    command: --config=/etc/otelcol/config.yaml ${AGENTPAY_LANGFUSE_PUBLIC_KEY:+--config=/etc/otelcol/langfuse.yaml}
+    # Langfuse (traces) is added only when its public key is set, and Grafana Cloud
+    # (metrics, #228) only when its auth is. Keys reach the collector by environment and
+    # are never written in its config.
+    command: --config=/etc/otelcol/config.yaml ${AGENTPAY_LANGFUSE_PUBLIC_KEY:+--config=/etc/otelcol/langfuse.yaml} ${AGENTPAY_GRAFANA_OTLP_AUTH:+--config=/etc/otelcol/grafana.yaml}
     environment:
       LANGFUSE_PUBLIC_KEY: ${AGENTPAY_LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${AGENTPAY_LANGFUSE_SECRET_KEY:-}
       LANGFUSE_HOST: ${AGENTPAY_LANGFUSE_HOST:-https://cloud.langfuse.com}
+      GRAFANA_OTLP_ENDPOINT: ${AGENTPAY_GRAFANA_OTLP_ENDPOINT:-}
+      GRAFANA_OTLP_AUTH: ${AGENTPAY_GRAFANA_OTLP_AUTH:-}
     volumes:
       - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
       - ./otel-collector.langfuse.yaml:/etc/otelcol/langfuse.yaml:ro
+      - ./otel-collector.grafana.yaml:/etc/otelcol/grafana.yaml:ro
     ports:
       - "4317:4317"
       - "4318:4318"

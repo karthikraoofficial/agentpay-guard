@@ -1,0 +1,16 @@
+# Merged on top of otel-collector.yaml when AGENTPAY_GRAFANA_OTLP_AUTH is set (see
+# docker-compose.yml, #228). Sends metrics to Grafana Cloud's OTLP gateway, where the
+# alert rules in infra/grafana/ read them; traces stay with Langfuse. Basic auth is a
+# header, base64 of "<instance id>:<token>", from the environment. Not a basicauth
+# extension: the collector replaces lists when it merges configs, so this overlay's
+# `service.extensions` would drop Langfuse's.
+exporters:
+  otlp_http/grafana:
+    endpoint: ${env:GRAFANA_OTLP_ENDPOINT}
+    headers:
+      Authorization: Basic ${env:GRAFANA_OTLP_AUTH}
+
+service:
+  pipelines:
+    metrics:
+      exporters: [debug, otlp_http/grafana]

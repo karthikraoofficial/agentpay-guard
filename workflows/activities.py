@@ -13,7 +13,7 @@ from core.domain.consent import ConsentRequestId
 from core.domain.decisions import decision_time
 from core.domain.disputes import DisputeId
 from core.evidence import NarrativeWriter, build_evidence_pack
-from core.ports import Clock, TenantId, UnitOfWork
+from core.ports import Clock, Telemetry, TenantId, UnitOfWork
 from core.resolutions import record_resolution
 from workflows.consent import EXPIRE, NOTIFY, ConsentArgs
 from workflows.dispute import BUILD, DisputeArgs
@@ -82,11 +82,13 @@ class DisputeActivities:
         clock: Clock,
         packs_dir: Path,
         writer: NarrativeWriter | None = None,
+        telemetry: Telemetry | None = None,
     ) -> None:
         self._store = store
         self._clock = clock
         self._packs_dir = packs_dir
         self._writer = writer
+        self._telemetry = telemetry
 
     @activity.defn(name=BUILD)
     def build(self, args: DisputeArgs) -> str:
@@ -99,6 +101,7 @@ class DisputeActivities:
             self._clock,
             self._packs_dir,
             self._writer,
+            self._telemetry,
         )
 
     @activity.defn(name=EXPIRE_DISPUTE)

@@ -140,3 +140,17 @@ def test_an_answer_resets_the_run_so_scattered_timeouts_never_open_it(outage: Ou
         assert worked.status_code == 202, worked.text
 
     assert outage.pay(outage.allow(mandate_id=outage.working)["decision_id"]).status_code == 202
+
+
+def test_the_breaker_reports_whether_it_is_open(outage: Outage) -> None:
+    telemetry = outage.api.telemetry
+    assert telemetry.last("agentpay.rail.breaker_open") == 0  # closed from the start
+
+    outage.timeouts(FAILURES)
+    assert telemetry.last("agentpay.rail.breaker_open") == 1
+
+    outage.api.clock.advance(timedelta(seconds=OPEN_SECONDS))
+    assert outage.pay(outage.allow(mandate_id=outage.working)["decision_id"]).status_code == 202
+    assert telemetry.last("agentpay.rail.breaker_open") == 0
+    # Set on each change only (each app the fixture makes starts closed), not per request.
+    assert [m.value for m in telemetry.recorded("agentpay.rail.breaker_open")][-3:] == [0, 1, 0]

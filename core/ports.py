@@ -616,6 +616,16 @@ class EventBus(Protocol):
         ...
 
 
+class ConsentBacklog(Protocol):
+    """A read across every Tenant for the stuck-consent alert (#228), like EventBus's
+    `undelivered`: it returns a count only, never a Tenant's records."""
+
+    def expired_unresolved_consents(self, expired_before: datetime) -> int:
+        """Consent requests that expired before `expired_before` and have no resolution,
+        not even `expired`: their workflow never wrote one."""
+        ...
+
+
 # --- Tenant webhooks ----------------------------------------------------------
 
 
@@ -680,8 +690,20 @@ class Span(Protocol):
 
 
 class Telemetry(Protocol):
-    """Traces and metrics without importing a vendor SDK into core/."""
+    """Traces and metrics without importing a vendor SDK into core/. Metric attributes are
+    identifiers and codes only, never names, amounts or free text."""
 
     def start_span(self, name: str, attributes: Attributes) -> AbstractContextManager[Span]: ...
 
-    def record_metric(self, name: str, value: float, attributes: Attributes) -> None: ...
+    def record_metric(self, name: str, value: float, attributes: Attributes) -> None:
+        """A measurement into a histogram, such as a duration in milliseconds."""
+        ...
+
+    def count(self, name: str, attributes: Attributes, value: int = 1) -> None:
+        """Add to a counter, such as one more Intent check with a verdict."""
+        ...
+
+    def set_gauge(self, name: str, value: float, attributes: Attributes) -> None:
+        """The current value of something, such as Payments unsettled now. It is exported
+        as is until set again."""
+        ...
