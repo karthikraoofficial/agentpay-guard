@@ -34,7 +34,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 from core.domain.consent import ResolutionStatus, approval_result
-from core.domain.decisions import AgentPaymentRequest, Outcome, ReasonCode
+from core.domain.decisions import AgentPaymentRequest, Outcome, ReasonCode, RiskTier
 from core.domain.mandates import Mandate
 from core.domain.money import Money
 from core.domain.parties import Agent, AgentStatus
@@ -129,8 +129,31 @@ def load_cases(path: Path) -> list[Case]:
     return [Case.model_validate(_merge(base, json.loads(line))) for line in lines if line.strip()]
 
 
-def _actual(case: Case, pack: PolicyPack) -> tuple[Expected, float]:
-    """The engine's answer for one case, and how long decide() took in milliseconds."""
+class Answer(BaseModel):
+    """Everything `decide()` says about one case that a Policy pack can change: what the
+    labels hold, plus the Risk tier. The Release gate compares these across two packs."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    outcome: Outcome
+    reason_codes: tuple[ReasonCode, ...]
+    risk_tier: RiskTier
+    resolution: ResolutionStatus | None = None
+
+    def as_label(self) -> Expected:
+        return Expected(
+            outcome=self.outcome, reason_codes=self.reason_codes, resolution=self.resolution
+        )
+
+
+def is_decision_file(path: Path) -> bool:
+    """A golden file of Decision or approval cases, rather than Disputes or narratives."""
+    return not path.stem.startswith(("disputes", "narrative_checks"))
+
+
+def decide_case(case: Case, pack: PolicyPack) -> tuple[Answer, float]:
+    """The engine's answer for one case on `pack` (whichever pack the case is pinned to),
+    and how long decide() took in milliseconds."""
     mandate = Mandate.model_validate(case.mandate)
     request = AgentPaymentRequest.model_validate(case.request)
     agent = (
@@ -150,10 +173,13 @@ def _actual(case: Case, pack: PolicyPack) -> tuple[Expected, float]:
     output = decide(request, mandate, agent, spent, signals, pack, case.now)
     ms = (time.perf_counter() - start) * 1000
     resolution = approval_result(output) if case.stage == "approval" else None
-    actual = Expected(
-        outcome=output.outcome, reason_codes=output.reason_codes, resolution=resolution
+    answer = Answer(
+        outcome=output.outcome,
+        reason_codes=output.reason_codes,
+        risk_tier=output.risk_tier,
+        resolution=resolution,
     )
-    return actual, ms
+    return answer, ms
 
 
 def run_cases(cases: Sequence[Case], pack_root: Path = PACKS) -> Report:
@@ -166,7 +192,8 @@ def run_cases(cases: Sequence[Case], pack_root: Path = PACKS) -> Report:
     for case in cases:
         if case.pack not in packs:
             packs[case.pack] = load_pack(pack_root, case.pack.id, case.pack.version).pack
-        actual, ms = _actual(case, packs[case.pack])
+        answer, ms = decide_case(case, packs[case.pack])
+        actual = answer.as_label()
         engine_ms.append(ms)
         if case.stage == "decision":
             outcomes[actual.outcome] += 1
@@ -232,11 +259,11 @@ def main(argv: list[str] | None = None) -> int:
     scenarios: dict[str, eval_report.OutcomeCounts] = {}
     engine_ms: list[float] = []
     for path in files:
-        if path.stem.startswith("disputes"):
-            entries.append(_disputes(path, args.packs))
-            continue
-        if path.stem.startswith("narrative_checks"):
-            entries.append(_narratives(path))
+        if not is_decision_file(path):
+            if path.stem.startswith("disputes"):
+                entries.append(_disputes(path, args.packs))
+            else:
+                entries.append(_narratives(path))
             continue
         cases = load_cases(path)
         report = run_cases(cases, args.packs)
