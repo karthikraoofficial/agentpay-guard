@@ -5,7 +5,8 @@
 
 Run on the operator's machine, not the VM. Needs AGENTPAY_GRAFANA_URL (the stack,
 https://<stack>.grafana.net), AGENTPAY_GRAFANA_API_TOKEN (a service account token with the
-Editor role) and AGENTPAY_ALERT_EMAIL in `.env`. It makes the folder and the `agentpay-email`
+Admin role: Editor can't write provisioned alert rules, which needs alert.provisioning:write)
+and AGENTPAY_ALERT_EMAIL in `.env`. It makes the folder and the `agentpay-email`
 contact point if they're missing, then replaces the whole rule group, so a second push
 updates the rules in place. Rules pushed this way are read-only in Grafana's UI: change the
 YAML and push again. The token is never printed.
