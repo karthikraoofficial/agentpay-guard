@@ -238,6 +238,18 @@ _Avoid_: Checksum, version
 The record of every released Policy pack version, its Pack hash, and which version is active.
 _Avoid_: Registry, index
 
+**Candidate pack**:
+The Policy pack version a change proposes to make active, which must pass the Release gate first.
+_Avoid_: New pack, draft pack, next pack
+
+**Release gate**:
+The check a Candidate pack must pass before it becomes active. It decides every Golden case on both the active pack and the candidate. It fails on any change in Outcome, Reason codes, Risk tier or Consent resolution that isn't a Declared change, on any loosening of a case that is high on either pack, and when the candidate misses a label in its own golden files (ADR-0027).
+_Avoid_: Pack check, eval gate, regression test
+
+**Declared change**:
+A Golden case whose answer a Candidate pack is meant to change, recorded with its answer on the active pack, its answer on the candidate, and why.
+_Avoid_: Expected diff, waiver, exception
+
 ## Evidence
 
 **Decision time**:
