@@ -74,7 +74,14 @@ from core.domain.rails import RailToken
 from core.domain.refunds import Refund, RefundId
 from core.domain.voids import Void
 from core.domain.webhooks import WebhookEndpoint
-from core.ports import DomainEvent, EventBus, TenantDirectory, TenantId, UnitOfWork
+from core.ports import (
+    ConsentBacklog,
+    DomainEvent,
+    EventBus,
+    TenantDirectory,
+    TenantId,
+    UnitOfWork,
+)
 
 
 class PostgresTransaction:
@@ -978,6 +985,21 @@ class PostgresStore:
             rows = conn.execute(query).all()
         return [(TenantId(t), PaymentId(i)) for t, i in rows]
 
+    def expired_unresolved_consents(self, expired_before: datetime) -> int:
+        r, s = consent_requests.c, consent_resolutions.c
+        resolved = (
+            select(s.consent_request_id)
+            .where(s.tenant_id == r.tenant_id, s.consent_request_id == r.consent_request_id)
+            .exists()
+        )
+        query = (
+            select(func.count())
+            .select_from(consent_requests)
+            .where(r.expires_at < expired_before, ~resolved)
+        )
+        with self._engine.connect() as conn:
+            return int(conn.execute(query).scalar_one())
+
     def payment_tenant(self, payment_id: PaymentId) -> TenantId | None:
         query = select(payments.c.tenant_id).where(payments.c.payment_id == payment_id)
         with self._engine.connect() as conn:
@@ -1265,3 +1287,4 @@ def _payment_row(payment: Payment) -> dict[str, object]:
 _conforms_uow: type[UnitOfWork] = PostgresStore  # mypy checks the adapter matches the ports
 _conforms_directory: type[TenantDirectory] = PostgresStore
 _conforms_bus: type[EventBus] = PostgresStore
+_conforms_backlog: type[ConsentBacklog] = PostgresStore

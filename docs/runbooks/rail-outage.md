@@ -4,7 +4,12 @@ The rail (Razorpay, or the mock rail on the hosted demo) is down, slow, rate-lim
 
 ## How you'd notice
 
-- **No alert fires for this.** The uptime check (ADR-0026) emails only when `/healthz` stops answering, and `/healthz` doesn't call the rail. So it fires only if the VM or the API is down too.
+- **The alerts (ADR-0026).** On the hosted demo, Grafana Cloud emails one of these. Thresholds are in `infra/grafana/alert-rules.yaml`.
+  - **Rail: sweep lookups failing:** the reconciliation sweep reports errors on every run for 3 minutes.
+  - **Rail: Payments or Refunds unsettled:** a Payment still scheduled, or a Refund still pending, past the sweep age for 10 minutes.
+  - **Rail: circuit breaker open:** payments and refunds have answered `503 RAIL_UNAVAILABLE` for 5 minutes.
+
+  The uptime check doesn't fire for this: `/healthz` doesn't call the rail.
 - `POST /v1/payments` answers `202` with a Payment that stays `scheduled` with no `rail_payment_id`, and the API log has `rail unavailable for Payment …`. After a few of those in a row, payments and refunds answer `503 RAIL_UNAVAILABLE`, and the log has `rail breaker opened`:
 
   ```bash

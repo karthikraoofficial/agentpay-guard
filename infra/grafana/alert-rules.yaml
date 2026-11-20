@@ -1,0 +1,110 @@
+# The hosted demo's metric alerts (#228, ADR-0026), one or more per runbook symptom. Pushed to
+# Grafana Cloud by `uv run python -m adapters.grafana.alerts`, which expands each entry into
+# a Grafana alert rule that emails the `agentpay-email` contact point. Edit here and push
+# again: the rules are kept in the repo, and pushing replaces the whole group.
+#
+# Each entry:
+#   uid, title  the rule's id (kept across pushes) and its name, as the runbook names it
+#   runbook     the runbook that says what to do
+#   expr        PromQL over the metrics in core/ops_metrics.py. Grafana Cloud's names: dots
+#               become underscores, counters end in _total, histograms have _bucket
+#   above       fires when the query's value is above this...
+#   for         ...for this long (0s: at once)
+#   no_data     OK, or Alerting where the metric going quiet is itself the symptom
+#   threshold   the rule in words, for the runbook and the email
+#
+# The query keeps every value, healthy or not, and the threshold is applied by Grafana:
+# filtered in PromQL, a healthy reading would come back empty, which is "no data".
+folder: agentpay-guard
+group: agentpay-guard
+interval: 1m
+rules:
+  # docs/runbooks/rail-outage.md
+  - uid: agentpay-rail-sweep-errors
+    title: "Rail: sweep lookups failing"
+    runbook: docs/runbooks/rail-outage.md
+    expr: max(agentpay_sweep_errors)
+    above: 0
+    for: 3m
+    no_data: OK
+    threshold: the reconciliation sweep reports errors on every run for 3 minutes (6 runs in a row at 30 s)
+
+  - uid: agentpay-rail-unsettled
+    title: "Rail: Payments or Refunds unsettled"
+    runbook: docs/runbooks/rail-outage.md
+    expr: max(agentpay_payments_unsettled) + max(agentpay_refunds_unsettled)
+    above: 0
+    for: 10m
+    no_data: OK
+    threshold: a Payment still scheduled, or a Refund still pending, past the sweep age for 10 minutes
+
+  - uid: agentpay-rail-breaker-open
+    title: "Rail: circuit breaker open"
+    runbook: docs/runbooks/rail-outage.md
+    expr: max(agentpay_rail_breaker_open)
+    above: 0
+    for: 5m
+    no_data: OK
+    threshold: payments and refunds answer 503 RAIL_UNAVAILABLE for 5 minutes
+
+  # docs/runbooks/model-outage.md
+  - uid: agentpay-model-intent-unknown
+    title: "Model: Intent checks unknown"
+    runbook: docs/runbooks/model-outage.md
+    # Unknown for timeout, error or unparseable, over the checks that called the model. The
+    # denominator is at least 5, so one unknown check among a few never fires on its own.
+    expr: >-
+      sum(increase(agentpay_intent_verdicts_total{failure_cause=~"timeout|error|unparseable"}[15m]))
+      / clamp_min(sum(increase(agentpay_intent_verdicts_total{failure_cause!~"disabled|capped"}[15m])), 5)
+    above: 0.2
+    for: 0s
+    no_data: OK
+    threshold: more than 20% of Intent checks over 15 minutes come back unknown for timeout, error or unparseable
+
+  - uid: agentpay-model-narrative-fallback
+    title: "Model: dispute narratives written by code"
+    runbook: docs/runbooks/model-outage.md
+    expr: sum(increase(agentpay_narrative_source_total{fallback="true"}[1h]))
+    above: 0
+    for: 0s
+    no_data: OK
+    threshold: an Evidence pack in the last hour fell back to the code-written narrative because the model call failed
+
+  - uid: agentpay-model-spend-cap
+    title: "Model: Model spend cap reached"
+    runbook: docs/runbooks/model-outage.md
+    expr: sum by (tenant_id, purpose) (increase(agentpay_model_calls_total{outcome="capped"}[15m]))
+    above: 0
+    for: 0s
+    no_data: OK
+    threshold: a Tenant's model call was refused by its daily Model spend cap in the last 15 minutes
+
+  # docs/runbooks/stuck-consent-workflows.md
+  - uid: agentpay-consent-outbox
+    title: "Consent: workflow events waiting"
+    runbook: docs/runbooks/stuck-consent-workflows.md
+    expr: sum(agentpay_outbox_undelivered{age!="under_1m"})
+    above: 0
+    for: 5m
+    # The worker reports this every 30 s, so no data at all means the worker is down.
+    no_data: Alerting
+    threshold: a workflow event over a minute old waits in the outbox for 5 minutes, or the worker reports nothing for 5 minutes
+
+  - uid: agentpay-consent-expired
+    title: "Consent: requests expired with no resolution"
+    runbook: docs/runbooks/stuck-consent-workflows.md
+    expr: max(agentpay_consent_expired_unresolved)
+    above: 0
+    for: 5m
+    no_data: OK
+    threshold: a Consent request more than 5 minutes past its expiry has no resolution, for 5 minutes
+
+  # docs/runbooks/slow-decisions.md
+  - uid: agentpay-decisions-p95
+    title: "Decisions: p95 latency over budget"
+    runbook: docs/runbooks/slow-decisions.md
+    expr: histogram_quantile(0.95, sum by (le) (rate(agentpay_decision_duration_bucket[15m])))
+    above: 150
+    for: 15m
+    no_data: OK
+    threshold: POST /v1/decisions p95 above its 150 ms budget for 15 minutes

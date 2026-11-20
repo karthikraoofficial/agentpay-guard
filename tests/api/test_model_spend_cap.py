@@ -148,3 +148,45 @@ def test_a_narrative_over_the_cap_is_written_by_code(disputes: Disputes) -> None
     )
     assert [a["error"] for a in pack["narrative_attempts"]] == ["ModelSpendCapReached"]
     assert api.gateway.calls == []
+
+
+def test_each_call_is_counted_against_the_cap_by_purpose_and_outcome(api: Api) -> None:
+    gateway, acme = capped(api), tenant(api)
+
+    for _ in range(3):
+        try:
+            call(gateway, acme)
+        except ModelSpendCapReached:
+            pass
+
+    calls = api.telemetry.recorded("agentpay.model.calls")
+    assert [(m.attributes["outcome"], m.value) for m in calls] == [
+        ("counted", 1),
+        ("counted", 1),
+        ("capped", 1),
+    ]
+    assert calls[0].attributes == {
+        "tenant_id": acme,
+        "purpose": "intent_check",
+        "outcome": "counted",
+        "daily_cap": 2,
+    }
+
+
+def test_each_narrative_counts_where_it_came_from(disputes: Disputes) -> None:
+    dispute_id, _ = _opened(disputes)
+    api = disputes.api
+    writer = NarrativeWriter(capped(api, {"dispute_narrative": 0}), MODEL, 45_000)
+
+    build_evidence_pack(
+        api.store,
+        disputes.tenant_id(),
+        DisputeId(dispute_id),
+        api.clock,
+        api.packs,
+        writer,
+        api.telemetry,
+    )
+
+    [counted] = api.telemetry.recorded("agentpay.narrative.source")
+    assert counted.attributes == {"source": "template", "fallback": "true"}

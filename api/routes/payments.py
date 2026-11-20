@@ -261,7 +261,8 @@ def _fail_fast(breaker: RailBreaker, clock: ClockDep) -> None:
 def _heard(breaker: RailBreaker, clock: ClockDep, unknown: bool) -> None:
     """Tell the breaker how a rail call went: an answer, or an unknown outcome."""
     if not unknown:
-        breaker.answered()
+        if breaker.answered():
+            log.info("rail breaker closed: the rail answered")
     elif breaker.unavailable(clock.now()):
         log.warning("rail breaker opened: payments and refunds answer 503 RAIL_UNAVAILABLE")
 

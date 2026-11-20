@@ -91,7 +91,9 @@ def create_app(
     app.state.secret_box = secret_box or build_secret_box(settings)
     app.state.rail = rail or build_rail(settings)
     app.state.rail_breaker = RailBreaker(
-        settings.rail_breaker_failures, timedelta(seconds=settings.rail_breaker_open_seconds)
+        settings.rail_breaker_failures,
+        timedelta(seconds=settings.rail_breaker_open_seconds),
+        app.state.telemetry,
     )
     errors.install(app)
     app.include_router(parties.router)

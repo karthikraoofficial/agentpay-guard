@@ -5,6 +5,7 @@ head, runs the pure engine, and writes the Decision, its Audit record and the
 idempotency entry together, or nothing at all (ADR-0003, ADR-0004).
 """
 
+import time
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Request, Response
@@ -45,6 +46,7 @@ from core.domain.money import Money
 from core.domain.parties import new_id
 from core.domain.signals import IntentResolution, IntentSignal, Signals
 from core.domain.voids import VoidVia, void_refusal
+from core.ops_metrics import DECISION_DURATION
 from core.policy.engine import decide
 from core.policy.pack import PolicyPack
 from core.ports import DomainEvent, Telemetry, TenantId, TenantTransaction
@@ -287,13 +289,20 @@ def create_decision(
             span.set_attribute("primary_reason_code", output.reason_codes[0])
         span.set_attribute("pack_id", ref.id)
         span.set_attribute("pack_version", ref.version)
+        decided.append(output.outcome)
         until = window_end(now, pack.pack) if output.outcome == "allow" else None
         return 200, _out(decision, consent, now, until)
 
     # One span per request. A replayed idempotent response carries only the Tenant.
+    decided: list[str] = []  # the new Decision's outcome; a replay or an error adds none
+    started = time.perf_counter()
     with telemetry.start_span("decision", {"tenant_id": tenant}) as span:
         with store.transaction(tenant) as tx:
-            return run_idempotent(tx, key, request_hash(request, body), clock, write)
+            response = run_idempotent(tx, key, request_hash(request, body), clock, write)
+    if decided:  # after the commit, so the duration is the whole Decision
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        telemetry.record_metric(DECISION_DURATION, elapsed_ms, {"outcome": decided[0]})
+    return response
 
 
 @router.get("/{decision_id}")

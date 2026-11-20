@@ -116,6 +116,13 @@ class Settings(BaseSettings):
     # CLI (`python -m demo`) only. The API never reads them.
     demo_agent_key: SecretStr | None = None
     demo_tenant_key: SecretStr | None = None
+    # Grafana Cloud, for pushing the metric alert rules from the operator's machine
+    # (`python -m adapters.grafana.alerts`, #228) only. The app never reads them; the VM's
+    # collector gets its own metrics key by compose.
+    grafana_url: AnyUrl | None = None
+    grafana_api_token: SecretStr | None = None
+    grafana_datasource_uid: str = "grafanacloud-prom"
+    alert_email: str | None = None
 
     @model_validator(mode="after")
     def _razorpay_test_mode_only(self) -> "Settings":

@@ -34,8 +34,9 @@ from core.domain.mandates import Mandate
 from core.domain.money import Money
 from core.domain.payments import PaymentId
 from core.evidence_strength import assess
+from core.ops_metrics import NARRATIVE_SOURCE
 from core.policy.packs import load_active_pack
-from core.ports import Clock, TenantId, TenantTransaction, UnitOfWork
+from core.ports import Clock, Telemetry, TenantId, TenantTransaction, UnitOfWork
 from core.tenant_events import dispute_changed
 
 # --- The readers ---------------------------------------------------------------------
@@ -165,6 +166,7 @@ def build_evidence_pack(
     clock: Clock,
     packs_dir: Path,
     writer: NarrativeWriter | None = None,
+    telemetry: Telemetry | None = None,
 ) -> str:
     """Build the next pack version of an open Dispute and put it in review, assessed with
     the Policy pack active now. Driven by the Dispute's status, so it is safe to run more
@@ -225,6 +227,9 @@ def build_evidence_pack(
         in_review = dispute.model_copy(update={"status": "in_review", "updated_at": now})
         tx.update_dispute(in_review)
         tx.publish(dispute_changed(in_review, version, now))
+    if telemetry is not None:  # a fallback is the writer failing, not the writer off
+        fallback = "true" if note == UNAVAILABLE else "false"
+        telemetry.count(NARRATIVE_SOURCE, {"source": source, "fallback": fallback})
     return "built"
 
 

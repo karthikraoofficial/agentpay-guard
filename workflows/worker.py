@@ -30,7 +30,15 @@ from agents.dispute_narrative import NarrativeWriter as DisputeNarrativeWriter
 from core.debits import run_debit_step
 from core.evidence import NarrativeWriter
 from core.model_spend import CappedGateway, daily_caps
-from core.ports import Clock, EventBus, ModelCallCounter, PaymentRail, UnitOfWork
+from core.ops_metrics import BacklogStore, report_backlog_once, report_sweep
+from core.ports import (
+    Clock,
+    EventBus,
+    ModelCallCounter,
+    PaymentRail,
+    Telemetry,
+    UnitOfWork,
+)
 from core.reconcile import SweepStore, sweep
 from core.relay import relay_once
 from core.settings import Settings, get_settings
@@ -42,6 +50,10 @@ from workflows.dispute import DisputePack
 
 log = logging.getLogger(__name__)
 
+
+# How often the backlog metrics are read: under the collector's 60 s export, so each
+# export carries a fresh reading.
+BACKLOG_INTERVAL_SECONDS = 30
 
 # The released Policy packs, for workers that aren't given a directory (tests).
 PACKS = Path(__file__).resolve().parents[1] / "policy_packs"
@@ -55,9 +67,10 @@ def consent_worker(
     pool: ThreadPoolExecutor,
     packs_dir: Path = PACKS,
     writer: NarrativeWriter | None = None,
+    telemetry: Telemetry | None = None,
 ) -> Worker:
     activities = ConsentActivities(store, clock)
-    disputes = DisputeActivities(store, clock, packs_dir, writer)
+    disputes = DisputeActivities(store, clock, packs_dir, writer, telemetry)
     return Worker(
         client,
         task_queue=task_queue,
@@ -68,13 +81,12 @@ def consent_worker(
 
 
 def narrative_writer(
-    settings: Settings, counter: ModelCallCounter, clock: Clock
+    settings: Settings, counter: ModelCallCounter, clock: Clock, telemetry: Telemetry
 ) -> NarrativeWriter | None:
     """The dispute evidence agent, or None to have every narrative written by code. Its
     model calls count against each Tenant's Model spend cap (ADR-0020)."""
     if not settings.dispute_narrative_enabled:
         return None
-    telemetry = OtelTelemetry.from_settings(settings)
     gateway = CappedGateway(
         build_gateway(settings, telemetry), counter, clock, telemetry, daily_caps(settings)
     )
@@ -102,6 +114,16 @@ async def relay_forever(
         await asyncio.sleep(interval_seconds)
 
 
+async def backlog_forever(
+    store: BacklogStore, telemetry: Telemetry, clock: Clock, interval_seconds: float
+) -> None:
+    """Until cancelled, each interval: report the outbox's waiting workflow events and the
+    Consent requests stuck past expiry (#228). Synchronous reads, so each in a thread."""
+    while True:
+        await asyncio.to_thread(report_backlog_once, store, telemetry, clock.now())
+        await asyncio.sleep(interval_seconds)
+
+
 def sweep_rail(settings: Settings, store: UnitOfWork) -> PaymentRail | None:
     """The rail the sweep asks, or None when there is nothing to ask: MockRail keeps its
     charges inside the API process, so a worker's own MockRail would know none of them
@@ -120,17 +142,18 @@ def sweep_age(settings: Settings) -> timedelta:
 
 
 async def sweep_forever(
-    store: SweepStore, rail: PaymentRail, clock: Clock, settings: Settings
+    store: SweepStore, rail: PaymentRail, clock: Clock, settings: Settings, telemetry: Telemetry
 ) -> None:
     """Until cancelled, each interval: debit the Payments whose Pre-debit notice period
-    has ended, then reconcile the scheduled ones. Both are synchronous, so each pass runs
-    in a thread."""
+    has ended, then reconcile the scheduled ones, and report the sweep's metrics. Both are
+    synchronous, so each pass runs in a thread."""
     older_than = sweep_age(settings)
     while True:
         debits = await asyncio.to_thread(run_debit_step, store, rail, clock)
         if debits.checked:
             log.info("debit step checked %d Payment(s), %d error(s)", debits.checked, debits.errors)
         result = await asyncio.to_thread(sweep, store, rail, clock, older_than)
+        report_sweep(telemetry, result)
         if result.checked:
             log.info(
                 "reconciliation sweep checked %d Payment(s), %d error(s)",
@@ -145,6 +168,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     store = PostgresStore(create_engine(str(settings.database_url), pool_pre_ping=True))
     clock = SystemClock()
+    telemetry = OtelTelemetry.from_settings(settings)
     client = await Client.connect(settings.temporal_address, namespace=settings.temporal_namespace)
     with ThreadPoolExecutor(max_workers=8) as pool:
         worker = consent_worker(
@@ -154,7 +178,8 @@ async def main() -> None:
             clock,
             pool,
             settings.policy_packs_dir,
-            narrative_writer(settings, store, clock),
+            narrative_writer(settings, store, clock, telemetry),
+            telemetry,
         )
         async with worker:
             log.info("consent worker polling task queue %s", settings.temporal_task_queue)
@@ -166,14 +191,18 @@ async def main() -> None:
                     clock,
                     TenantWebhooks(store, secret_box(settings), HttpWebhookSender(), clock),
                     settings.outbox_poll_interval_ms / 1000,
-                )
+                ),
+                backlog_forever(store, telemetry, clock, BACKLOG_INTERVAL_SECONDS),
             ]
             rail = sweep_rail(settings, store)
             if rail is None:
                 log.info("reconciliation sweep off: mock Payments stay scheduled (no mock settle)")
             else:
-                loops.append(sweep_forever(store, rail, clock, settings))
-            await asyncio.gather(*loops)
+                loops.append(sweep_forever(store, rail, clock, settings, telemetry))
+            try:
+                await asyncio.gather(*loops)
+            finally:
+                telemetry.shutdown()  # flush the last metrics
 
 
 if __name__ == "__main__":

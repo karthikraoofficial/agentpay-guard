@@ -6,7 +6,12 @@ The Claude API is down, slow or erroring, or a Tenant has reached its Model spen
 
 ## How you'd notice
 
-- **No alert fires for this.** The uptime check (ADR-0026) emails only when `/healthz` stops answering, and `/healthz` doesn't call a model. Decisions keep answering, with step-ups.
+- **The alerts (ADR-0026).** On the hosted demo, Grafana Cloud emails one of these. Thresholds are in `infra/grafana/alert-rules.yaml`.
+  - **Model: Intent checks unknown:** over 15 minutes, more than 20% of Intent checks that called the model came back `unknown` for `timeout`, `error` or `unparseable`. The share is taken over at least 5 checks, so one unknown check among a few doesn't fire it.
+  - **Model: dispute narratives written by code:** in the last hour, an Evidence pack fell back to the code-written narrative because the model call failed.
+  - **Model: Model spend cap reached:** in the last 15 minutes, a Tenant's model call was refused by its daily cap. The email names the Tenant and the purpose.
+
+  The uptime check doesn't fire for this: `/healthz` doesn't call a model, and Decisions keep answering, with step-ups.
 - **More step-ups.** Decisions from the medium tier up start stepping up with `INTENT_UNKNOWN`.
 - **Unknown Intent checks.** `POST /v1/intents` answers with verdict `unknown` and a `failure_cause`:
 
@@ -17,7 +22,7 @@ The Claude API is down, slow or erroring, or a Tenant has reached its Model spen
   # causes: timeout, error, capped (the spend cap), unparseable, disabled
   ```
 
-- **Code-written narratives.** New Evidence packs say `narrative_source: code` and `narrative_note: model narrative unavailable`, and `narrative_attempts` shows the failed calls.
+- **Code-written narratives.** New Evidence packs say `narrative_source: template` and `narrative_note: model narrative unavailable`, and `narrative_attempts` shows the failed calls.
 - **Traces and logs.** Langfuse shows `model_gateway.complete` spans with errors or long latency. Each call logs its model, prompt version, tokens, cost and latency (non-negotiable 10).
 - **The spend cap reached.** Today's calls per Tenant and purpose, against `AGENTPAY_INTENT_CHECK_DAILY_CAP` and `AGENTPAY_DISPUTE_NARRATIVE_DAILY_CAP`:
 

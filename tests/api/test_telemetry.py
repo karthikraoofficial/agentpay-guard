@@ -21,6 +21,20 @@ def test_every_decision_emits_a_decision_span(api: Api) -> None:
     }
 
 
+def test_every_new_decision_records_its_duration_by_outcome(api: Api) -> None:
+    pay = Pay(api)
+
+    pay.ask()
+    pay.ask(amount={"minor": 6_000_00, "currency": "INR"})
+
+    durations = api.telemetry.recorded("agentpay.decision.duration")
+    assert [(m.kind, m.attributes) for m in durations] == [
+        ("histogram", {"outcome": "allow"}),
+        ("histogram", {"outcome": "step_up"}),
+    ]
+    assert all(m.value >= 0 for m in durations)
+
+
 def test_an_allow_has_no_primary_reason_code(api: Api) -> None:
     Pay(api).ask()
 

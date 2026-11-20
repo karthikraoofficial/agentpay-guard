@@ -32,7 +32,14 @@ from core.domain.payments import Payment, PaymentId, RailEvent
 from core.domain.refunds import Refund, RefundId
 from core.domain.voids import Void
 from core.domain.webhooks import WebhookEndpoint
-from core.ports import DomainEvent, EventBus, TenantDirectory, TenantId, UnitOfWork
+from core.ports import (
+    ConsentBacklog,
+    DomainEvent,
+    EventBus,
+    TenantDirectory,
+    TenantId,
+    UnitOfWork,
+)
 
 
 @dataclass
@@ -568,6 +575,14 @@ class InMemoryUnitOfWork:
         ]
         return [(tenant_id, payment_id) for _, tenant_id, payment_id in sorted(due)]
 
+    def expired_unresolved_consents(self, expired_before: datetime) -> int:
+        return sum(
+            1
+            for data in list(self._tenants.values())
+            for c in list(data.consents.values())
+            if c.resolution is None and c.expires_at < expired_before
+        )
+
     def payment_tenant(self, payment_id: PaymentId) -> TenantId | None:
         for tenant_id, data in list(self._tenants.items()):
             if payment_id in data.payments:
@@ -622,3 +637,4 @@ class InMemoryUnitOfWork:
 _conforms_uow: type[UnitOfWork] = InMemoryUnitOfWork
 _conforms_directory: type[TenantDirectory] = InMemoryUnitOfWork
 _conforms_bus: type[EventBus] = InMemoryUnitOfWork
+_conforms_backlog: type[ConsentBacklog] = InMemoryUnitOfWork
