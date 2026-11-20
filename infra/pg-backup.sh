@@ -8,6 +8,8 @@
 # Dumps go to ~/agentpay-backups (AGENTPAY_BACKUP_DIR). With AGENTPAY_BACKUP_PAR_URL set in
 # .env, each is also PUT to Object Storage through that write-only link, which this script
 # never prints. AGENTPAY_BACKUP_PAR_EXPIRES (YYYY-MM-DD) gets a warning 30 days ahead.
+# AGENTPAY_BACKUP_HEARTBEAT_URL and AGENTPAY_RESTORE_CHECK_HEARTBEAT_URL (Healthchecks.io,
+# #227, ADR-0026) get a ping when dump or check succeeds, and their /fail when it fails.
 # Nothing here stops the stack: pg_dump reads a consistent snapshot while the API runs.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -27,6 +29,31 @@ setting() {
   value=$(sed -n "s/^$1=//p" "$env_file" 2>/dev/null | tail -n1)
   value=${value#\'}; value=${value%\'}; value=${value#\"}; value=${value%\"}
   printf '%s' "$value"
+}
+
+# heartbeat KEY [fail]: ping KEY's URL, or its /fail, when KEY is set. The request carries
+# nothing (no body, no data from the database), and the URL is a secret so it's never
+# printed: curl's own errors are dropped. A ping that fails only logs, since a good backup
+# isn't made bad by it, and the missed ping alerts on its own.
+heartbeat() {
+  local url
+  url=$(setting "$1")
+  [[ -n "$url" ]] || return 0
+  url=${url%/}${2:+/$2}
+  curl -fsS --retry 3 --max-time 10 "$url" > /dev/null 2>&1     || log "WARNING: the $1 heartbeat ping failed"
+}
+
+# with_heartbeat KEY FUNCTION: run FUNCTION in a subshell under set -e (its EXIT trap
+# cleans up there), then ping KEY with how it went and exit with its status. Not in an
+# `if`: bash ignores set -e inside a condition.
+with_heartbeat() {
+  local status
+  set +e
+  (set -e; "$2")
+  status=$?
+  set -e
+  if (( status == 0 )); then heartbeat "$1"; else heartbeat "$1" fail; fi
+  exit "$status"
 }
 
 dump() {
@@ -123,8 +150,8 @@ install_cron() {
 }
 
 case "${1:-}" in
-  dump) dump ;;
-  check) check ;;
+  dump) with_heartbeat AGENTPAY_BACKUP_HEARTBEAT_URL dump ;;
+  check) with_heartbeat AGENTPAY_RESTORE_CHECK_HEARTBEAT_URL check ;;
   install-cron) install_cron ;;
   *) echo "usage: bash infra/pg-backup.sh dump|check|install-cron" >&2; exit 2 ;;
 esac

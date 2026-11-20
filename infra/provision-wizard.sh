@@ -201,7 +201,7 @@ finish() {
 
 run_wizard() {
 
-TOTAL_STAGES=12
+TOTAL_STAGES=13
 
 # Run from the repo root. Two git-ignored files:
 #   .env.production  the VM's .env (every AGENTPAY_ hosted setting), copied to the VM
@@ -507,6 +507,56 @@ if confirm "Install the backup jobs on the VM and take the first dump now?"; the
   else
     SKIPPED+=("backups: on the VM, cd agentpay-guard && bash infra/pg-backup.sh install-cron && bash infra/pg-backup.sh dump")
   fi
+fi
+pause
+
+# ── 13 ─────────────────────────────────────────────────────────────────────
+stage "Alerts by email"
+say "Two free services watch what nothing on the VM can (#227, ADR-0026): an uptime check"
+say "of /healthz from outside, and a dead-man's switch that emails when a backup fails or"
+say "doesn't run. Signing up to each is yours to do; use the email you want alerts at."
+open_url "https://healthchecks.io/"
+step "Healthchecks.io → sign up or log in → your project → Add Check:"
+step "  name 'agentpay nightly dump', Simple schedule, Period 1 day, Grace Time 2 hours."
+step "  Add another: 'agentpay restore check', Period 7 days, Grace Time 6 hours."
+step "Integrations: your email is there by default; leave it on for both checks."
+note "Each check shows a ping URL (https://hc-ping.com/…). It's a secret: paste, don't share."
+pause "Press Enter when both checks exist"
+# heartbeat_url KEY "Prompt": a hidden paste that must look like a ping URL.
+heartbeat_url() {
+  while :; do
+    prod_secret "$1" "$2"
+    [[ "${!1}" =~ ^https://[^[:space:]]+$ ]] && break
+    warn "That isn't an https:// ping URL; copy it from the check's page."
+  done
+  prod_write "$1" "${!1%/}"
+}
+heartbeat_url AGENTPAY_BACKUP_HEARTBEAT_URL "Ping URL of 'agentpay nightly dump' (hidden):"
+heartbeat_url AGENTPAY_RESTORE_CHECK_HEARTBEAT_URL "Ping URL of 'agentpay restore check' (hidden):"
+scp -i "$SSH_KEY" -q "$PROD" "$VM_USER@$VM_IP:agentpay-guard/.env"
+vm 'chmod 600 agentpay-guard/.env'
+printf '  %s✓ copied%s %s → %s:agentpay-guard/.env
+' "$GREEN" "$RESET" "$PROD" "$VM_IP"
+if confirm "Take a dump on the VM now, so 'agentpay nightly dump' gets its first ping?"; then
+  if vm "cd agentpay-guard && bash infra/pg-backup.sh dump"; then
+    step "Healthchecks.io: 'agentpay nightly dump' should turn green within a minute."
+  else
+    SKIPPED+=("the first heartbeat: on the VM, cd agentpay-guard && bash infra/pg-backup.sh dump")
+  fi
+fi
+note "'agentpay restore check' stays 'new' (grey, no alerts) until Sunday's first check."
+say ""
+open_url "https://uptimerobot.com/"
+step "UptimeRobot → sign up or log in → New monitor: HTTP(s),"
+step "  URL https://$API_HOST/healthz, interval 5 minutes, alert by your email."
+step "  If your plan lets an alert wait for a second failed check, set that, so one blip doesn't email."
+pause "Press Enter when the monitor shows Up"
+note_write UPTIME_MONITOR_URL "https://$API_HOST/healthz"
+step "Send yourself one test alert: Healthchecks.io → Integrations → Email → Test!"
+if confirm "Did the test alert reach your inbox?"; then
+  note_write ALERT_EMAIL_TESTED "yes"
+else
+  SKIPPED+=("a test alert by email: Healthchecks.io → Integrations → Email → Test (check spam)")
 fi
 pause
 

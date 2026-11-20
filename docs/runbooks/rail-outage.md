@@ -4,6 +4,7 @@ The rail (Razorpay, or the mock rail on the hosted demo) is down, slow, rate-lim
 
 ## How you'd notice
 
+- **No alert fires for this.** The uptime check (ADR-0026) emails only when `/healthz` stops answering, and `/healthz` doesn't call the rail. So it fires only if the VM or the API is down too.
 - `POST /v1/payments` answers `202` with a Payment that stays `scheduled` with no `rail_payment_id`, and the API log has `rail unavailable for Payment …`. After a few of those in a row, payments and refunds answer `503 RAIL_UNAVAILABLE`, and the log has `rail breaker opened`:
 
   ```bash

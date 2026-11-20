@@ -338,7 +338,7 @@ The hosted demo costs nothing except model calls (ADR-0021):
 - The web app is on Vercel Hobby.
 - Traces go to Langfuse Hobby.
 
-To put it live, run `bash infra/provision-wizard.sh` from the repo root (on Windows, from Git Bash; see Run it locally). It walks you through 12 stages:
+To put it live, run `bash infra/provision-wizard.sh` from the repo root (on Windows, from Git Bash; see Run it locally). It walks you through 13 stages:
 - creating the Oracle VM and opening ports 80 and 443 (in Oracle's security list and on the VM's own firewall). With the OCI CLI installed (`uv tool install oci-cli`), stage 1 runs `infra/oci-create-vm.sh`, which:
   - creates the network and the VM;
   - keeps retrying while the region is out of Ampere capacity;
@@ -347,7 +347,8 @@ To put it live, run `bash infra/provision-wizard.sh` from the repo root (on Wind
 - creating the Langfuse project, the Anthropic key and the Vercel project;
 - writing the VM's `.env`, starting the stack and creating the Demo Tenant;
 - checking it's live;
-- turning on nightly backups (below).
+- turning on nightly backups (below);
+- setting up alerts by email (below).
 
 It never shows a secret. Generated passwords and keys go into the git-ignored `.env.production`, which is copied to the VM. The Demo Tenant's keys go into your local `.env` for `python -m demo`. Re-running it keeps the values already saved.
 
@@ -362,11 +363,15 @@ docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compo
 
 To move the hosted demo's Postgres to a new major version, run `bash infra/pg-upgrade.sh --prod` on the VM after pulling, then the `up -d --build` step below. It stops the stack, copies the database into the new volume, and checks every table's row count. The `migrate` service then runs on the new database. The old volume and the dump stay as the rollback (ADR-0022).
 
-**Backups** (ADR-0023). `infra/pg-backup.sh` runs from the VM's crontab, installed by the wizard's last stage:
+**Backups** (ADR-0023). `infra/pg-backup.sh` runs from the VM's crontab, installed by the wizard's backups stage:
 - **Nightly, 02:30 UTC:** a `pg_dump` of the running database to `~/agentpay-backups`, keeping the newest 14. Each one is also uploaded to the private Object Storage bucket `agentpay-guard-backups`, which deletes objects after 30 days.
 - **Sundays, 03:00 UTC:** the newest dump is restored into a throwaway Postgres, and `api.admin verify` must pass for every Tenant.
 
-Results go to `~/agentpay-backups/backup.log` and `check.log`. Nothing alerts on a failure, so look at those now and then. The VM uploads through a write-only link (`AGENTPAY_BACKUP_PAR_URL`), not OCI credentials. `infra/oci-create-backup-bucket.sh` makes the bucket and the link, and the link expires after a year. The nightly log warns 30 days ahead, and re-running the wizard's last stage replaces it.
+Results go to `~/agentpay-backups/backup.log` and `check.log`, and each run pings its heartbeat (see Alerts below). The VM uploads through a write-only link (`AGENTPAY_BACKUP_PAR_URL`), not OCI credentials. `infra/oci-create-backup-bucket.sh` makes the bucket and the link, and the link expires after a year. The nightly log warns 30 days ahead, and re-running the wizard's backups stage replaces it.
+
+**Alerts** (ADR-0026). Two free services email when the hosted demo needs you. The wizard's last stage sets them up; signing up to each is yours to do.
+- **Uptime:** an UptimeRobot monitor checks `https://<AGENTPAY_API_HOST>/healthz` every 5 minutes from outside, and emails when it fails. That catches the VM reclaimed or down, and Caddy or the API down.
+- **Backup heartbeats:** two Healthchecks.io checks, a dead-man's switch for the cron jobs. `pg-backup.sh dump` pings `AGENTPAY_BACKUP_HEARTBEAT_URL` (period 1 day, grace 2 hours) and `check` pings `AGENTPAY_RESTORE_CHECK_HEARTBEAT_URL` (period 7 days, grace 6 hours) when they succeed, and its `/fail` when they fail. A failure, or a run that never happens, emails. A ping carries nothing but the request, and the URLs are secrets kept in the VM's `.env`. Unset, nothing is pinged.
 
 To restore a dump on the VM (one from the bucket: download it in the Oracle console, then `scp` it over):
 

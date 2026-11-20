@@ -2,8 +2,8 @@
 
 The script runs with stand-in `docker`, `curl` and `crontab` commands first on PATH, which
 log their arguments and play the parts each test needs, so these need bash but no Docker
-and no Oracle account. The restore check (`pg-backup.sh check`) needs a real stack and is
-run by hand (see the ticket).
+and no Oracle account. The stand-in `docker` plays enough of a stack for the restore check
+(`pg-backup.sh check`) to pass or fail; a real one is run by hand (see the ticket).
 """
 
 import os
@@ -16,6 +16,9 @@ import pytest
 
 SCRIPT = Path("infra/pg-backup.sh").resolve().as_posix()  # bash on Windows reads "\\" as an escape
 PAR = "https://objectstorage.ap-hyderabad-1.oraclecloud.com/p/SECRET-TOKEN-x9/n/ns/b/agentpay-guard-backups/o/"
+# Healthchecks.io ping URLs (#227): the check's UUID is the secret part.
+DUMP_PING = "https://hc-ping.com/SECRET-DUMP-UUID"
+CHECK_PING = "https://hc-ping.com/SECRET-CHECK-UUID"
 
 # By full path: on Windows, subprocess looks in System32 (WSL's bash) before PATH.
 BASH = shutil.which("bash")
@@ -29,11 +32,21 @@ case "$*" in
   *pg_dump*)
     if [[ -n "${STUB_DUMP_FAILS:-}" ]]; then printf 'PGDMP-half'; exit 1; fi
     printf 'PGDMP-archive' ;;
-  *"pg_restore -l"*) cat > /dev/null ;;
+  *pg_restore*)
+    cat > /dev/null
+    [[ -z "${STUB_RESTORE_FAILS:-}" ]] || exit 1 ;;
+  *"config --images"*) echo "postgres:18-alpine" ;;
+  *" config"*) echo "name: agentpay" ;;
+  *psql*) echo "t_demo" ;;
 esac
 """,
     "curl": """#!/usr/bin/env bash
 echo "curl $*" >> "$STUB_LOG"
+if [[ "$*" == *hc-ping* ]]; then
+  [[ -z "${STUB_PING_FAILS:-}" ]] && exit 0
+  echo "curl: (22) The requested URL returned error: 404 for $*" >&2  # names the URL
+  exit 22
+fi
 [[ -z "${STUB_CURL_FAILS:-}" ]] || exit 22
 """,
     "crontab": """#!/usr/bin/env bash
@@ -184,3 +197,112 @@ def test_installing_the_cron_jobs_twice_leaves_one_of_each(vm: Vm) -> None:
     assert len(ours) == 2
     assert ours[0].startswith("30 2 * * * ") and "pg-backup.sh dump" in ours[0]
     assert ours[1].startswith("0 3 * * 0 ") and "pg-backup.sh check" in ours[1]
+
+
+def pings(vm: Vm) -> list[str]:
+    """The heartbeat URL each ping went to, in order."""
+    return [word for call in vm.calls("curl") for word in call.split() if "hc-ping" in word]
+
+
+def heartbeats(vm: Vm) -> None:
+    vm.set("AGENTPAY_BACKUP_HEARTBEAT_URL", DUMP_PING)
+    vm.set("AGENTPAY_RESTORE_CHECK_HEARTBEAT_URL", CHECK_PING)
+
+
+def test_a_good_dump_pings_its_heartbeat(vm: Vm) -> None:
+    heartbeats(vm)
+    vm.set("AGENTPAY_BACKUP_PAR_URL", PAR)
+
+    done = vm.run("dump")
+
+    assert done.returncode == 0, done.stderr
+    assert pings(vm) == [DUMP_PING]
+    assert vm.calls("curl")[-1].endswith(DUMP_PING)  # after the upload, not before
+
+
+def test_a_failed_dump_pings_fail(vm: Vm) -> None:
+    heartbeats(vm)
+
+    done = vm.run("dump", STUB_DUMP_FAILS="1")
+
+    assert done.returncode != 0
+    assert pings(vm) == [f"{DUMP_PING}/fail"]
+
+
+def test_a_failed_upload_pings_fail(vm: Vm) -> None:
+    heartbeats(vm)
+    vm.set("AGENTPAY_BACKUP_PAR_URL", PAR)
+
+    done = vm.run("dump", STUB_CURL_FAILS="1")
+
+    assert done.returncode != 0
+    assert pings(vm) == [f"{DUMP_PING}/fail"]
+
+
+def test_a_good_restore_check_pings_its_heartbeat(vm: Vm) -> None:
+    heartbeats(vm)
+    assert vm.run("dump").returncode == 0
+
+    done = vm.run("check")
+
+    assert done.returncode == 0, done.stderr
+    assert "check ok" in done.stdout
+    assert pings(vm) == [DUMP_PING, CHECK_PING]
+
+
+def test_a_failed_restore_check_pings_fail(vm: Vm) -> None:
+    heartbeats(vm)
+    assert vm.run("dump").returncode == 0
+
+    done = vm.run("check", STUB_RESTORE_FAILS="1")
+
+    assert done.returncode != 0
+    assert pings(vm) == [DUMP_PING, f"{CHECK_PING}/fail"]
+
+
+def test_a_restore_check_with_no_dump_pings_fail(vm: Vm) -> None:
+    heartbeats(vm)
+
+    done = vm.run("check")
+
+    assert done.returncode != 0
+    assert pings(vm) == [f"{CHECK_PING}/fail"]
+
+
+def test_without_heartbeat_urls_nothing_is_pinged(vm: Vm) -> None:
+    for command, extra in (("dump", {}), ("check", {}), ("dump", {"STUB_DUMP_FAILS": "1"})):
+        vm.run(command, **extra)
+
+    assert vm.calls("curl") == []
+
+
+def test_a_ping_sends_no_payload(vm: Vm) -> None:
+    heartbeats(vm)
+
+    vm.run("dump")
+
+    [ping] = [call for call in vm.calls("curl") if "hc-ping" in call]
+    assert not any(flag in ping.split() for flag in ("-d", "--data", "-T", "-F", "--data-binary"))
+
+
+def test_a_failed_ping_is_logged_but_never_fails_a_good_backup(vm: Vm) -> None:
+    heartbeats(vm)
+
+    done = vm.run("dump", STUB_PING_FAILS="1")
+
+    assert done.returncode == 0, done.stderr
+    assert "heartbeat ping failed" in done.stdout + done.stderr
+
+
+def test_a_ping_never_prints_its_url(vm: Vm) -> None:
+    heartbeats(vm)
+
+    for command, extra in (
+        ("dump", {}),
+        ("dump", {"STUB_PING_FAILS": "1"}),
+        ("dump", {"STUB_DUMP_FAILS": "1", "STUB_PING_FAILS": "1"}),
+        ("check", {"STUB_PING_FAILS": "1"}),
+        ("check", {"STUB_RESTORE_FAILS": "1", "STUB_PING_FAILS": "1"}),
+    ):
+        done = vm.run(command, **extra)
+        assert "SECRET-" not in done.stdout + done.stderr, (command, extra)
