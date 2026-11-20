@@ -595,7 +595,8 @@ fi
 say ""
 say "Now the alert rules, pushed from here with a Grafana service account token:"
 step "Your stack's Grafana (https://<stack>.grafana.net) → Administration → Users and access"
-step "  → Service accounts → Add service account, role Editor → Add service account token."
+step "  → Service accounts → Add service account, role Admin → Add service account token."
+note "Admin, not Editor: writing provisioned alert rules needs alert.provisioning:write."
 ENV_FILE=.env ask AGENTPAY_GRAFANA_URL "Stack URL (https://<stack>.grafana.net):"
 ENV_FILE=.env write_env AGENTPAY_GRAFANA_URL "${AGENTPAY_GRAFANA_URL%/}"
 ENV_FILE=.env ask_secret AGENTPAY_GRAFANA_API_TOKEN "Service account token (hidden):"
@@ -614,11 +615,12 @@ if confirm "Do you see agentpay_rail_breaker_open in Grafana?"; then
 else
   SKIPPED+=("metrics in Grafana: on the VM, $COMPOSE logs otel-collector | grep -i grafana")
 fi
-step "Send yourself one test alert: Alerting → Contact points → agentpay-email → Test."
+say "Sending a test alert (the contact point is read-only in Grafana's UI, so no Test button there):"
+uv run python -m adapters.grafana.alerts --test-alert || true
 if confirm "Did the Grafana test alert reach your inbox?"; then
   note_write GRAFANA_ALERT_TESTED "yes"
 else
-  SKIPPED+=("a Grafana test alert: Alerting → Contact points → agentpay-email → Test (check spam)")
+  SKIPPED+=("a Grafana test alert: uv run python -m adapters.grafana.alerts --test-alert (check spam)")
 fi
 pause
 

@@ -68,7 +68,7 @@ The API and worker also export metrics, one or more per runbook symptom (`core/o
 - **Consent:** workflow events waiting in the outbox, by age, and Consent requests past expiry with no resolution.
 - **Decisions:** each new Decision's duration, by Outcome.
 
-To send them to [Grafana Cloud](https://grafana.com), set `AGENTPAY_GRAFANA_OTLP_ENDPOINT` and `AGENTPAY_GRAFANA_OTLP_AUTH` (base64 of `<instance id>:<token>`) in `.env` and re-run the `up -d` step (`infra/otel-collector.grafana.yaml`). The alert rules on those metrics are in `infra/grafana/alert-rules.yaml`, each with its threshold and runbook. `uv run python -m adapters.grafana.alerts` pushes them, with `AGENTPAY_GRAFANA_URL`, `AGENTPAY_GRAFANA_API_TOKEN` and `AGENTPAY_ALERT_EMAIL` in `.env`; `--dry-run` prints them instead.
+To send them to [Grafana Cloud](https://grafana.com), set `AGENTPAY_GRAFANA_OTLP_ENDPOINT` and `AGENTPAY_GRAFANA_OTLP_AUTH` (base64 of `<instance id>:<token>`) in `.env` and re-run the `up -d` step (`infra/otel-collector.grafana.yaml`). The alert rules on those metrics are in `infra/grafana/alert-rules.yaml`, each with its threshold and runbook. `uv run python -m adapters.grafana.alerts` pushes them, with `AGENTPAY_GRAFANA_URL`, `AGENTPAY_GRAFANA_API_TOKEN` and `AGENTPAY_ALERT_EMAIL` in `.env`; `--dry-run` prints them instead, and `--test-alert` emails a test notification. Pushed rules and the contact point are read-only in Grafana's UI, so change the YAML and push again.
 
 ## Using the API
 

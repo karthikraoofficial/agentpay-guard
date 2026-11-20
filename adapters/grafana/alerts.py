@@ -2,13 +2,16 @@
 
     uv run python -m adapters.grafana.alerts            # push
     uv run python -m adapters.grafana.alerts --dry-run  # print the rule group, send nothing
+    uv run python -m adapters.grafana.alerts --test-alert  # email a test notification
 
 Run on the operator's machine, not the VM. Needs AGENTPAY_GRAFANA_URL (the stack,
 https://<stack>.grafana.net), AGENTPAY_GRAFANA_API_TOKEN (a service account token with the
-Editor role) and AGENTPAY_ALERT_EMAIL in `.env`. It makes the folder and the `agentpay-email`
+Admin role: Editor can't write provisioned alert rules, which needs alert.provisioning:write)
+and AGENTPAY_ALERT_EMAIL in `.env`. It makes the folder and the `agentpay-email`
 contact point if they're missing, then replaces the whole rule group, so a second push
-updates the rules in place. Rules pushed this way are read-only in Grafana's UI: change the
-YAML and push again. The token is never printed.
+updates the rules in place. Rules and the contact point pushed this way are read-only in
+Grafana's UI, which also hides the contact point's Test button: change the YAML and push
+again, and send a test with --test-alert. The token is never printed.
 """
 
 import argparse
@@ -181,9 +184,27 @@ def push(
     _check(client.put(f"/api/v1/provisioning/folder/{folder}/rule-groups/{group}", json=body))
 
 
+def send_test_alert(client: httpx.Client) -> None:
+    """Have Grafana send the contact point a test notification, through its receivers API
+    (the older test endpoint is gone). The stack's namespace comes from Grafana itself."""
+    namespace = _check(client.get("/api/frontend/settings")).json()["namespace"]
+    receivers = f"/apis/notifications.alerting.grafana.app/v1beta1/namespaces/{namespace}/receivers"
+    items = _check(client.get(receivers)).json().get("items", [])
+    found = [r for r in items if r["spec"]["title"] == CONTACT_POINT]
+    if not found or not found[0]["spec"]["integrations"]:
+        raise RuntimeError(f"Grafana has no {CONTACT_POINT} contact point: push the rules first")
+    receiver = found[0]
+    integration = receiver["spec"]["integrations"][0]
+    name = receiver["metadata"]["name"]
+    _check(client.post(f"{receivers}/{name}/test", json={"integration": integration}))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dry-run", action="store_true", help="print the rule group only")
+    parser.add_argument(
+        "--test-alert", action="store_true", help="email the contact point a test notification"
+    )
     args = parser.parse_args(argv)
     settings = get_settings()
     spec = load_file()
@@ -214,6 +235,10 @@ def main(argv: list[str] | None = None) -> int:
         timeout=30,
     ) as client:
         try:
+            if args.test_alert:
+                send_test_alert(client)
+                print(f"sent a test notification to {CONTACT_POINT}: check the inbox (and spam)")
+                return 0
             push(
                 client,
                 spec.rules,

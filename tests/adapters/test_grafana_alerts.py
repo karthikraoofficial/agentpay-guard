@@ -18,6 +18,7 @@ from adapters.grafana.alerts import (
     load_rules,
     push,
     rule_group,
+    send_test_alert,
 )
 
 DATASOURCE = "grafanacloud-prom"
@@ -190,3 +191,52 @@ def test_a_refused_request_stops_the_push_without_showing_the_token(
 
     assert "401" in str(refused.value)
     assert "glsa_token" not in str(refused.value)
+
+
+def test_a_test_alert_goes_through_the_receivers_api_to_the_email_integration() -> None:
+    receivers = "/apis/notifications.alerting.grafana.app/v1beta1/namespaces/stacks-42/receivers"
+    integration = {"uid": "int-1", "type": "email", "settings": {"addresses": "ops@example.com"}}
+    seen: list[tuple[str, str, object]] = []
+
+    def grafana(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else None
+        seen.append((request.method, request.url.path, body))
+        if request.url.path == "/api/frontend/settings":
+            return httpx.Response(200, json={"namespace": "stacks-42"})
+        if request.url.path == receivers:
+            items = [
+                {
+                    "metadata": {"name": "other"},
+                    "spec": {"title": "someone-else", "integrations": []},
+                },
+                {
+                    "metadata": {"name": "rcv-1"},
+                    "spec": {"title": CONTACT_POINT, "integrations": [integration]},
+                },
+            ]
+            return httpx.Response(200, json={"items": items})
+        return httpx.Response(200, json={"status": "success"})
+
+    grafana_client = httpx.Client(
+        base_url="https://agentpay.grafana.net",
+        headers={"Authorization": "Bearer glsa_token"},
+        transport=httpx.MockTransport(grafana),
+    )
+
+    send_test_alert(grafana_client)
+
+    assert seen[-1] == ("POST", f"{receivers}/rcv-1/test", {"integration": integration})
+
+
+def test_a_test_alert_without_the_contact_point_says_to_push_first() -> None:
+    def grafana(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/frontend/settings":
+            return httpx.Response(200, json={"namespace": "stacks-42"})
+        return httpx.Response(200, json={"items": []})
+
+    grafana_client = httpx.Client(
+        base_url="https://agentpay.grafana.net", transport=httpx.MockTransport(grafana)
+    )
+
+    with pytest.raises(RuntimeError, match="push the rules first"):
+        send_test_alert(grafana_client)
