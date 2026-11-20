@@ -615,11 +615,12 @@ if confirm "Do you see agentpay_rail_breaker_open in Grafana?"; then
 else
   SKIPPED+=("metrics in Grafana: on the VM, $COMPOSE logs otel-collector | grep -i grafana")
 fi
-step "Send yourself one test alert: Alerting → Contact points → agentpay-email → Test."
+say "Sending a test alert (the contact point is read-only in Grafana's UI, so no Test button there):"
+uv run python -m adapters.grafana.alerts --test-alert || true
 if confirm "Did the Grafana test alert reach your inbox?"; then
   note_write GRAFANA_ALERT_TESTED "yes"
 else
-  SKIPPED+=("a Grafana test alert: Alerting → Contact points → agentpay-email → Test (check spam)")
+  SKIPPED+=("a Grafana test alert: uv run python -m adapters.grafana.alerts --test-alert (check spam)")
 fi
 pause
 
