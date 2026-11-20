@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from evals.release_gate import main, run_gate
+from core.policy.packs import load_pack
+from evals.release_gate import Change, Declarations, DeclaredChange, main, run_gate
 from evals.run_evals import GOLDEN, PackPin
 from tests.packs import PACKS, release_test_pack
 
@@ -146,6 +147,259 @@ def test_a_case_that_cant_be_decided_fails_the_gate_and_is_named(tmp_path: Path)
     assert not verdict.passed
     assert len(verdict.errors) == 1
     assert verdict.errors[0].startswith(f"candidate.jsonl {rows[0]['id']}: ")
+
+
+# --- Declared changes -------------------------------------------------------------------
+
+
+# Case ids are unique within a golden file, not across them.
+KEY = ("phase2.jsonl", "allow-basic")
+
+
+def _declare(change: Change, reason: str = "intended") -> DeclaredChange:
+    return DeclaredChange(
+        file=change.file,
+        case_id=change.case_id,
+        active=change.active,
+        candidate=change.candidate,
+        reason=reason,
+    )
+
+
+def test_a_declared_tightening_passes(tmp_path: Path) -> None:
+    packs = _candidate(tmp_path, LOWER_INR_THRESHOLD)
+    changes = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE).changes
+    allow_basic = DeclaredChange.model_validate(
+        {
+            "file": "phase2.jsonl",
+            "case_id": "allow-basic",
+            "active": {"outcome": "allow", "risk_tier": "low", "reason_codes": []},
+            "candidate": {
+                "outcome": "step_up",
+                "risk_tier": "high",
+                "reason_codes": ["AMOUNT_ABOVE_STEP_UP_THRESHOLD", "INTENT_MISSING"],
+            },
+            "reason": "INR 1,000 and up is high",
+        }
+    )
+    rest = [_declare(c) for c in changes if (c.file, c.case_id) != KEY]
+
+    verdict = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE, [allow_basic, *rest])
+
+    assert verdict.passed
+    assert verdict.undeclared == []
+    assert verdict.wrong_declarations == []
+    assert all(c.declared for c in verdict.changes)
+    assert len(verdict.changes) == len(changes) > 1
+
+
+def test_leaving_one_change_undeclared_fails_on_that_change(tmp_path: Path) -> None:
+    packs = _candidate(tmp_path, LOWER_INR_THRESHOLD)
+    changes = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE).changes
+    declared = [_declare(c) for c in changes if (c.file, c.case_id) != KEY]
+
+    verdict = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE, declared)
+
+    assert not verdict.passed
+    assert [(c.file, c.case_id) for c in verdict.undeclared] == [("phase2.jsonl", "allow-basic")]
+
+
+def test_a_declared_change_that_doesnt_happen_fails_and_says_what_the_case_returned(
+    tmp_path: Path,
+) -> None:
+    packs = _candidate(tmp_path, {})
+    stale = DeclaredChange.model_validate(
+        {
+            "file": "phase2.jsonl",
+            "case_id": "allow-basic",
+            "active": {"outcome": "allow", "risk_tier": "low", "reason_codes": []},
+            "candidate": {"outcome": "block", "risk_tier": "low", "reason_codes": []},
+            "reason": "a change the candidate doesn't make",
+        }
+    )
+
+    verdict = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE, [stale])
+
+    assert not verdict.passed
+    assert verdict.changes == []
+    [wrong] = verdict.wrong_declarations
+    assert wrong.declared == stale
+    assert wrong.active is not None and wrong.candidate is not None
+    assert (wrong.active.outcome, wrong.candidate.outcome) == ("allow", "allow")
+
+
+def test_a_declaration_with_the_wrong_expected_answer_fails(tmp_path: Path) -> None:
+    packs = _candidate(tmp_path, LOWER_INR_THRESHOLD)
+    changes = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE).changes
+    declared = [_declare(c) for c in changes]
+    i = next(i for i, d in enumerate(declared) if (d.file, d.case_id) == KEY)
+    wrong_answer = declared[i].candidate.model_copy(update={"outcome": "block"})
+    declared[i] = declared[i].model_copy(update={"candidate": wrong_answer})
+
+    verdict = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE, declared)
+
+    assert not verdict.passed
+    [wrong] = verdict.wrong_declarations
+    assert wrong.declared.case_id == "allow-basic"
+    assert wrong.candidate is not None and wrong.candidate.outcome == "step_up"
+    assert [(c.file, c.case_id) for c in verdict.undeclared] == [KEY]
+
+
+def test_a_declaration_for_a_case_no_golden_file_has_fails(tmp_path: Path) -> None:
+    packs = _candidate(tmp_path, {})
+    ghost = DeclaredChange.model_validate(
+        {
+            "file": "phase2.jsonl",
+            "case_id": "no-such-case",
+            "active": {"outcome": "allow", "risk_tier": "low", "reason_codes": []},
+            "candidate": {"outcome": "block", "risk_tier": "low", "reason_codes": []},
+            "reason": "typo",
+        }
+    )
+
+    verdict = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE, [ghost])
+
+    assert not verdict.passed
+    [wrong] = verdict.wrong_declarations
+    assert (wrong.active, wrong.candidate) == (None, None)
+
+
+def test_a_declared_high_risk_loosening_still_fails(tmp_path: Path) -> None:
+    packs = _candidate(tmp_path, {"currencies": {"INR": {"step_up_threshold": 2000000}}})
+    changes = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE).changes
+
+    verdict = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE, [_declare(c) for c in changes])
+
+    assert verdict.undeclared == []
+    assert verdict.wrong_declarations == []
+    assert "threshold-at" in {c.case_id for c in verdict.high_risk_loosenings}
+    assert not verdict.passed
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("reason", "", "reason"),
+        ("candidate", {"outcome": "allow", "risk_tier": "low", "reason_codes": []}, "same"),
+        ("extra", "x", "extra"),
+    ],
+    ids=["no-reason", "no-change", "unknown-field"],
+)
+def test_a_declaration_that_says_nothing_is_refused(field: str, value: object, error: str) -> None:
+    entry: dict[str, object] = {
+        "file": "phase2.jsonl",
+        "case_id": "allow-basic",
+        "active": {"outcome": "allow", "risk_tier": "low", "reason_codes": []},
+        "candidate": {"outcome": "block", "risk_tier": "low", "reason_codes": []},
+        "reason": "why",
+    }
+
+    with pytest.raises(ValueError, match=error):
+        DeclaredChange.model_validate(entry | {field: value})
+
+
+def _declarations_file(packs: Path, entries: list[DeclaredChange]) -> Path:
+    path = packs / "default" / "1.6.0.declared-changes.yaml"
+    doc = {"changes": [e.model_dump(mode="json") for e in entries]}
+    path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+    return path
+
+
+def test_the_command_reads_the_candidates_declarations_and_marks_each_change(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    packs = _candidate(tmp_path, LOWER_INR_THRESHOLD)
+    changes = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE).changes
+    _declarations_file(packs, [_declare(c) for c in changes if (c.file, c.case_id) != KEY])
+
+    assert main(["--packs", str(packs), "--candidate", "default@1.6.0"]) == 1
+    out = capsys.readouterr().out
+    assert "[undeclared] phase2.jsonl allow-basic: allow low [] -> step_up high" in out
+    assert "[declared] " in out
+    assert "undeclared: 1" in out
+
+    _declarations_file(packs, [_declare(c) for c in changes])
+    assert main(["--packs", str(packs), "--candidate", "default@1.6.0"]) == 0
+    assert "PASS" in capsys.readouterr().out
+
+
+def test_the_command_says_what_a_wrongly_declared_case_returned(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    packs = _candidate(tmp_path, {})
+    _declarations_file(
+        packs,
+        [
+            DeclaredChange.model_validate(
+                {
+                    "file": "phase2.jsonl",
+                    "case_id": "allow-basic",
+                    "active": {"outcome": "allow", "risk_tier": "low", "reason_codes": []},
+                    "candidate": {"outcome": "block", "risk_tier": "low", "reason_codes": []},
+                    "reason": "stale",
+                }
+            )
+        ],
+    )
+
+    assert main(["--packs", str(packs), "--candidate", "default@1.6.0"]) == 1
+    out = capsys.readouterr().out
+    declared = "phase2.jsonl allow-basic: declared allow low [] -> block low []"
+    assert f"wrong declaration: {declared}" in out
+    assert "got allow low [] -> allow low []" in out
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "changes: [{file: phase2.jsonl}]\n",  # entry missing its answers and reason
+        "changes: []\nwaived: true\n",  # unknown field
+        ": not yaml : [\n",
+    ],
+    ids=["incomplete", "unknown-field", "not-yaml"],
+)
+def test_a_declarations_file_that_fails_the_schema_exits_2(
+    tmp_path: Path, text: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    packs = _candidate(tmp_path, {})
+    (packs / "default" / "1.6.0.declared-changes.yaml").write_text(text, encoding="utf-8")
+
+    assert main(["--packs", str(packs), "--candidate", "default@1.6.0"]) == 2
+    assert "1.6.0.declared-changes.yaml" in capsys.readouterr().err
+
+
+def test_a_case_declared_twice_exits_2(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    packs = _candidate(tmp_path, LOWER_INR_THRESHOLD)
+    change = next(
+        c for c in run_gate(packs, GOLDEN, ACTIVE, CANDIDATE).changes if (c.file, c.case_id) == KEY
+    )
+    _declarations_file(packs, [_declare(change), _declare(change, "again")])
+
+    assert main(["--packs", str(packs), "--candidate", "default@1.6.0"]) == 2
+    assert "allow-basic" in capsys.readouterr().err
+
+
+def test_the_committed_declarations_schema_matches_the_model() -> None:
+    committed = json.loads((PACKS / "declared-changes.schema.json").read_text(encoding="utf-8"))
+
+    assert committed == Declarations.model_json_schema(), (
+        "policy_packs/declared-changes.schema.json is stale; regenerate it with "
+        "`uv run python -m evals.release_gate --write-schema`"
+    )
+
+
+def test_a_declarations_file_changes_no_pack_hash(tmp_path: Path) -> None:
+    # Replay (api.admin) loads the recorded pack with load_pack, so an unchanged
+    # LoadedPack means Replay is unchanged too.
+    packs = _candidate(tmp_path, {})
+    before = {v: load_pack(packs, "default", v) for v in ("1.5.0", "1.6.0")}
+    for version in before:
+        path = packs / "default" / f"{version}.declared-changes.yaml"
+        path.write_text("changes: []\n", encoding="utf-8")
+
+    assert {v: load_pack(packs, "default", v) for v in before} == before
+    real = json.loads((PACKS / "manifest.json").read_text(encoding="utf-8"))
+    assert before["1.5.0"].hash == real["packs"]["default"]["versions"]["1.5.0"]
 
 
 # --- The real repo ----------------------------------------------------------------------

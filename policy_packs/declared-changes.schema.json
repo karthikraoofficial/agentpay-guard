@@ -1,0 +1,134 @@
+{
+  "$defs": {
+    "Answer": {
+      "additionalProperties": false,
+      "description": "Everything `decide()` says about one case that a Policy pack can change: what the\nlabels hold, plus the Risk tier. The Release gate compares these across two packs.",
+      "properties": {
+        "outcome": {
+          "enum": [
+            "allow",
+            "step_up",
+            "block"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "enum": [
+              "MANDATE_REVOKED",
+              "MANDATE_NOT_YET_VALID",
+              "MANDATE_EXPIRED",
+              "AGENT_NOT_ALLOWED",
+              "AGENT_DISABLED",
+              "CURRENCY_MISMATCH",
+              "MCC_HIGH_RISK",
+              "MCC_NOT_ALLOWED",
+              "PER_TXN_CAP_EXCEEDED",
+              "MONTHLY_CAP_EXCEEDED",
+              "AMOUNT_ABOVE_STEP_UP_THRESHOLD",
+              "MONTHLY_CAP_NEAR",
+              "VELOCITY_HIGH",
+              "MERCHANT_NEW",
+              "INTENT_MISSING",
+              "INTENT_MISMATCH",
+              "INTENT_UNKNOWN",
+              "PRICE_DRIFT"
+            ],
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "risk_tier": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Risk Tier",
+          "type": "string"
+        },
+        "resolution": {
+          "anyOf": [
+            {
+              "enum": [
+                "approved",
+                "declined",
+                "expired",
+                "blocked"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolution"
+        }
+      },
+      "required": [
+        "outcome",
+        "reason_codes",
+        "risk_tier"
+      ],
+      "title": "Answer",
+      "type": "object"
+    },
+    "DeclaredChange": {
+      "additionalProperties": false,
+      "description": "A golden case whose answer the candidate is meant to change, and why.",
+      "properties": {
+        "file": {
+          "description": "The golden file's name, for example phase2.jsonl",
+          "title": "File",
+          "type": "string"
+        },
+        "case_id": {
+          "title": "Case Id",
+          "type": "string"
+        },
+        "active": {
+          "$ref": "#/$defs/Answer",
+          "description": "The case's answer on the active pack"
+        },
+        "candidate": {
+          "$ref": "#/$defs/Answer",
+          "description": "The case's answer on the candidate"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "case_id",
+        "active",
+        "candidate",
+        "reason"
+      ],
+      "title": "DeclaredChange",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A Candidate pack's declarations file: every change it makes on purpose.",
+  "properties": {
+    "changes": {
+      "items": {
+        "$ref": "#/$defs/DeclaredChange"
+      },
+      "minItems": 1,
+      "title": "Changes",
+      "type": "array"
+    }
+  },
+  "required": [
+    "changes"
+  ],
+  "title": "Declarations",
+  "type": "object"
+}

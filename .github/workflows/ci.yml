@@ -50,13 +50,13 @@ jobs:
       - name: Type check
         run: uv run mypy
 
-      - name: Released policy packs are unchanged
+      - name: Released policy packs and their declarations files are unchanged
         if: github.event_name == 'pull_request'
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
           git fetch --no-tags --depth=1 origin "$BASE_REF"
-          bash .github/scripts/check-released-packs.sh FETCH_HEAD
+          uv run python -m evals.released_packs FETCH_HEAD
 
       - name: Collector configs are valid (console only, with the Langfuse overlay, and with both overlays)
         run: |
