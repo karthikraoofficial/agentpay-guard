@@ -6,6 +6,7 @@ The Claude API is down, slow or erroring, or a Tenant has reached its Model spen
 
 ## How you'd notice
 
+- **No alert fires for this.** The uptime check (ADR-0026) emails only when `/healthz` stops answering, and `/healthz` doesn't call a model. Decisions keep answering, with step-ups.
 - **More step-ups.** Decisions from the medium tier up start stepping up with `INTENT_UNKNOWN`.
 - **Unknown Intent checks.** `POST /v1/intents` answers with verdict `unknown` and a `failure_cause`:
 

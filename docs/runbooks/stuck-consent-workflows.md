@@ -4,6 +4,7 @@ A step_up's `step_up_consent` workflow isn't running: the worker or Temporal is 
 
 ## How you'd notice
 
+- **An alert fires only if the whole VM is down.** The uptime check (ADR-0026) emails when `/healthz` stops answering. A worker or Temporal that's down on its own sends no alert, since the API keeps answering.
 - **Payers aren't notified.** The `consent_requested` event isn't delivered to start the workflow:
 
   ```bash

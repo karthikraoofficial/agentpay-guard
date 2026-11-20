@@ -15,6 +15,8 @@ COMPOSE_ONLY = {
     "AGENTPAY_LANGFUSE_HOST",
     "AGENTPAY_BACKUP_PAR_URL",  # infra/pg-backup.sh (#200)
     "AGENTPAY_BACKUP_PAR_EXPIRES",
+    "AGENTPAY_BACKUP_HEARTBEAT_URL",  # infra/pg-backup.sh (#227)
+    "AGENTPAY_RESTORE_CHECK_HEARTBEAT_URL",
 }
 # Set by infra/docker-compose.prod.yml itself.
 FROM_COMPOSE = {
