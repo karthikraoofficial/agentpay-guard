@@ -69,7 +69,11 @@ async def test_a_decide_key_is_accepted(api: Api) -> None:
     async with connect(api, key) as client:
         tools = await client.list_tools()
 
-    assert {tool.name for tool in tools.tools} == {"request_decision", "get_decision"}
+    assert {tool.name for tool in tools.tools} == {
+        "request_decision",
+        "get_decision",
+        "get_consent_request",
+    }
 
 
 async def test_the_server_exits_non_zero_when_its_key_is_refused(
