@@ -37,6 +37,7 @@ from core.domain.refunds import RefundId, RefundStatus
 from core.domain.signals import IntentSignal, Signals
 from core.evidence_strength import assess
 from core.narrative_check import check_narrative
+from core.policy.pack import DisputeRules
 from core.policy.packs import load_pack
 
 _ZERO = "sha256:" + "00" * 32
@@ -68,6 +69,8 @@ class OtherPayment(_Strict):
 
 
 class Expected(_Strict):
+    """A Dispute case's label, and its answer in the Release gate."""
+
     strength: EvidenceStrength
     visa_code: str
     mastercard_code: str
@@ -127,13 +130,7 @@ def run_dispute_cases(cases: list[DisputeCase], pack_root: Path) -> DisputeRepor
         rules = load_pack(pack_root, case.pack.id, case.pack.version).pack.disputes
         if rules is None:
             raise ValueError(f"{case.pack.id}@{case.pack.version} has no Dispute rules")
-        got = assess(bundle_for(case), case.reason, rules)
-        actual = Expected(
-            strength=got.strength,
-            visa_code=got.visa_code,
-            mastercard_code=got.mastercard_code,
-            missing=got.missing,
-        )
+        actual = assess_case(case, rules)
         if actual != case.expected:
             misses.append(
                 Miss(
@@ -144,6 +141,17 @@ def run_dispute_cases(cases: list[DisputeCase], pack_root: Path) -> DisputeRepor
                 )
             )
     return DisputeReport(total=len(cases), mismatches=misses)
+
+
+def assess_case(case: DisputeCase, rules: DisputeRules) -> Expected:
+    """What a pack's Dispute rules say about the case: everything its label holds."""
+    got = assess(bundle_for(case), case.reason, rules)
+    return Expected(
+        strength=got.strength,
+        visa_code=got.visa_code,
+        mastercard_code=got.mastercard_code,
+        missing=got.missing,
+    )
 
 
 # --- Building a bundle from a case ------------------------------------------------------

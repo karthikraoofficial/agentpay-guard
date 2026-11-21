@@ -1,7 +1,8 @@
 """The Release gate: may a Candidate pack become the active Policy pack?
 
-Every Decision and approval golden case is decided twice, on the active pack and on the
-candidate, whichever pack its file is pinned to, and the two answers are compared. The
+Every Decision, approval and Dispute golden case is decided twice, on the active pack and
+on the candidate, whichever pack its file is pinned to, and the two answers are compared.
+Dispute cases are compared only when both packs have Dispute rules (#234). The
 labels play no part: changes earlier releases made on purpose are already in the active
 pack's answers, so only what the candidate changes shows up (ADR-0027).
 
@@ -20,7 +21,9 @@ from typing import Annotated, Self
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-from core.policy.packs import PackError, load_active_pack, load_pack
+from core.policy.packs import PackError, PolicyPack, load_active_pack, load_pack
+from evals.disputes import Expected as DisputeAnswer
+from evals.disputes import assess_case, load_dispute_cases, run_dispute_cases
 from evals.run_evals import (
     GOLDEN,
     PACKS,
@@ -37,6 +40,11 @@ from evals.run_evals import (
 # keeps the payment from going through, so all of them rank above approved.
 _STRICTNESS: dict[str, int] = {"allow": 0, "step_up": 1, "block": 2}
 _RESOLUTION_STRICTNESS: dict[str, int] = {"approved": 0, "declined": 1, "expired": 1, "blocked": 1}
+_STRENGTH: dict[str, int] = {"weak": 0, "mixed": 1, "strong": 2}
+
+# What a pack says about a golden case: a Decision or approval case's Answer, or a Dispute
+# case's Evidence strength, network codes and missing evidence.
+CaseAnswer = Answer | DisputeAnswer
 
 
 class DeclaredChange(BaseModel):
@@ -46,12 +54,16 @@ class DeclaredChange(BaseModel):
 
     file: str = Field(description="The golden file's name, for example phase2.jsonl")
     case_id: str
-    active: Answer = Field(description="The case's answer on the active pack")
-    candidate: Answer = Field(description="The case's answer on the candidate")
+    active: CaseAnswer = Field(description="The case's answer on the active pack")
+    candidate: CaseAnswer = Field(description="The case's answer on the candidate")
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
     @model_validator(mode="after")
     def _is_a_change(self) -> Self:
+        if type(self.active) is not type(self.candidate):
+            raise ValueError(
+                f"{self.case_id}: both answers must be of one kind, a Decision's or a Dispute's"
+            )
         if self.active == self.candidate:
             raise ValueError(f"{self.case_id}: the same answer on both packs is not a change")
         return self
@@ -109,13 +121,23 @@ class Change(BaseModel):
 
     file: str
     case_id: str
-    active: Answer
-    candidate: Answer
+    active: CaseAnswer
+    candidate: CaseAnswer
     # True when a Declared change names this case with these exact answers.
     declared: bool = False
 
     @property
+    def lowers_strength(self) -> bool:
+        a, c = self.active, self.candidate
+        if not (isinstance(a, DisputeAnswer) and isinstance(c, DisputeAnswer)):
+            return False
+        return _STRENGTH[c.strength] < _STRENGTH[a.strength]
+
+    @property
     def loosens(self) -> bool:
+        """A Decision or approval that lets the payment through more easily."""
+        if not (isinstance(self.active, Answer) and isinstance(self.candidate, Answer)):
+            return False
         if self.active.resolution is not None and self.candidate.resolution is not None:
             was = _RESOLUTION_STRICTNESS[self.active.resolution]
             now = _RESOLUTION_STRICTNESS[self.candidate.resolution]
@@ -125,7 +147,8 @@ class Change(BaseModel):
 
     @property
     def high_risk(self) -> bool:
-        return "high" in (self.active.risk_tier, self.candidate.risk_tier)
+        tiers = [a.risk_tier for a in (self.active, self.candidate) if isinstance(a, Answer)]
+        return "high" in tiers
 
 
 class LabelMismatch(BaseModel):
@@ -133,18 +156,18 @@ class LabelMismatch(BaseModel):
 
     file: str
     case_id: str
-    expected: Expected
-    actual: Expected
+    expected: Expected | DisputeAnswer
+    actual: Expected | DisputeAnswer
 
 
 class WrongDeclaration(BaseModel):
     """A Declared change that doesn't match what the case does: it doesn't change, or
     changes to a different answer. Holds what the case actually returned on each pack,
-    None when no Decision or approval golden case has that id."""
+    None when no golden case compared has that id."""
 
     declared: DeclaredChange
-    active: Answer | None
-    candidate: Answer | None
+    active: CaseAnswer | None
+    candidate: CaseAnswer | None
 
 
 class StepUpRate(BaseModel):
@@ -160,6 +183,8 @@ class Verdict(BaseModel):
     changes: list[Change]
     step_up_rate: StepUpRate
     wrong_declarations: list[WrongDeclaration] = []
+    # The active pack has Dispute rules and the candidate has none.
+    drops_dispute_rules: bool = False
     own_file_mismatches: list[LabelMismatch] = []
     # Cases that couldn't be decided, as "<file> <case id>: <why>". Never skipped silently.
     errors: list[str] = []
@@ -174,11 +199,18 @@ class Verdict(BaseModel):
         return [c for c in self.changes if c.loosens and c.high_risk]
 
     @property
+    def lower_strengths(self) -> list[Change]:
+        """Dispute cases whose Evidence strength drops: these fail even when declared."""
+        return [c for c in self.changes if c.lowers_strength]
+
+    @property
     def passed(self) -> bool:
         return not (
             self.undeclared
             or self.wrong_declarations
+            or self.drops_dispute_rules
             or self.high_risk_loosenings
+            or self.lower_strengths
             or self.own_file_mismatches
             or self.errors
         )
@@ -191,48 +223,21 @@ def run_gate(
     candidate: PackPin,
     declared: Sequence[DeclaredChange] = (),
 ) -> Verdict:
-    """Decide every Decision and approval golden case on both packs. The verdict passes
-    when the changes are exactly the `declared` ones, none is a high-risk loosening, and
-    the candidate meets the labels in its own golden files."""
+    """Decide every Decision, approval and Dispute golden case on both packs. The verdict
+    passes when the changes are exactly the `declared` ones, none is a high-risk loosening
+    or a lower Evidence strength, the candidate keeps the active pack's Dispute rules, and
+    it meets the labels in its own golden files."""
     before = load_pack(pack_root, active.id, active.version).pack
     after = load_pack(pack_root, candidate.id, candidate.version).pack
-    compared = 0
-    changes: list[Change] = []
-    own: list[LabelMismatch] = []
-    errors: list[str] = []
-    answers: dict[tuple[str, str], tuple[Answer, Answer]] = {}
-    decisions = stepped_up_before = stepped_up_after = 0
+    run = _Run(pack_root, candidate)
     for path in sorted(golden.glob("*.jsonl")):
-        if not is_decision_file(path):
-            continue
-        decided = []
-        for case in load_cases(path):
-            compared += 1
-            try:
-                was, _ = decide_case(case, before)
-                now, _ = decide_case(case, after)
-            except ValueError as e:  # pydantic's ValidationError included
-                errors.append(f"{path.name} {case.id}: {e}")
-                continue
-            decided.append(case)
-            answers[(path.name, case.id)] = (was, now)
-            if case.stage == "decision":
-                decisions += 1
-                stepped_up_before += was.outcome == "step_up"
-                stepped_up_after += now.outcome == "step_up"
-            if was != now:
-                changes.append(Change(file=path.name, case_id=case.id, active=was, candidate=now))
-        # The candidate's own golden files must still pass the eval thresholds.
-        pinned = [c for c in decided if c.pack == candidate]
-        for m in run_cases(pinned, pack_root).mismatches:
-            own.append(
-                LabelMismatch(
-                    file=path.name, case_id=m.case_id, expected=m.expected, actual=m.actual
-                )
-            )
+        if is_decision_file(path):
+            run.decision_file(path, before, after)
+        elif path.stem.startswith("disputes"):
+            run.dispute_file(path, before, after)
     wrong: list[WrongDeclaration] = []
     for d in declared:
-        was_now = answers.get((d.file, d.case_id))
+        was_now = run.answers.get((d.file, d.case_id))
         if was_now == (d.active, d.candidate):
             continue
         actual = was_now or (None, None)
@@ -240,19 +245,90 @@ def run_gate(
     matched = {(d.file, d.case_id) for d in declared} - {
         (w.declared.file, w.declared.case_id) for w in wrong
     }
-    changes = [c.model_copy(update={"declared": (c.file, c.case_id) in matched}) for c in changes]
+    changes = [
+        Change(file=f, case_id=i, active=was, candidate=now, declared=(f, i) in matched)
+        for (f, i), (was, now) in run.answers.items()
+        if was != now
+    ]
     rate = StepUpRate(
-        active=stepped_up_before / decisions if decisions else 0.0,
-        candidate=stepped_up_after / decisions if decisions else 0.0,
+        active=run.stepped_up[0] / run.decisions if run.decisions else 0.0,
+        candidate=run.stepped_up[1] / run.decisions if run.decisions else 0.0,
     )
     return Verdict(
-        compared=compared,
+        compared=len(run.answers) + len(run.errors),
         changes=changes,
         step_up_rate=rate,
         wrong_declarations=wrong,
-        own_file_mismatches=own,
-        errors=errors,
+        drops_dispute_rules=before.disputes is not None and after.disputes is None,
+        own_file_mismatches=run.own,
+        errors=run.errors,
     )
+
+
+class _Run:
+    """What one gate run has gathered, file by file."""
+
+    def __init__(self, pack_root: Path, candidate: PackPin) -> None:
+        self.pack_root, self.candidate = pack_root, candidate
+        # (file, case id) -> the answer on the active pack and on the candidate.
+        self.answers: dict[tuple[str, str], tuple[CaseAnswer, CaseAnswer]] = {}
+        self.own: list[LabelMismatch] = []
+        self.errors: list[str] = []
+        self.decisions = 0
+        self.stepped_up = [0, 0]
+
+    def decision_file(self, path: Path, before: PolicyPack, after: PolicyPack) -> None:
+        decided = []
+        for case in load_cases(path):
+            try:
+                was, _ = decide_case(case, before)
+                now, _ = decide_case(case, after)
+            except ValueError as e:  # pydantic's ValidationError included
+                self.errors.append(f"{path.name} {case.id}: {e}")
+                continue
+            decided.append(case)
+            self.answers[(path.name, case.id)] = (was, now)
+            if case.stage == "decision":
+                self.decisions += 1
+                self.stepped_up[0] += was.outcome == "step_up"
+                self.stepped_up[1] += now.outcome == "step_up"
+        # The candidate's own golden files must still pass the eval thresholds.
+        pinned = [c for c in decided if c.pack == self.candidate]
+        for m in run_cases(pinned, self.pack_root).mismatches:
+            self.own.append(
+                LabelMismatch(
+                    file=path.name, case_id=m.case_id, expected=m.expected, actual=m.actual
+                )
+            )
+
+    def dispute_file(self, path: Path, before: PolicyPack, after: PolicyPack) -> None:
+        cases = load_dispute_cases(path)
+        if before.disputes is not None and after.disputes is not None:
+            for case in cases:
+                try:
+                    was = assess_case(case, before.disputes)
+                    now = assess_case(case, after.disputes)
+                except ValueError as e:
+                    self.errors.append(f"{path.name} {case.id}: {e}")
+                    continue
+                self.answers[(path.name, case.id)] = (was, now)
+        # A candidate that is the first with Dispute rules is covered by its own files.
+        pinned = [
+            c
+            for c in cases
+            if (c.pack.id, c.pack.version) == (self.candidate.id, self.candidate.version)
+        ]
+        try:
+            misses = run_dispute_cases(pinned, self.pack_root).mismatches
+        except ValueError as e:  # the candidate has no Dispute rules for its own file
+            self.errors.append(f"{path.name}: {e}")
+            return
+        for m in misses:
+            self.own.append(
+                LabelMismatch(
+                    file=path.name, case_id=m.case_id, expected=m.expected, actual=m.actual
+                )
+            )
 
 
 def _pin(text: str) -> PackPin:
@@ -262,9 +338,17 @@ def _pin(text: str) -> PackPin:
     return PackPin(id=pack_id, version=version)
 
 
-def _answer(a: Answer) -> str:
+def _answer(a: CaseAnswer) -> str:
+    if isinstance(a, DisputeAnswer):
+        return f"{a.strength} {a.visa_code}/{a.mastercard_code} {list(a.missing)}"
     resolution = f" {a.resolution}" if a.resolution else ""
     return f"{a.outcome} {a.risk_tier} {list(a.reason_codes)}{resolution}"
+
+
+def _label(e: Expected | DisputeAnswer) -> str:
+    if isinstance(e, DisputeAnswer):
+        return _answer(e)
+    return f"{e.outcome} {list(e.reason_codes)}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -305,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
         got = (
             f"{_answer(w.active)} -> {_answer(w.candidate)}"
             if w.active and w.candidate
-            else "no Decision or approval golden case with that id"
+            else "no golden case compared with that id"
         )
         print(
             f"  wrong declaration: {d.file} {d.case_id}: declared "
@@ -313,10 +397,14 @@ def main(argv: list[str] | None = None) -> int:
         )
     for c in verdict.high_risk_loosenings:
         print(f"  high-risk loosening: {c.file} {c.case_id}")
+    for c in verdict.lower_strengths:
+        print(f"  lower Evidence strength: {c.file} {c.case_id}")
+    if verdict.drops_dispute_rules:
+        print("  the candidate drops the active pack's Dispute rules")
     for m in verdict.own_file_mismatches:
         print(
-            f"  label missed: {m.file} {m.case_id}: expected {m.expected.outcome} "
-            f"{list(m.expected.reason_codes)}, got {m.actual.outcome} {list(m.actual.reason_codes)}"
+            f"  label missed: {m.file} {m.case_id}: expected {_label(m.expected)}, "
+            f"got {_label(m.actual)}"
         )
     for error in verdict.errors:
         print(f"  could not decide: {error}")
@@ -327,6 +415,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"undeclared: {len(verdict.undeclared)}")
     print(f"wrong declarations: {len(verdict.wrong_declarations)}")
     print(f"high-risk loosenings: {len(verdict.high_risk_loosenings)}")
+    print(f"lower Evidence strengths: {len(verdict.lower_strengths)}")
     print(f"step-up rate: {rate.active:.1%} -> {rate.candidate:.1%}")
     print("PASS" if verdict.passed else "FAIL")
     return 0 if verdict.passed else 1

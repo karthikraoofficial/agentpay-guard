@@ -6,7 +6,14 @@ import pytest
 import yaml
 
 from core.policy.packs import load_pack
-from evals.release_gate import Change, Declarations, DeclaredChange, main, run_gate
+from evals.release_gate import (
+    Change,
+    Declarations,
+    DeclaredChange,
+    DisputeAnswer,
+    main,
+    run_gate,
+)
 from evals.run_evals import GOLDEN, PackPin
 from tests.packs import PACKS, release_test_pack
 
@@ -14,6 +21,9 @@ ACTIVE = PackPin(id="default", version="1.5.0")
 CANDIDATE = PackPin(id="default", version="1.6.0")
 # Decision and approval golden cases today: phase1 44, phase2 36, scenarios 117, approval 6.
 DECISION_CASES = 203
+# Dispute golden cases: disputes 28, disputes_refunds 3. Compared when both packs have
+# Dispute rules (from default@1.4.0).
+DISPUTE_CASES = 31
 
 
 def _candidate(tmp_path: Path, changes: dict[str, object]) -> Path:
@@ -28,7 +38,7 @@ def test_a_candidate_identical_to_the_active_pack_passes(tmp_path: Path) -> None
 
     assert verdict.passed
     assert verdict.changes == []
-    assert verdict.compared == DECISION_CASES
+    assert verdict.compared == DECISION_CASES + DISPUTE_CASES
 
 
 # INR 1,000 and up is high: phase2's allow-basic (INR 1,250, low on 1.5.0) steps up.
@@ -131,7 +141,7 @@ def test_a_new_golden_file_is_compared_without_wiring(tmp_path: Path) -> None:
     verdict = run_gate(packs, golden, ACTIVE, CANDIDATE)
 
     assert verdict.passed
-    assert verdict.compared == DECISION_CASES + 36  # phase2's cases, once more
+    assert verdict.compared == DECISION_CASES + DISPUTE_CASES + 36  # phase2's, once more
 
 
 def test_a_case_that_cant_be_decided_fails_the_gate_and_is_named(tmp_path: Path) -> None:
@@ -402,6 +412,157 @@ def test_a_declarations_file_changes_no_pack_hash(tmp_path: Path) -> None:
     assert before["1.5.0"].hash == real["packs"]["default"]["versions"]["1.5.0"]
 
 
+# --- Dispute cases ----------------------------------------------------------------------
+
+
+def _reason(name: str, **changes: object) -> dict[str, object]:
+    """`disputes.reasons.<name>` from default@1.5.0, with `changes`."""
+    pack = yaml.safe_load((PACKS / "default" / "1.5.0.yaml").read_text(encoding="utf-8"))
+    reason: dict[str, object] = pack["disputes"]["reasons"][name]
+    return {"disputes": {"reasons": {name: reason | changes}}}
+
+
+NOT_RECEIVED_NEW_VISA = _reason(
+    "not_received", network_codes={"visa": "13.9", "mastercard": "4855"}
+)
+DISPUTE_KEY = ("disputes.jsonl", "not-received")
+
+
+def test_a_changed_network_code_is_a_change_that_fails_undeclared(tmp_path: Path) -> None:
+    packs = _candidate(tmp_path, NOT_RECEIVED_NEW_VISA)
+
+    verdict = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE)
+
+    assert not verdict.passed
+    [change] = verdict.changes
+    assert (change.file, change.case_id) == DISPUTE_KEY
+    assert isinstance(change.active, DisputeAnswer)
+    assert isinstance(change.candidate, DisputeAnswer)
+    assert (change.active.visa_code, change.candidate.visa_code) == ("13.1", "13.9")
+    assert verdict.lower_strengths == []
+
+
+def test_a_declared_network_code_change_passes(tmp_path: Path) -> None:
+    packs = _candidate(tmp_path, NOT_RECEIVED_NEW_VISA)
+    [change] = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE).changes
+    _declarations_file(packs, [_declare(change, "Visa moved the code")])
+
+    verdict = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE, [_declare(change, "Visa moved it")])
+
+    assert verdict.passed
+    assert verdict.changes[0].declared
+    # Read back from the file, as the command does.
+    assert main(["--packs", str(packs), "--candidate", "default@1.6.0"]) == 0
+
+
+# Revoking the Mandate before capture now weakens an amount_differs claim too.
+AMOUNT_WEAKER = _reason(
+    "amount_differs",
+    weak_when=["amount_differs_from_decision", "decision_within_mandate"],
+)
+
+
+def test_a_lower_evidence_strength_fails_even_when_declared(tmp_path: Path) -> None:
+    packs = _candidate(tmp_path, AMOUNT_WEAKER)
+    changes = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE).changes
+
+    verdict = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE, [_declare(c) for c in changes])
+
+    assert verdict.undeclared == []
+    assert not verdict.passed
+    lower = {(c.file, c.case_id) for c in verdict.lower_strengths}
+    assert ("disputes.jsonl", "amount-at-quote") in lower
+    change = next(c for c in verdict.lower_strengths if c.case_id == "amount-at-quote")
+    assert isinstance(change.active, DisputeAnswer)
+    assert isinstance(change.candidate, DisputeAnswer)
+    assert (change.active.strength, change.candidate.strength) == ("strong", "weak")
+
+
+def test_the_command_names_each_lower_strength(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    packs = _candidate(tmp_path, AMOUNT_WEAKER)
+
+    assert main(["--packs", str(packs), "--candidate", "default@1.6.0"]) == 1
+    out = capsys.readouterr().out
+    assert "lower Evidence strength: disputes.jsonl amount-at-quote" in out
+    assert "[undeclared] disputes.jsonl amount-at-quote: strong 12.5/4834 [] -> weak" in out
+
+
+def test_dispute_cases_are_skipped_when_the_active_pack_has_no_dispute_rules() -> None:
+    # 1.3.0 has no Dispute rules; 1.4.0 is the first with them.
+    verdict = run_gate(
+        PACKS,
+        GOLDEN,
+        PackPin(id="default", version="1.3.0"),
+        PackPin(id="default", version="1.4.0"),
+    )
+
+    assert verdict.compared == DECISION_CASES
+    assert not any(c.file.startswith("disputes") for c in verdict.changes)
+    assert verdict.errors == []
+    # 1.4.0 is the first with rules: its own pinned Dispute file still covers it.
+    assert verdict.own_file_mismatches == []
+
+
+def test_dispute_cases_are_skipped_when_neither_pack_has_dispute_rules() -> None:
+    active = PackPin(id="default", version="1.3.0")
+
+    verdict = run_gate(PACKS, GOLDEN, active, active)
+
+    assert verdict.passed
+    assert verdict.compared == DECISION_CASES
+
+
+def test_a_candidate_that_drops_the_active_packs_dispute_rules_fails(tmp_path: Path) -> None:
+    packs = _candidate(tmp_path, {"disputes": None})
+
+    verdict = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE)
+
+    assert verdict.drops_dispute_rules
+    assert not verdict.passed
+    assert verdict.compared == DECISION_CASES
+
+
+def test_a_candidate_that_misses_a_label_in_its_own_dispute_file_fails(tmp_path: Path) -> None:
+    packs = _candidate(tmp_path, {})
+    golden = tmp_path / "golden"
+    shutil.copytree(GOLDEN, golden)
+    base = json.loads((GOLDEN / "disputes_base.json").read_text(encoding="utf-8"))
+    base["pack"] = {"id": "default", "version": "1.6.0"}
+    (golden / "disputes_candidate_base.json").write_text(json.dumps(base), encoding="utf-8")
+    rows = [json.loads(line) for line in (GOLDEN / "disputes.jsonl").read_text().splitlines()]
+    rows = [r for r in rows if r["id"] == "not-received"]
+    rows[0]["expected"]["strength"] = "strong"
+    (golden / "disputes_candidate.jsonl").write_text(json.dumps(rows[0]) + "\n")
+
+    verdict = run_gate(packs, golden, ACTIVE, CANDIDATE)
+
+    assert verdict.changes == []
+    assert not verdict.passed
+    assert [(m.file, m.case_id) for m in verdict.own_file_mismatches] == [
+        ("disputes_candidate.jsonl", "not-received")
+    ]
+
+
+def test_a_declaration_cant_mix_a_decision_answer_with_a_dispute_answer() -> None:
+    with pytest.raises(ValueError, match="kind"):
+        DeclaredChange.model_validate(
+            {
+                "file": "disputes.jsonl",
+                "case_id": "not-received",
+                "active": {"outcome": "allow", "risk_tier": "low", "reason_codes": []},
+                "candidate": {
+                    "strength": "mixed",
+                    "visa_code": "13.1",
+                    "mastercard_code": "4855",
+                    "missing": ["fulfilment_evidence"],
+                },
+                "reason": "mixed up",
+            }
+        )
+
+
 # --- The real repo ----------------------------------------------------------------------
 
 
@@ -413,7 +574,7 @@ def test_the_real_active_pack_against_itself_passes_with_no_changes() -> None:
 
     assert verdict.passed
     assert (verdict.changes, verdict.errors) == ([], [])
-    assert verdict.compared == DECISION_CASES
+    assert verdict.compared == DECISION_CASES + DISPUTE_CASES
 
 
 # --- The command ------------------------------------------------------------------------

@@ -90,12 +90,28 @@
           "type": "string"
         },
         "active": {
-          "$ref": "#/$defs/Answer",
-          "description": "The case's answer on the active pack"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Answer"
+            },
+            {
+              "$ref": "#/$defs/Expected"
+            }
+          ],
+          "description": "The case's answer on the active pack",
+          "title": "Active"
         },
         "candidate": {
-          "$ref": "#/$defs/Answer",
-          "description": "The case's answer on the candidate"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Answer"
+            },
+            {
+              "$ref": "#/$defs/Expected"
+            }
+          ],
+          "description": "The case's answer on the candidate",
+          "title": "Candidate"
         },
         "reason": {
           "minLength": 1,
@@ -111,6 +127,59 @@
         "reason"
       ],
       "title": "DeclaredChange",
+      "type": "object"
+    },
+    "Expected": {
+      "additionalProperties": false,
+      "description": "A Dispute case's label, and its answer in the Release gate.",
+      "properties": {
+        "strength": {
+          "enum": [
+            "strong",
+            "mixed",
+            "weak"
+          ],
+          "title": "Strength",
+          "type": "string"
+        },
+        "visa_code": {
+          "title": "Visa Code",
+          "type": "string"
+        },
+        "mastercard_code": {
+          "title": "Mastercard Code",
+          "type": "string"
+        },
+        "missing": {
+          "items": {
+            "enum": [
+              "decision_within_mandate",
+              "payer_intent_confirmed",
+              "intent_mismatch_approved",
+              "mandate_revoked_before_capture",
+              "mandate_active_at_decision",
+              "mandate_revoked_before_decision",
+              "amount_matches_decision",
+              "amount_differs_from_decision",
+              "within_quoted_total",
+              "no_duplicate_payment",
+              "duplicate_payment_found",
+              "fulfilment_evidence",
+              "credit_issued"
+            ],
+            "type": "string"
+          },
+          "title": "Missing",
+          "type": "array"
+        }
+      },
+      "required": [
+        "strength",
+        "visa_code",
+        "mastercard_code",
+        "missing"
+      ],
+      "title": "Expected",
       "type": "object"
     }
   },

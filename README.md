@@ -452,8 +452,8 @@ To change a value, release a new version:
 
 1. Copy the current file to the next version, for example `default/1.5.1.yaml`. Then edit `version` and the values.
 2. Run `uv run python -m core.policy.packs --hash policy_packs/default/1.5.1.yaml`, then add the printed hash under `versions` in the manifest. Point `active` at the new version.
-3. Run the Release gate: `uv run python -m evals.release_gate --candidate default@1.5.1`. It decides every Decision and approval golden case on the active pack and on yours, and lists each case whose answer changes, marked declared or undeclared.
-4. If a change is intended, declare it in `default/1.5.1.declared-changes.yaml`, next to the pack file, then run the gate again. The gate passes only when the changes it finds are exactly the ones declared. A loosening on a high-risk case fails even when declared.
+3. Run the Release gate: `uv run python -m evals.release_gate --candidate default@1.5.1`. It decides every Decision, approval and Dispute golden case on the active pack and on yours (Dispute cases only when both packs have Dispute rules), and lists each case whose answer changes, marked declared or undeclared.
+4. If a change is intended, declare it in `default/1.5.1.declared-changes.yaml`, next to the pack file, then run the gate again. The gate passes only when the changes it finds are exactly the ones declared. A loosening on a high-risk case, or a lower Evidence strength on a Dispute case, fails even when declared.
 5. Keep the old version. Replay needs every released pack.
 
 A declarations file lists each Declared change. It isn't part of the pack, so it changes no Pack hash:

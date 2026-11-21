@@ -243,11 +243,18 @@ The Policy pack version a change proposes to make active, which must pass the Re
 _Avoid_: New pack, draft pack, next pack
 
 **Release gate**:
-The check a Candidate pack must pass before it becomes active. It decides every Golden case on both the active pack and the candidate. It fails on any change in Outcome, Reason codes, Risk tier or Consent resolution that isn't a Declared change, on a Declared change that doesn't happen as declared, on any loosening of a case that is high on either pack, and when the candidate misses a label in its own golden files (ADR-0027).
+The check a Candidate pack must pass before it becomes active. It decides every Golden case on both the active pack and the candidate. Dispute cases are compared only when both packs have Dispute rules. It fails on:
+
+- any change that isn't a Declared change: in Outcome, Reason codes, Risk tier or Consent resolution, or for a Dispute case in Evidence strength, network reason codes or missing evidence;
+- a Declared change that doesn't happen as declared;
+- any loosening of a case that is high on either pack, and any lower Evidence strength, even when declared;
+- a candidate that drops the Dispute rules the active pack has;
+- a candidate that misses a label in its own golden files (ADR-0027).
+
 _Avoid_: Pack check, eval gate, regression test
 
 **Declared change**:
-A Golden case whose answer a Candidate pack is meant to change. It is one entry in the candidate's declarations file, `policy_packs/<id>/<version>.declared-changes.yaml`, and gives the golden file, the case id, the answer on the active pack, the answer on the candidate (each an Outcome, Reason codes, Risk tier and, for an approval case, the Consent resolution), and a reason. The Release gate fails when a declared change doesn't happen or returns a different answer. The file isn't hashed into the pack, and once released it can't be changed (ADR-0028).
+A Golden case whose answer a Candidate pack is meant to change. It is one entry in the candidate's declarations file, `policy_packs/<id>/<version>.declared-changes.yaml`, and gives the golden file, the case id, the answer on the active pack, the answer on the candidate (for a Decision or approval case, the Outcome, Reason codes, Risk tier and any Consent resolution; for a Dispute case, the Evidence strength, the Visa and Mastercard codes and the missing evidence), and a reason. The Release gate fails when a declared change doesn't happen or returns a different answer. The file isn't hashed into the pack, and once released it can't be changed (ADR-0028).
 _Avoid_: Expected diff, waiver, exception
 
 ## Evidence
