@@ -89,12 +89,19 @@ def merchant_new_pack(root: Path, version: str = "1.0.1") -> Path:
     )
 
 
-def phase_1_packs(root: Path) -> Path:
-    """A copy of policy_packs/ with default@1.0.0 active, for tests of Phase 1 rules
-    (caps, Spent this month) that shouldn't also have to satisfy the Signals."""
+def released_packs(root: Path, active: str) -> Path:
+    """A copy of policy_packs/ with the released `default@<active>` made active."""
     shutil.copytree(PACKS, root, dirs_exist_ok=True)
     manifest_path = root / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["packs"]["default"]["active"] = "1.0.0"
+    if active not in manifest["packs"]["default"]["versions"]:
+        raise ValueError(f"default@{active} is not released")
+    manifest["packs"]["default"]["active"] = active
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return root
+
+
+def phase_1_packs(root: Path) -> Path:
+    """A copy of policy_packs/ with default@1.0.0 active, for tests of Phase 1 rules
+    (caps, Spent this month) that shouldn't also have to satisfy the Signals."""
+    return released_packs(root, "1.0.0")

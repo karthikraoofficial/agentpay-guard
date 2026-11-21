@@ -93,6 +93,9 @@ jobs:
       - name: Consent workflow on Temporal (worker killed mid-wait, resumed by signal and timer)
         run: uv run pytest -m workflow -o addopts=""
 
+      - name: Golden parity (every Decision golden case through MCP and the API, same answer)
+        run: uv run pytest -m parity -o addopts=""
+
   web:
     runs-on: ubuntu-latest
     defaults:
