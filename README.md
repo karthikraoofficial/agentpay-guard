@@ -184,6 +184,13 @@ claude mcp add agentpay-guard \
 | --- | --- | --- |
 | `request_decision` | `POST /v1/decisions` | Ask before paying: an Agent payment request plus an `idempotency_key`. Returns the API's Decision: allow, step_up (a person must approve; don't pay yet) or block, with its Reason codes |
 | `get_decision` | `GET /v1/decisions/{id}` | Read a Decision again; on a step_up, `consent.status` shows whether the Payer has answered |
+| `get_consent_request` | `GET /v1/consent-requests/{id}` | Check a step_up's Consent request: `pending`, `approved`, `declined`, `expired` or `blocked` |
+
+On a step_up, the Agent waits for the Payer:
+
+1. `request_decision` answers `step_up` with a `consent_request_id`, and its text tells the Agent that a person must approve it and not to pay, retry or work around it.
+2. Your back end asks the Payer, and resolves the Consent request with your `consent` key (`POST /v1/consent-requests/{id}/approve` or `/decline`), or sends the Payer a Consent link. The Agent can't: no tool does it, and its `decide` key gets `403 INSUFFICIENT_SCOPE` from those endpoints.
+3. The Agent checks `get_consent_request` until the status is no longer `pending`. On `approved`, `get_decision` gives `payable_until`, and the Agent may pay before then. On `declined`, `expired` or `blocked`, it doesn't pay.
 
 No tool approves, declines or links a Consent request, or changes a Mandate, Agent or Payer. An API error comes back as a tool error that starts with the API's code, such as `MANDATE_NOT_FOUND: ...`. Each call is logged to stderr with its tool name, HTTP status, Outcome and latency, never the key or the request.
 

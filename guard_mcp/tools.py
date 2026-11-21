@@ -61,8 +61,10 @@ class Tool:
 
 STEP_UP_NOTE = (
     "step_up: a person must approve this payment before you may pay. Don't pay, retry or "
-    "try another way. Wait, then read this Decision again with get_decision: "
-    "consent.status shows whether the Payer has approved or declined."
+    "try another way, and don't ask for a new Decision to get round it. Nothing you can call "
+    "approves it: only the Payer can. Wait, then check step_up.consent_request_id with "
+    "get_consent_request. Once it is approved, read the Decision with get_decision for "
+    "payable_until, and pay before then."
 )
 
 TOOLS: tuple[Tool, ...] = (
@@ -90,5 +92,19 @@ TOOLS: tuple[Tool, ...] = (
         method="GET",
         path="/v1/decisions/{decision_id}",
         path_params=("decision_id",),
+    ),
+    Tool(
+        name="get_consent_request",
+        description=(
+            "Check whether the Payer has answered a step_up, by the consent_request_id the "
+            "step_up gave you. status is pending (not answered yet: wait and check again "
+            "later), approved (read the Decision with get_decision for payable_until, then "
+            "you may pay), declined or expired (don't pay), or blocked (the Mandate no "
+            "longer allows the payment: don't pay). Only the Payer can approve; no tool here "
+            "can."
+        ),
+        method="GET",
+        path="/v1/consent-requests/{consent_request_id}",
+        path_params=("consent_request_id",),
     ),
 )
