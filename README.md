@@ -195,6 +195,8 @@ On a step_up, the Agent waits for the Payer:
 2. Your back end asks the Payer, and resolves the Consent request with your `consent` key (`POST /v1/consent-requests/{id}/approve` or `/decline`), or sends the Payer a Consent link. The Agent can't: no tool does it, and its `decide` key gets `403 INSUFFICIENT_SCOPE` from those endpoints.
 3. The Agent checks `get_consent_request` until the status is no longer `pending`. On `approved`, `get_decision` gives `payable_until`, and the Agent may pay before then. On `declined`, `expired` or `blocked`, it doesn't pay.
 
+The tools can't drift from the API: CI's golden parity step sets up every Decision and approval golden case through the API and decides it through `request_decision` and through `POST /v1/decisions`, and fails unless the Outcome, Reason codes, pack version and Pack hash match.
+
 No tool approves, declines or links a Consent request, or changes a Mandate, Agent or Payer. An API error comes back as a tool error that starts with the API's code, such as `MANDATE_NOT_FOUND: ...`. Each call is logged to stderr with its tool name, HTTP status, Outcome and latency, never the key or the request.
 
 ## Checks (what CI runs on every PR)
@@ -206,6 +208,7 @@ uv run alembic upgrade head
 uv run pytest
 uv run python -m evals.run_evals
 uv run pytest -m perf -s -o addopts=""   # latency budgets
+uv run pytest -m parity -o addopts=""    # golden parity: each Decision golden case through MCP and the API
 bash infra/smoke-prod.sh                 # the production stack, /healthz through Caddy (CI's deploy job)
 ```
 

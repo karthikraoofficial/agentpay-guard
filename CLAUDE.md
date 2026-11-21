@@ -44,6 +44,7 @@ Run from the repo root. These are the same commands CI runs.
 - Live dispute narrative eval (real model, ~$0.12 a run, by hand and before each release, not CI): `uv run python -m evals.run_dispute_evals` (exit 1 if an accepted narrative follows an injection)
 - Latency budgets: `uv run pytest -m perf -s -o addopts=""` (skipped by the default `pytest` run; CI runs them)
 - Consent workflow on Temporal: `uv run pytest -m workflow -o addopts=""` (downloads Temporal's test and dev servers on first use; skipped by the default `pytest` run; CI runs it)
+- Golden parity (#249): `uv run pytest -m parity -o addopts=""` sets up every Decision and approval golden case through the API, twice, and decides it through the MCP server's `request_decision` and through POST /v1/decisions; fails if the two answers differ or a case can't be set up (except the named `ENGINE_ONLY` cases in `tests/mcp/test_golden_parity.py`, null Signals the API never sends). About 2 minutes, on the memory store; skipped by the default `pytest` run; CI runs it
 - Tests: `uv run pytest` (needs local infra up and `.env`; tests create their own `<database>_test`)
 - End to end on the mock rail (part of `pytest`), an allow to a captured Payment that the Tenant then refunds, and that Payment disputed to a signed-off Evidence pack that passes `verify-pack`: `uv run pytest tests/api/test_end_to_end.py`; the real Razorpay half is the runbook in the README
 - Contract tests against real vendor APIs: `uv run pytest -m contract -o addopts=""` (not in CI; skip without the vendor key)
