@@ -19,6 +19,7 @@ from adapters.webhooks.secret_box import secret_box as build_secret_box
 from api import errors
 from api.deps import Store
 from api.routes import (
+    api_keys,
     consent_links,
     consent_requests,
     decisions,
@@ -96,6 +97,7 @@ def create_app(
         app.state.telemetry,
     )
     errors.install(app)
+    app.include_router(api_keys.router)
     app.include_router(parties.router)
     app.include_router(mandates.router)
     app.include_router(decisions.router)

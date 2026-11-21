@@ -23,6 +23,7 @@ from core.domain.parties import (
     Agent,
     AgentId,
     AgentStatus,
+    ApiKeyDetails,
     ApiKeyGrant,
     ApiKeyScope,
     Payer,
@@ -484,6 +485,7 @@ class InMemoryUnitOfWork:
     def __init__(self) -> None:
         self._tenants: dict[TenantId, _TenantData] = {}
         self._keys: dict[str, ApiKeyGrant] = {}
+        self._key_details: dict[str, ApiKeyDetails] = {}
         self._claims = _Claims()
         self._commit = threading.Lock()
         # (tenant_id, purpose, UTC day) -> model calls counted (ADR-0020). Kept outside
@@ -517,10 +519,20 @@ class InMemoryUnitOfWork:
         if tenant_id not in self._tenants:
             return False
         self._keys[key_hash] = ApiKeyGrant(tenant_id=tenant_id, scopes=frozenset(scopes))
+        self._key_details[key_hash] = ApiKeyDetails(
+            tenant_id=tenant_id,
+            key_prefix=key_prefix,
+            scopes=frozenset(scopes),
+            created_at=created_at,
+        )
         return True
 
     def api_key(self, key_hash: str) -> ApiKeyGrant | None:
         return self._keys.get(key_hash)
+
+    def api_key_details(self, tenant_id: TenantId, key_hash: str) -> ApiKeyDetails | None:
+        details = self._key_details.get(key_hash)
+        return details if details and details.tenant_id == tenant_id else None
 
     def consent_link(self, token_hash: str) -> ConsentLink | None:
         for data in list(self._tenants.values()):

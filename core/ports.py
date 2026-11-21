@@ -41,6 +41,7 @@ from core.domain.parties import (
     Agent,
     AgentId,
     AgentStatus,
+    ApiKeyDetails,
     ApiKeyGrant,
     ApiKeyScope,
     Payer,
@@ -547,6 +548,10 @@ class TenantDirectory(Protocol):
         ...
 
     def api_key(self, key_hash: str) -> ApiKeyGrant | None: ...
+
+    def api_key_details(self, tenant_id: TenantId, key_hash: str) -> ApiKeyDetails | None:
+        """A key's non-secret details, read within its own Tenant (key introspection)."""
+        ...
 
     def consent_link(self, token_hash: str) -> ConsentLink | None:
         """The link a token hash names, from any Tenant: like an API key, a link is how a
