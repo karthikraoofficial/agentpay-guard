@@ -74,6 +74,8 @@ async def test_a_decide_key_is_accepted(api: Api) -> None:
         "check_intent",
         "get_decision",
         "get_consent_request",
+        "create_payment",
+        "get_payment",
     }
 
 

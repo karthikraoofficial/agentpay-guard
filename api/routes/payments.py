@@ -48,7 +48,13 @@ from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.mandates import MandateId
 from core.domain.money import Money
 from core.domain.parties import new_id
-from core.domain.payments import Payment, PaymentId, PaymentStatus, payment_refusal
+from core.domain.payments import (
+    Payment,
+    PaymentCreate,
+    PaymentId,
+    PaymentStatus,
+    payment_refusal,
+)
 from core.domain.rails import RailName, RailToken
 from core.domain.refunds import (
     REASON_MAX,
@@ -63,14 +69,6 @@ from core.refunds import record_refund, request_refund
 
 router = APIRouter(prefix="/v1/payments", tags=["payments"])
 log = logging.getLogger(__name__)
-
-
-class PayBody(BaseModel):
-    """Only the Decision: the amount and the instrument come from it and its Mandate."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    decision_id: DecisionId
 
 
 class RefundBody(BaseModel):
@@ -139,7 +137,7 @@ def _refund_out(refund: Refund) -> RefundOut:
 @router.post("", status_code=202, response_model=PaymentOut)
 def create_payment(
     request: Request,
-    body: PayBody,
+    body: PaymentCreate,
     tenant: DecideTenant,
     store: StoreDep,
     clock: ClockDep,

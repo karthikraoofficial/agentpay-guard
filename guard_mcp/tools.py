@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from core.domain.decisions import AgentPaymentRequest
 from core.domain.intents import IntentCreate
+from core.domain.payments import PaymentCreate
 
 IDEMPOTENCY_KEY = "idempotency_key"
 
@@ -122,5 +123,30 @@ TOOLS: tuple[Tool, ...] = (
         method="GET",
         path="/v1/consent-requests/{consent_request_id}",
         path_params=("consent_request_id",),
+    ),
+    Tool(
+        name="create_payment",
+        description=(
+            "Pay a Decision you may pay: an allow, or a step_up the Payer has approved, "
+            "before its payable_until. Pass only its decision_id: the amount and the payment "
+            "method come from the Decision and its Mandate. A Decision is paid at most once. "
+            "The answer is the Payment: keep its payment_id and follow it with get_payment. "
+            "The idempotency key makes a retry safe: reuse it when you retry this payment "
+            "after a timeout or error, so it is never made twice."
+        ),
+        method="POST",
+        path="/v1/payments",
+        body=PaymentCreate,
+    ),
+    Tool(
+        name="get_payment",
+        description=(
+            "Read a Payment you made, by its payment_id. status is scheduled (the card is "
+            "debited after the Payer's pre-debit notice period: check again later), captured "
+            "(paid), or failed (not paid; failure_code says why)."
+        ),
+        method="GET",
+        path="/v1/payments/{payment_id}",
+        path_params=("payment_id",),
     ),
 )

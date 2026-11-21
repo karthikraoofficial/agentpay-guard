@@ -37,6 +37,15 @@ _MANDATE_REFUSALS: dict[MandateStatus, PaymentRefusal] = {
 }
 
 
+class PaymentCreate(BaseModel):
+    """The body of POST /v1/payments, and the MCP server's `create_payment` input: only
+    the Decision. The amount and the instrument come from it and its Mandate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision_id: DecisionId
+
+
 class Payment(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
