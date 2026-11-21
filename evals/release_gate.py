@@ -379,7 +379,11 @@ def main(argv: list[str] | None = None) -> int:
     except (PackError, DeclarationsError) as e:
         print(f"release gate: {e}", file=sys.stderr)
         return 2
+    print_report(active, candidate, verdict)
+    return 0 if verdict.passed else 1
 
+
+def print_report(active: PackPin, candidate: PackPin, verdict: Verdict) -> None:
     print(f"Release gate: {active.id}@{active.version} -> {candidate.id}@{candidate.version}")
     for c in verdict.changes:
         mark = "[declared]" if c.declared else "[undeclared]"
@@ -418,7 +422,63 @@ def main(argv: list[str] | None = None) -> int:
     print(f"lower Evidence strengths: {len(verdict.lower_strengths)}")
     print(f"step-up rate: {rate.active:.1%} -> {rate.candidate:.1%}")
     print("PASS" if verdict.passed else "FAIL")
-    return 0 if verdict.passed else 1
+
+
+def summary_markdown(active: PackPin, candidate: PackPin, verdict: Verdict) -> str:
+    """The verdict as Markdown, for a CI job summary."""
+    rate = verdict.step_up_rate
+    rows = [
+        ("Compared", verdict.compared),
+        ("Changed", len(verdict.changes)),
+        ("Declared", len(verdict.changes) - len(verdict.undeclared)),
+        ("Undeclared", len(verdict.undeclared)),
+        ("Wrong declarations", len(verdict.wrong_declarations)),
+        ("High-risk loosenings", len(verdict.high_risk_loosenings)),
+        ("Lower Evidence strengths", len(verdict.lower_strengths)),
+        ("Own golden labels missed", len(verdict.own_file_mismatches)),
+        ("Cases that couldn't be decided", len(verdict.errors)),
+        ("Step-up rate", f"{rate.active:.1%} → {rate.candidate:.1%}"),
+    ]
+    lines = [
+        f"### Release gate: {active.id}@{active.version} → {candidate.id}@{candidate.version}"
+        f" — {'PASS' if verdict.passed else 'FAIL'}",
+        "",
+        "| | |",
+        "|---|---|",
+        *(f"| {name} | {value} |" for name, value in rows),
+    ]
+    if verdict.drops_dispute_rules:
+        lines += ["", "The candidate drops the active pack's Dispute rules."]
+    if verdict.changes:
+        lines += [
+            "",
+            "| File | Case | Active | Candidate | |",
+            "|---|---|---|---|---|",
+        ]
+        for c in verdict.changes:
+            flags = ["declared" if c.declared else "**undeclared**"]
+            if c in verdict.high_risk_loosenings:
+                flags.append("**high-risk loosening**")
+            if c.lowers_strength:
+                flags.append("**lower Evidence strength**")
+            lines.append(
+                f"| {c.file} | {c.case_id} | {_answer(c.active)} | {_answer(c.candidate)} "
+                f"| {', '.join(flags)} |"
+            )
+    for heading, items in (
+        (
+            "Wrong declarations",
+            [f"{w.declared.file} {w.declared.case_id}" for w in verdict.wrong_declarations],
+        ),
+        (
+            "Own golden labels missed",
+            [f"{m.file} {m.case_id}" for m in verdict.own_file_mismatches],
+        ),
+        ("Cases that couldn't be decided", verdict.errors),
+    ):
+        if items:
+            lines += ["", f"**{heading}**", "", *(f"- {i}" for i in items)]
+    return "\n".join(lines) + "\n"
 
 
 if __name__ == "__main__":

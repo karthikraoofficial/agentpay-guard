@@ -58,6 +58,14 @@ jobs:
           git fetch --no-tags --depth=1 origin "$BASE_REF"
           uv run python -m evals.released_packs FETCH_HEAD
 
+      - name: Release gate (pull requests that add a pack version or change the Manifest)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          uv run python -m evals.gate_ci FETCH_HEAD --summary "$GITHUB_STEP_SUMMARY"
+
       - name: Collector configs are valid (console only, with the Langfuse overlay, and with both overlays)
         run: |
           image=otel/opentelemetry-collector-contrib:0.165.0
