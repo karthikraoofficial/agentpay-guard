@@ -10,6 +10,8 @@ VENDOR_MODULES = frozenset(
         "anthropic",
         "fastapi",
         "httpx",
+        "mcp",
+        "mcp_types",
         "openai",
         "opentelemetry",
         "psycopg",
@@ -156,6 +158,9 @@ VENDOR_HOMES = {
     "opentelemetry": "adapters/otel",
     # The workflow, its activities, the Workflow port adapter and the worker.
     "temporalio": "workflows",
+    # The MCP server, a driving adapter beside the API (#242).
+    "mcp": "guard_mcp",
+    "mcp_types": "guard_mcp",
 }
 
 
@@ -174,4 +179,20 @@ def vendors_outside_their_adapter(root: Path, code_dirs: list[str]) -> list[Viol
                 home = VENDOR_HOMES.get(name.split(".")[0])
                 if home is not None and not rel.as_posix().startswith(home + "/"):
                     found.append(Violation(rel, node.lineno, f"imports {name} outside {home}"))
+    return found
+
+
+def imports_from(root: Path, code_dirs: list[str], forbidden: tuple[str, ...]) -> list[Violation]:
+    """Every import, from a module under `code_dirs`, of a module in `forbidden` or below it."""
+    found: list[Violation] = []
+    for path in python_files(root, *code_dirs):
+        for node in ast.walk(_tree(path)):
+            names: list[str] = []
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                names = [node.module]
+            for name in names:
+                if any(name == f or name.startswith(f + ".") for f in forbidden):
+                    found.append(Violation(path.relative_to(root), node.lineno, f"imports {name}"))
     return found

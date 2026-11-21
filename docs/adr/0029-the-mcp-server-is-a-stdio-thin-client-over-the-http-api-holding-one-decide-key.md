@@ -1,0 +1,17 @@
+# The MCP server is a stdio thin client over the HTTP API, holding exactly one decide key
+
+An Agent that runs in an MCP host (Claude Desktop, Claude Code, an agent framework) asks AgentPay Guard for a Decision through our MCP server, `python -m guard_mcp` (#242, #245). The host launches it as a local process over stdio. Each tool is one HTTP call to an existing API endpoint, made with the one API key the server holds as its Bearer token. The server checks that key at startup with `GET /v1/api-keys/self`, and exits before serving anything unless the key holds exactly the `decide` scope.
+
+We considered two other shapes. Running the engine in-process, with the server opening the store and the Policy pack itself, would skip one network hop. But it would need the database and the API's settings in every Agent's host, and would copy the API's auth, idempotency, Tenant and Audit rules into a second front door that could drift from the first. Mounting an MCP endpoint inside the API keeps one process, but it needs a hosted transport and MCP auth (OAuth), which are their own project. It also puts Agent-facing protocol code next to the Tenant-facing routes. A thin client gets parity by construction: a Decision through MCP is a Decision through the API, with the same Audit record and Replay. The cost is one local hop.
+
+The key guard is the part most likely to surprise. A key with `consent` would let a prompt-injected Agent approve its own step_up, and `manage` would let it widen its own Mandate (ADR-0011). So the server refuses any key that holds more than `decide`, including keys from before scopes existed, which hold all three. Holding a key that could do more would be a mistake no tool list can undo.
+
+## Consequences
+
+- **It's a driving adapter, so it isn't under `adapters/`.** `guard_mcp/` sits beside `api/`, registered in the buildviz config. It imports `core.domain` (for the request models) and `core.settings`, and nothing from `core.policy`, `api`, `adapters`, `workflows`, `agents` or `evals`. An architecture test checks this, and that `core/` never imports it. The MCP SDK (`mcp`, `mcp_types`) is imported only here.
+- **Its settings are separate from the API's.** `McpSettings` (`AGENTPAY_MCP_API_BASE_URL`, `AGENTPAY_MCP_API_KEY`, `AGENTPAY_MCP_HTTP_TIMEOUT_SECONDS`) has none of the database, Anthropic or rail settings that `Settings` checks at startup.
+- **Tool input schemas come from the API's request models.** `request_decision` publishes `AgentPaymentRequest`'s JSON schema plus a required `idempotency_key`, which is sent as the `Idempotency-Key` header. No tool takes a Tenant id: the key names the Tenant.
+- **No tool reaches a `consent` or `manage` route.** An architecture test resolves every registered tool to its FastAPI route and fails if that route depends on either scope check.
+- **API errors are tool errors that start with the API's code** (`MANDATE_NOT_FOUND: ...`), with the problem body as structured content. A step_up's text tells the Agent that a person must approve it, and not to pay, retry or work around it.
+- **Each call is logged to stderr as one line** with the tool name, HTTP status, Outcome and latency. The key, the arguments and the response body are never logged. stdout is the MCP channel.
+- **A hosted Streamable-HTTP transport and OAuth are out of scope.** Adding them later means a new decision about where the key lives.

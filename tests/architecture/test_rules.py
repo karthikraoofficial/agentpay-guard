@@ -6,6 +6,7 @@ from pathlib import Path
 
 from tests.architecture.rules import (
     environment_reads,
+    imports_from,
     impure_engine,
     model_gateway_in_policy,
     vendor_imports,
@@ -14,7 +15,19 @@ from tests.architecture.rules import (
 
 REPO = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).parent / "fixtures"
-CODE_DIRS = ["api", "core", "adapters", "workflows", "agents", "evals", "migrations"]
+CODE_DIRS = [
+    "api",
+    "core",
+    "adapters",
+    "workflows",
+    "agents",
+    "evals",
+    "migrations",
+    "guard_mcp",
+]
+# The MCP server is a thin client over the HTTP API (#242): it never decides or stores
+# anything itself, so it imports none of these.
+MCP_FORBIDDEN = ("core.policy", "api", "adapters", "workflows", "agents", "evals")
 SETTINGS = "core/settings.py"
 
 
@@ -94,4 +107,23 @@ def test_vendor_home_rule_flags_imports_outside_the_adapter() -> None:
         ("api/main.py", "imports opentelemetry.sdk.trace outside adapters/otel"),
         ("adapters/stray.py", "imports opentelemetry.trace outside adapters/otel"),
         ("api/llm.py", "imports anthropic outside adapters/claude"),
+    }
+
+
+def test_the_mcp_server_is_a_thin_client_and_core_never_imports_it() -> None:
+    violations = imports_from(REPO, ["guard_mcp"], MCP_FORBIDDEN)
+    violations += imports_from(REPO, ["core"], ("guard_mcp",))
+    assert violations == [], _report(violations)
+
+
+def test_the_mcp_boundary_rule_flags_each_forbidden_import() -> None:
+    root = FIXTURES / "mcp_boundary"
+    found = {
+        (v.path.as_posix(), v.detail) for v in imports_from(root, ["guard_mcp"], MCP_FORBIDDEN)
+    }
+    found |= {(v.path.as_posix(), v.detail) for v in imports_from(root, ["core"], ("guard_mcp",))}
+    assert found == {
+        ("guard_mcp/server.py", "imports core.policy.engine"),
+        ("guard_mcp/server.py", "imports api.deps"),
+        ("core/hook.py", "imports guard_mcp.tools"),
     }
