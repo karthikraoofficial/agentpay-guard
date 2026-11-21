@@ -2,7 +2,9 @@
 
 Every Decision, approval and Dispute golden case is decided twice, on the active pack and
 on the candidate, whichever pack its file is pinned to, and the two answers are compared.
-Dispute cases are compared only when both packs have Dispute rules (#234). The
+Dispute cases are compared only when both packs have Dispute rules (#234). The pack
+windows the API reads (Consent TTL, Payment window, Refund window), which no golden answer
+shows, are compared directly (#259). The
 labels play no part: changes earlier releases made on purpose are already in the active
 pack's answers, so only what the candidate changes shows up (ADR-0027).
 
@@ -16,7 +18,7 @@ import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
@@ -69,20 +71,60 @@ class DeclaredChange(BaseModel):
         return self
 
 
+# The pack windows the API reads, named by their pack field and in its unit, with each
+# window's legacy default applied for packs that don't set it.
+WindowName = Literal["consent_ttl_seconds", "payment_window_seconds", "refund_window_days"]
+# A longer one keeps an allow or approval usable for longer. The Refund window has no
+# looser direction: a change of it only needs declaring.
+_LONGER_LOOSENS: frozenset[str] = frozenset({"consent_ttl_seconds", "payment_window_seconds"})
+
+
+def _windows(pack: PolicyPack) -> dict[WindowName, int]:
+    return {
+        "consent_ttl_seconds": int(pack.consent_ttl.total_seconds()),
+        "payment_window_seconds": int(pack.payment_window.total_seconds()),
+        "refund_window_days": pack.refund_window.days,
+    }
+
+
+class DeclaredWindow(BaseModel):
+    """A pack window the candidate is meant to change, and why."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    window: WindowName
+    active: int = Field(gt=0, description="The window on the active pack, in its field's unit")
+    candidate: int = Field(gt=0, description="The window on the candidate, in its field's unit")
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+    @model_validator(mode="after")
+    def _is_a_change(self) -> Self:
+        if self.active == self.candidate:
+            raise ValueError(f"{self.window}: the same value on both packs is not a change")
+        return self
+
+
 class Declarations(BaseModel):
     """A Candidate pack's declarations file: every change it makes on purpose."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    changes: list[DeclaredChange] = Field(min_length=1)
+    changes: list[DeclaredChange] = []
+    windows: list[DeclaredWindow] = []
 
     @model_validator(mode="after")
-    def _each_case_once(self) -> Self:
+    def _each_once(self) -> Self:
+        if not (self.changes or self.windows):
+            raise ValueError("a declarations file declares at least one change")
         seen: set[tuple[str, str]] = set()
         for d in self.changes:
             if (d.file, d.case_id) in seen:
                 raise ValueError(f"{d.file} {d.case_id} is declared more than once")
             seen.add((d.file, d.case_id))
+        names = [w.window for w in self.windows]
+        for name in names:
+            if names.count(name) > 1:
+                raise ValueError(f"{name} is declared more than once")
         return self
 
 
@@ -94,15 +136,16 @@ def declarations_path(pack_root: Path, pin: PackPin) -> Path:
     return pack_root / pin.id / f"{pin.version}.declared-changes.yaml"
 
 
-def load_declarations(pack_root: Path, pin: PackPin) -> list[DeclaredChange]:
+def load_declarations(pack_root: Path, pin: PackPin) -> list[DeclaredChange | DeclaredWindow]:
     """The candidate's Declared changes; none when it has no declarations file."""
     path = declarations_path(pack_root, pin)
     if not path.exists():
         return []
     try:
-        return Declarations.model_validate(yaml.safe_load(path.read_text(encoding="utf-8"))).changes
+        d = Declarations.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
     except (OSError, yaml.YAMLError, ValueError) as e:  # pydantic's ValidationError included
         raise DeclarationsError(f"{path} could not be loaded: {e}") from e
+    return [*d.changes, *d.windows]
 
 
 def write_schema(pack_root: Path) -> Path:
@@ -170,6 +213,33 @@ class WrongDeclaration(BaseModel):
     candidate: CaseAnswer | None
 
 
+class Window(BaseModel):
+    """A pack window the API reads, on each pack."""
+
+    window: WindowName
+    active: int
+    candidate: int
+    # True when a declared window names it with these exact values.
+    declared: bool = False
+
+    @property
+    def changed(self) -> bool:
+        return self.active != self.candidate
+
+    @property
+    def loosens(self) -> bool:
+        """Longer, for a window that keeps an allow or approval usable (#259)."""
+        return self.window in _LONGER_LOOSENS and self.candidate > self.active
+
+
+class WrongWindowDeclaration(BaseModel):
+    """A declared window whose values don't match the two packs'."""
+
+    declared: DeclaredWindow
+    active: int
+    candidate: int
+
+
 class StepUpRate(BaseModel):
     """Share of decision-stage cases that step up, on each pack. Approval cases aren't
     counted, as in the Eval report."""
@@ -183,6 +253,9 @@ class Verdict(BaseModel):
     changes: list[Change]
     step_up_rate: StepUpRate
     wrong_declarations: list[WrongDeclaration] = []
+    # Every pack window, changed or not.
+    windows: list[Window] = []
+    wrong_window_declarations: list[WrongWindowDeclaration] = []
     # The active pack has Dispute rules and the candidate has none.
     drops_dispute_rules: bool = False
     own_file_mismatches: list[LabelMismatch] = []
@@ -192,6 +265,15 @@ class Verdict(BaseModel):
     @property
     def undeclared(self) -> list[Change]:
         return [c for c in self.changes if not c.declared]
+
+    @property
+    def window_changes(self) -> list[Window]:
+        return [w for w in self.windows if w.changed]
+
+    @property
+    def window_loosenings(self) -> list[Window]:
+        """Flagged for review; they pass when declared."""
+        return [w for w in self.window_changes if w.loosens]
 
     @property
     def high_risk_loosenings(self) -> list[Change]:
@@ -208,6 +290,8 @@ class Verdict(BaseModel):
         return not (
             self.undeclared
             or self.wrong_declarations
+            or any(not w.declared for w in self.window_changes)
+            or self.wrong_window_declarations
             or self.drops_dispute_rules
             or self.high_risk_loosenings
             or self.lower_strengths
@@ -221,7 +305,7 @@ def run_gate(
     golden: Path,
     active: PackPin,
     candidate: PackPin,
-    declared: Sequence[DeclaredChange] = (),
+    declared: Sequence[DeclaredChange | DeclaredWindow] = (),
 ) -> Verdict:
     """Decide every Decision, approval and Dispute golden case on both packs. The verdict
     passes when the changes are exactly the `declared` ones, none is a high-risk loosening
@@ -235,14 +319,15 @@ def run_gate(
             run.decision_file(path, before, after)
         elif path.stem.startswith("disputes"):
             run.dispute_file(path, before, after)
+    cases = [d for d in declared if isinstance(d, DeclaredChange)]
     wrong: list[WrongDeclaration] = []
-    for d in declared:
+    for d in cases:
         was_now = run.answers.get((d.file, d.case_id))
         if was_now == (d.active, d.candidate):
             continue
         actual = was_now or (None, None)
         wrong.append(WrongDeclaration(declared=d, active=actual[0], candidate=actual[1]))
-    matched = {(d.file, d.case_id) for d in declared} - {
+    matched = {(d.file, d.case_id) for d in cases} - {
         (w.declared.file, w.declared.case_id) for w in wrong
     }
     changes = [
@@ -250,6 +335,9 @@ def run_gate(
         for (f, i), (was, now) in run.answers.items()
         if was != now
     ]
+    windows, wrong_windows = _compare_windows(
+        before, after, [d for d in declared if isinstance(d, DeclaredWindow)]
+    )
     rate = StepUpRate(
         active=run.stepped_up[0] / run.decisions if run.decisions else 0.0,
         candidate=run.stepped_up[1] / run.decisions if run.decisions else 0.0,
@@ -259,10 +347,28 @@ def run_gate(
         changes=changes,
         step_up_rate=rate,
         wrong_declarations=wrong,
+        windows=windows,
+        wrong_window_declarations=wrong_windows,
         drops_dispute_rules=before.disputes is not None and after.disputes is None,
         own_file_mismatches=run.own,
         errors=run.errors,
     )
+
+
+def _compare_windows(
+    before: PolicyPack, after: PolicyPack, declared: list[DeclaredWindow]
+) -> tuple[list[Window], list[WrongWindowDeclaration]]:
+    was, now = _windows(before), _windows(after)
+    by_name = {d.window: d for d in declared}
+    windows: list[Window] = []
+    wrong: list[WrongWindowDeclaration] = []
+    for name in was:
+        d = by_name.get(name)
+        matches = d is not None and (d.active, d.candidate) == (was[name], now[name])
+        if d is not None and not matches:
+            wrong.append(WrongWindowDeclaration(declared=d, active=was[name], candidate=now[name]))
+        windows.append(Window(window=name, active=was[name], candidate=now[name], declared=matches))
+    return windows, wrong
 
 
 class _Run:
@@ -399,6 +505,11 @@ def print_report(active: PackPin, candidate: PackPin, verdict: Verdict) -> None:
             f"  wrong declaration: {d.file} {d.case_id}: declared "
             f"{_answer(d.active)} -> {_answer(d.candidate)}, got {got}"
         )
+    for ww in verdict.wrong_window_declarations:
+        print(
+            f"  wrong declaration: {ww.declared.window}: declared {ww.declared.active} -> "
+            f"{ww.declared.candidate}, got {ww.active} -> {ww.candidate}"
+        )
     for c in verdict.high_risk_loosenings:
         print(f"  high-risk loosening: {c.file} {c.case_id}")
     for c in verdict.lower_strengths:
@@ -420,6 +531,13 @@ def print_report(active: PackPin, candidate: PackPin, verdict: Verdict) -> None:
     print(f"wrong declarations: {len(verdict.wrong_declarations)}")
     print(f"high-risk loosenings: {len(verdict.high_risk_loosenings)}")
     print(f"lower Evidence strengths: {len(verdict.lower_strengths)}")
+    print("windows:")
+    for win in verdict.windows:
+        mark = ""
+        if win.changed:
+            mark = "[declared] " if win.declared else "[undeclared] "
+        note = " (longer: a loosening)" if win.loosens else ""
+        print(f"  {mark}{win.window}: {win.active} -> {win.candidate}{note}")
     print(f"step-up rate: {rate.active:.1%} -> {rate.candidate:.1%}")
     print("PASS" if verdict.passed else "FAIL")
 
@@ -437,6 +555,8 @@ def summary_markdown(active: PackPin, candidate: PackPin, verdict: Verdict) -> s
         ("Lower Evidence strengths", len(verdict.lower_strengths)),
         ("Own golden labels missed", len(verdict.own_file_mismatches)),
         ("Cases that couldn't be decided", len(verdict.errors)),
+        ("Window changes", len(verdict.window_changes)),
+        ("Window loosenings", len(verdict.window_loosenings)),
         ("Step-up rate", f"{rate.active:.1%} → {rate.candidate:.1%}"),
     ]
     lines = [
@@ -465,7 +585,19 @@ def summary_markdown(active: PackPin, candidate: PackPin, verdict: Verdict) -> s
                 f"| {c.file} | {c.case_id} | {_answer(c.active)} | {_answer(c.candidate)} "
                 f"| {', '.join(flags)} |"
             )
+    lines += ["", "| Window | Active | Candidate | |", "|---|---|---|---|"]
+    for w in verdict.windows:
+        flags = []
+        if w.changed:
+            flags.append("declared" if w.declared else "**undeclared**")
+        if w.loosens:
+            flags.append("loosening")
+        lines.append(f"| {w.window} | {w.active} | {w.candidate} | {', '.join(flags)} |")
     for heading, items in (
+        (
+            "Wrong window declarations",
+            [w.declared.window for w in verdict.wrong_window_declarations],
+        ),
         (
             "Wrong declarations",
             [f"{w.declared.file} {w.declared.case_id}" for w in verdict.wrong_declarations],

@@ -448,7 +448,7 @@ The test suite replays every Decision it makes and verifies every chain it touch
 
 The decision rules, and the Dispute rules behind each Evidence pack's network codes and Evidence strength, read their parameters from a Policy pack, `policy_packs/<id>/<version>.yaml`. `policy_packs/manifest.json` records each released version's hash and which version is active. The API refuses to start if the active pack doesn't match its hash, and CI fails any PR that edits, renames or deletes a released pack file or its declarations file.
 
-CI also runs the Release gate on every pull request that adds a pack file or a declarations file, or changes the Manifest. It gates each version the pull request adds, and the Manifest's new active version if it moves, against the active version on the base branch, so a pack released inactive is still checked. The gate's summary goes to the job summary: cases compared, changed, declared and undeclared, high-risk loosenings, lower Evidence strengths, and the step-up rate on each pack. A failing gate fails the `ci` check. Other pull requests skip it.
+CI also runs the Release gate on every pull request that adds a pack file or a declarations file, or changes the Manifest. It gates each version the pull request adds, and the Manifest's new active version if it moves, against the active version on the base branch, so a pack released inactive is still checked. The gate's summary goes to the job summary: cases compared, changed, declared and undeclared, high-risk loosenings, lower Evidence strengths, each pack window on both packs, and the step-up rate on each pack. A failing gate fails the `ci` check. Other pull requests skip it.
 
 To change a value, release a new version:
 
@@ -470,7 +470,14 @@ changes:
       risk_tier: high
       reason_codes: [AMOUNT_ABOVE_STEP_UP_THRESHOLD, INTENT_MISSING]
     reason: INR 1,000 and up is high risk
+windows:
+  - window: payment_window_seconds
+    active: 900
+    candidate: 1800
+    reason: UPI collect requests take longer to approve
 ```
+
+The gate also compares the windows the API reads: `consent_ttl_seconds`, `payment_window_seconds` and `refund_window_days`, with the defaults applied for packs that don't set them. No golden case shows them, so a change goes under `windows:`. A longer Consent TTL or Payment window is flagged as a loosening, but passes when declared.
 
 Add it in the same PR as its pack. Once released it is as immutable as the pack, and CI refuses one added later for a pack that is already released (ADR-0028).
 
