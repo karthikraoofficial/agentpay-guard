@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AnyUrl, Field, SecretStr, model_validator
+from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from core.domain.rails import RailName
@@ -151,6 +151,28 @@ class Settings(BaseSettings):
                 "set it or set AGENTPAY_INTENT_CHECK_ENABLED=false"
             )
         return self
+
+
+class McpSettings(BaseSettings):
+    """The MCP server's settings (#242), separate from the API's: the MCP process is a thin
+    client over the HTTP API, so it never needs the Anthropic key, database or rail
+    settings that `Settings` checks at startup."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="AGENTPAY_MCP_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        frozen=True,
+    )
+
+    # Where the AgentPay Guard API runs, e.g. http://localhost:8000.
+    api_base_url: AnyHttpUrl
+    # An API key with exactly the `decide` scope; the server refuses to start with any
+    # other (ADR-0011). Sent only as the Bearer token, never logged.
+    api_key: SecretStr
+    # Each API call's timeout. A Decision answers well inside a second.
+    http_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
 
 
 @lru_cache

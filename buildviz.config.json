@@ -176,6 +176,17 @@
       ]
     },
     {
+      "id": "mcp",
+      "label": "guard_mcp (MCP server)",
+      "phase": "3 Async & API",
+      "description": "The MCP server an agent's app launches, so the agent can ask for a decision before it pays. It only calls the web service, with a key that can't approve anything.",
+      "cmd": "uv run ruff check guard_mcp && uv run python -m compileall -q guard_mcp",
+      "dependsOn": [
+        "domain",
+        "core-services"
+      ]
+    },
+    {
       "id": "web",
       "label": "web (Next.js)",
       "phase": "3 Async & API",
@@ -193,7 +204,8 @@
       "dependsOn": [
         "api",
         "workflows",
-        "demo"
+        "demo",
+        "mcp"
       ]
     },
     {
@@ -205,7 +217,8 @@
       "dependsOn": [
         "api",
         "workflows",
-        "demo"
+        "demo",
+        "mcp"
       ],
       "timeoutSec": 600
     },

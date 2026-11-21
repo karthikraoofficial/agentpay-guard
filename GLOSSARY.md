@@ -20,6 +20,10 @@ _Avoid_: Bot, assistant
 What a Tenant's API key may do: decide (Agent traffic), consent (resolving Consent requests) or manage (granting Mandates and registering or switching Agents and Payers). An Agent is only ever given a decide key. Any key can read its own scopes from `GET /v1/api-keys/self`.
 _Avoid_: Role, permission
 
+**MCP server**:
+The process an Agent's MCP host launches (`python -m guard_mcp`) so the Agent can ask for a Decision through tools instead of HTTP. It calls the API with one key that holds exactly the decide scope, and won't start with any other. No tool can resolve a Consent request or change a Mandate.
+_Avoid_: MCP adapter, MCP plugin, connector
+
 **Disabled agent**:
 An Agent its Tenant has switched off. Its requests are blocked under every Mandate until it is re-enabled.
 _Avoid_: Revoked agent, suspended agent

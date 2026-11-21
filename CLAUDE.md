@@ -30,6 +30,7 @@ Run from the repo root. These are the same commands CI runs.
 - Hosted demo backups (ADR-0023; on the VM, from the repo root; the wizard's backups stage installs the cron jobs): `bash infra/pg-backup.sh dump` (nightly: dump, keep 14, upload through `AGENTPAY_BACKUP_PAR_URL`), `bash infra/pg-backup.sh check` (weekly: restore the newest dump into a throwaway Postgres and `verify` every Tenant); each pings its Healthchecks.io heartbeat (`AGENTPAY_BACKUP_HEARTBEAT_URL`, `AGENTPAY_RESTORE_CHECK_HEARTBEAT_URL`; ADR-0026), or its `/fail`, `bash infra/pg-backup.sh install-cron`; `bash infra/oci-create-backup-bucket.sh <env-file>` makes the bucket and its write-only upload link (OCI CLI, on your machine)
 - Run the API: `uv run uvicorn api.main:asgi_app --factory --reload` (health: `/healthz`, docs: `/docs`)
 - Run the consent worker (Temporal consent and Dispute pack workflows, activities, outbox relay, and the Payment debit step and reconciliation sweep, which are off on the mock rail unless `AGENTPAY_MOCK_SETTLE_AFTER_SECONDS` is set (ADR-0019); needs local infra): `uv run python -m workflows.worker`
+- Run the MCP server (stdio, for an Agent's MCP host; ADR-0029): `uv run python -m guard_mcp`, with `AGENTPAY_MCP_API_BASE_URL` and `AGENTPAY_MCP_API_KEY` set. It exits 1 unless the key holds exactly `decide`. Its tests are ordinary pytest tests in `tests/mcp/`, an in-process MCP client against the real app
 - Lint and format: `uv run ruff check .` and `uv run ruff format --check .`
 - Types: `uv run mypy`
 - Migrations: `uv run alembic upgrade head`

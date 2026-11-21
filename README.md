@@ -143,6 +143,50 @@ Keys are per Tenant.
 
 Errors are `application/problem+json` with a stable `code`, such as `UNAUTHENTICATED`, `INSUFFICIENT_SCOPE`, `IDEMPOTENCY_KEY_MISSING` or `VALIDATION_FAILED`. An ID that belongs to another Tenant returns 404.
 
+## Connecting an MCP host
+
+An Agent that runs in an MCP host (Claude Desktop, Claude Code, an agent framework) can ask for a Decision without you writing an HTTP client. The host launches the MCP server, `python -m guard_mcp`, as a local process over stdio. Each tool is one call to the API above, so the API's rules apply unchanged: the Tenant comes from the key, writes need an idempotency key, and every Decision writes its Audit record (ADR-0029).
+
+Give it a key with only the `decide` scope. The server checks its key with `GET /v1/api-keys/self` at startup, and exits with a message unless the scopes are exactly `decide`. A key that could also resolve consent would let a prompt-injected Agent approve its own step_up (ADR-0011). The agent key `create-tenant` prints is decide-only, or issue one:
+
+```bash
+uv run python -m api.admin create-key --tenant <tenant_id> --scopes decide
+```
+
+Claude Desktop (`claude_desktop_config.json`), or any host that takes the same shape:
+
+```json
+{
+  "mcpServers": {
+    "agentpay-guard": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/agentpay-guard", "python", "-m", "guard_mcp"],
+      "env": {
+        "AGENTPAY_MCP_API_BASE_URL": "http://localhost:8000",
+        "AGENTPAY_MCP_API_KEY": "apg_test_..."
+      }
+    }
+  }
+}
+```
+
+Claude Code:
+
+```bash
+claude mcp add agentpay-guard \
+  -e AGENTPAY_MCP_API_BASE_URL=http://localhost:8000 -e AGENTPAY_MCP_API_KEY=apg_test_... \
+  -- uv run --directory /path/to/agentpay-guard python -m guard_mcp
+```
+
+`AGENTPAY_MCP_HTTP_TIMEOUT_SECONDS` (default 10) bounds each API call. The settings can also go in the repo's `.env`, since `uv run --directory` starts the server there.
+
+| Tool | Calls | Does |
+| --- | --- | --- |
+| `request_decision` | `POST /v1/decisions` | Ask before paying: an Agent payment request plus an `idempotency_key`. Returns the API's Decision: allow, step_up (a person must approve; don't pay yet) or block, with its Reason codes |
+| `get_decision` | `GET /v1/decisions/{id}` | Read a Decision again; on a step_up, `consent.status` shows whether the Payer has answered |
+
+No tool approves, declines or links a Consent request, or changes a Mandate, Agent or Payer. An API error comes back as a tool error that starts with the API's code, such as `MANDATE_NOT_FOUND: ...`. Each call is logged to stderr with its tool name, HTTP status, Outcome and latency, never the key or the request.
+
 ## Checks (what CI runs on every PR)
 
 ```bash
@@ -216,6 +260,7 @@ Allow, step-up and block count decision-stage cases; approval re-checks are labe
 | `workflows/` | Temporal: the `step_up_consent` and `dispute_pack` workflows, their activities, the Workflow port adapter and the worker (the only code that imports `temporalio`) |
 | `agents/` | The dispute evidence agent: tools and versioned prompts |
 | `policy_packs/` | Released policy packs and their hash manifest |
+| `guard_mcp/` | The MCP server: a stdio thin client over the API for an Agent's MCP host, holding one `decide` key (`python -m guard_mcp`, ADR-0029) |
 | `demo/` | The demo CLI: the four demo journeys over HTTP (`python -m demo`) |
 | `evals/` | Labelled golden cases and the eval gate; the live Intent check eval set |
 | `migrations/` | Alembic migrations |
