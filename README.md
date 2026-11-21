@@ -37,7 +37,7 @@ Enforced by code from the first commit:
 - idempotency keys and tenant IDs in every write-shaped port signature (`mypy --strict`);
 - a pure policy engine that imports no clock, store, gateway or I/O (architecture test);
 - append-only Audit records (Postgres triggers), with every Decision in the test suite replayed byte for byte;
-- latency budgets (`decide()` p99 < 5 ms, `POST /v1/decisions` p95 < 150 ms) and a zero-mismatch eval gate in CI.
+- latency budgets (`decide()` p99 < 5 ms, `POST /v1/decisions` p95 < 150 ms, `request_decision` through the MCP server p95 < 175 ms) and a zero-mismatch eval gate in CI.
 
 ## Run it locally
 
