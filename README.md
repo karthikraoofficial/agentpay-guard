@@ -186,6 +186,8 @@ claude mcp add agentpay-guard \
 | `check_intent` | `POST /v1/intents` | Get an Intent check on the Payer's instruction and the cart, plus an `idempotency_key`. Returns only `{intent_id, expires_at}`: cite `intent_id` in `request_decision`. The verdict is never shown to the Agent; the model call happens inside the API, with its timeout and fail-closed default |
 | `get_decision` | `GET /v1/decisions/{id}` | Read a Decision again; on a step_up, `consent.status` shows whether the Payer has answered |
 | `get_consent_request` | `GET /v1/consent-requests/{id}` | Check a step_up's Consent request: `pending`, `approved`, `declined`, `expired` or `blocked` |
+| `create_payment` | `POST /v1/payments` | Pay an allow, or an approved step_up, before its `payable_until`: a `decision_id` plus an `idempotency_key`. The amount and instrument come from the Decision and its Mandate. Returns the API's Payment. A second Payment on the same Decision is the tool error `DECISION_ALREADY_PAID` (ADR-0014) |
+| `get_payment` | `GET /v1/payments/{id}` | Follow a Payment: `scheduled` (debited after the Pre-debit notice), `captured` or `failed` |
 
 On a step_up, the Agent waits for the Payer:
 
