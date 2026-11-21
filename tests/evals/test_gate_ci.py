@@ -127,3 +127,14 @@ def test_the_step_exits_2_when_a_declarations_file_is_invalid(tmp_path: Path) ->
     (packs / "default" / "1.6.0.declared-changes.yaml").write_text("changes: 1\n")
 
     assert run(f"{PACK}\n{DECLARATIONS}\n{MANIFEST}", BASE, packs, GOLDEN, None) == 2
+
+
+def test_the_job_summary_shows_a_window_change(tmp_path: Path) -> None:
+    packs = release_test_pack(
+        tmp_path / "packs", "1.6.0", {"payment_window_seconds": 1800}, based_on="1.5.0"
+    )
+    summary = tmp_path / "summary.md"
+
+    assert run(f"{PACK}\n{MANIFEST}", BASE, packs, GOLDEN, summary) == 1
+    text = summary.read_text(encoding="utf-8")
+    assert "| payment_window_seconds | 900 | 1800 | **undeclared**, loosening |" in text

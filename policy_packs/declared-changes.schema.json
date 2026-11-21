@@ -129,6 +129,46 @@
       "title": "DeclaredChange",
       "type": "object"
     },
+    "DeclaredWindow": {
+      "additionalProperties": false,
+      "description": "A pack window the candidate is meant to change, and why.",
+      "properties": {
+        "window": {
+          "enum": [
+            "consent_ttl_seconds",
+            "payment_window_seconds",
+            "refund_window_days"
+          ],
+          "title": "Window",
+          "type": "string"
+        },
+        "active": {
+          "description": "The window on the active pack, in its field's unit",
+          "exclusiveMinimum": 0,
+          "title": "Active",
+          "type": "integer"
+        },
+        "candidate": {
+          "description": "The window on the candidate, in its field's unit",
+          "exclusiveMinimum": 0,
+          "title": "Candidate",
+          "type": "integer"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "window",
+        "active",
+        "candidate",
+        "reason"
+      ],
+      "title": "DeclaredWindow",
+      "type": "object"
+    },
     "Expected": {
       "additionalProperties": false,
       "description": "A Dispute case's label, and its answer in the Release gate.",
@@ -187,17 +227,22 @@
   "description": "A Candidate pack's declarations file: every change it makes on purpose.",
   "properties": {
     "changes": {
+      "default": [],
       "items": {
         "$ref": "#/$defs/DeclaredChange"
       },
-      "minItems": 1,
       "title": "Changes",
+      "type": "array"
+    },
+    "windows": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/DeclaredWindow"
+      },
+      "title": "Windows",
       "type": "array"
     }
   },
-  "required": [
-    "changes"
-  ],
   "title": "Declarations",
   "type": "object"
 }

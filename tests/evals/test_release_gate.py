@@ -1,3 +1,4 @@
+import itertools
 import json
 import shutil
 from pathlib import Path
@@ -10,6 +11,7 @@ from evals.release_gate import (
     Change,
     Declarations,
     DeclaredChange,
+    DeclaredWindow,
     DisputeAnswer,
     main,
     run_gate,
@@ -561,6 +563,178 @@ def test_a_declaration_cant_mix_a_decision_answer_with_a_dispute_answer() -> Non
                 "reason": "mixed up",
             }
         )
+
+
+# --- Pack windows -----------------------------------------------------------------------
+
+
+def _window(window: str, active: int, candidate: int) -> DeclaredWindow:
+    return DeclaredWindow.model_validate(
+        {"window": window, "active": active, "candidate": candidate, "reason": "intended"}
+    )
+
+
+def test_the_verdict_reports_each_window_on_both_packs(tmp_path: Path) -> None:
+    verdict = run_gate(_candidate(tmp_path, {}), GOLDEN, ACTIVE, CANDIDATE)
+
+    assert {(w.window, w.active, w.candidate) for w in verdict.windows} == {
+        ("consent_ttl_seconds", 600, 600),
+        ("payment_window_seconds", 900, 900),
+        ("refund_window_days", 180, 180),
+    }
+    assert verdict.window_changes == []
+
+
+def test_an_undeclared_window_change_fails_even_with_no_golden_change(tmp_path: Path) -> None:
+    packs = _candidate(tmp_path, {"payment_window_seconds": 1800})
+
+    verdict = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE)
+
+    assert verdict.changes == []
+    assert not verdict.passed
+    [w] = verdict.window_changes
+    assert (w.window, w.active, w.candidate, w.declared) == (
+        "payment_window_seconds",
+        900,
+        1800,
+        False,
+    )
+    assert w.loosens
+
+
+def test_a_declared_longer_payment_window_passes_and_is_flagged_as_a_loosening(
+    tmp_path: Path,
+) -> None:
+    packs = _candidate(tmp_path, {"payment_window_seconds": 1800})
+
+    verdict = run_gate(
+        packs, GOLDEN, ACTIVE, CANDIDATE, [_window("payment_window_seconds", 900, 1800)]
+    )
+
+    assert verdict.passed
+    assert [w.window for w in verdict.window_loosenings] == ["payment_window_seconds"]
+
+
+def test_a_longer_consent_ttl_is_a_loosening_and_a_shorter_one_isnt(tmp_path: Path) -> None:
+    longer = run_gate(
+        _candidate(tmp_path / "longer", {"consent_ttl_seconds": 1200}), GOLDEN, ACTIVE, CANDIDATE
+    )
+    shorter = run_gate(
+        _candidate(tmp_path / "shorter", {"consent_ttl_seconds": 300}), GOLDEN, ACTIVE, CANDIDATE
+    )
+
+    assert [w.window for w in longer.window_loosenings] == ["consent_ttl_seconds"]
+    assert shorter.window_loosenings == []
+    assert [w.window for w in shorter.window_changes] == ["consent_ttl_seconds"]
+    assert not shorter.passed
+
+
+@pytest.mark.parametrize("days", [90, 365])
+def test_a_refund_window_change_is_never_a_loosening_but_needs_declaring(
+    tmp_path: Path, days: int
+) -> None:
+    packs = _candidate(tmp_path, {"refund_window_days": days})
+
+    undeclared = run_gate(packs, GOLDEN, ACTIVE, CANDIDATE)
+    declared = run_gate(
+        packs, GOLDEN, ACTIVE, CANDIDATE, [_window("refund_window_days", 180, days)]
+    )
+
+    assert not undeclared.passed
+    assert undeclared.window_loosenings == []
+    assert declared.passed
+
+
+def test_a_window_declaration_that_doesnt_happen_as_declared_fails(tmp_path: Path) -> None:
+    packs = _candidate(tmp_path, {"payment_window_seconds": 1800})
+
+    stale = run_gate(
+        _candidate(tmp_path / "same", {}),
+        GOLDEN,
+        ACTIVE,
+        CANDIDATE,
+        [_window("payment_window_seconds", 900, 1800)],
+    )
+    wrong = run_gate(
+        packs, GOLDEN, ACTIVE, CANDIDATE, [_window("payment_window_seconds", 900, 3600)]
+    )
+
+    assert not stale.passed
+    [w] = stale.wrong_window_declarations
+    assert (w.active, w.candidate) == (900, 900)
+    assert not wrong.passed
+    [w] = wrong.wrong_window_declarations
+    assert (w.active, w.candidate) == (900, 1800)
+    assert [c.declared for c in wrong.window_changes] == [False]
+
+
+def test_a_pack_that_sets_a_window_to_its_old_default_changes_nothing(tmp_path: Path) -> None:
+    # 1.0.0 doesn't set the Payment window and reads as 900 s; setting 900 is no change.
+    packs = release_test_pack(
+        tmp_path / "packs", "1.0.1", {"payment_window_seconds": 900}, active=False
+    )
+
+    verdict = run_gate(
+        packs,
+        GOLDEN,
+        PackPin(id="default", version="1.0.0"),
+        PackPin(id="default", version="1.0.1"),
+    )
+
+    assert verdict.window_changes == []
+
+
+def test_the_past_activations_change_no_window() -> None:
+    versions = ["1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0"]
+    for before, after in itertools.pairwise(versions):
+        verdict = run_gate(
+            PACKS,
+            GOLDEN,
+            PackPin(id="default", version=before),
+            PackPin(id="default", version=after),
+        )
+        assert verdict.window_changes == [], f"{before} -> {after}"
+
+
+def test_the_command_reads_window_declarations_and_shows_each_window(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    packs = _candidate(tmp_path, {"payment_window_seconds": 1800})
+    path = packs / "default" / "1.6.0.declared-changes.yaml"
+
+    assert main(["--packs", str(packs), "--candidate", "default@1.6.0"]) == 1
+    out = capsys.readouterr().out
+    assert "[undeclared] payment_window_seconds: 900 -> 1800 (longer: a loosening)" in out
+    assert "refund_window_days: 180 -> 180" in out
+
+    path.write_text(
+        "windows:\n"
+        "  - {window: payment_window_seconds, active: 900, candidate: 1800, reason: UPI}\n",
+        encoding="utf-8",
+    )
+    assert main(["--packs", str(packs), "--candidate", "default@1.6.0"]) == 0
+    assert "[declared] payment_window_seconds: 900 -> 1800" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "changes: []\nwindows: []\n",  # declares nothing
+        "windows:\n  - {window: velocity, active: 1, candidate: 2, reason: x}\n",
+        "windows:\n  - {window: refund_window_days, active: 180, candidate: 180, reason: x}\n",
+        "windows:\n"
+        "  - {window: refund_window_days, active: 180, candidate: 90, reason: x}\n"
+        "  - {window: refund_window_days, active: 180, candidate: 30, reason: y}\n",
+    ],
+    ids=["empty", "unknown-window", "no-change", "twice"],
+)
+def test_a_bad_window_declaration_exits_2(
+    tmp_path: Path, text: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    packs = _candidate(tmp_path, {})
+    (packs / "default" / "1.6.0.declared-changes.yaml").write_text(text, encoding="utf-8")
+
+    assert main(["--packs", str(packs), "--candidate", "default@1.6.0"]) == 2
 
 
 # --- The real repo ----------------------------------------------------------------------
