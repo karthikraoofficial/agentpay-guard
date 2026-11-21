@@ -1,0 +1,112 @@
+consent_ttl_seconds: 600
+currencies:
+  INR:
+    medium_from: 50000
+    step_up_threshold: 100000
+  USD:
+    medium_from: 2500
+    step_up_threshold: 10000
+disputes:
+  duplicate_window_seconds: 86400
+  reasons:
+    amount_differs:
+      network_codes:
+        mastercard: '4834'
+        visa: '12.5'
+      strong_when:
+      - amount_matches_decision
+      - within_quoted_total
+      weak_when:
+      - amount_differs_from_decision
+    cancelled_recurring:
+      network_codes:
+        mastercard: '4841'
+        visa: '13.2'
+      strong_when:
+      - mandate_active_at_decision
+      weak_when:
+      - mandate_revoked_before_decision
+    duplicate:
+      network_codes:
+        mastercard: '4834'
+        visa: '12.6'
+      strong_when:
+      - no_duplicate_payment
+      weak_when:
+      - duplicate_payment_found
+    not_as_described:
+      network_codes:
+        mastercard: '4853'
+        visa: '13.3'
+      strong_when:
+      - fulfilment_evidence
+      weak_when: []
+    not_received:
+      network_codes:
+        mastercard: '4855'
+        visa: '13.1'
+      strong_when:
+      - fulfilment_evidence
+      weak_when: []
+    unauthorised:
+      network_codes:
+        mastercard: '4837'
+        visa: '10.4'
+      strong_when:
+      - decision_within_mandate
+      - payer_intent_confirmed
+      weak_when:
+      - intent_mismatch_approved
+      - mandate_revoked_before_capture
+  strong_if_any:
+  - credit_issued
+high_risk_mccs:
+- '4829'
+- '6051'
+- '7995'
+id: default
+intent:
+  min_tier: medium
+  verdict_ttl_seconds: 1800
+merchant_new:
+  min_tier: medium
+monthly_cap_near_ratio_bps: 8000
+payment_window_seconds: 900
+price_drift:
+  max_above_bps: 200
+refund_window_days: 180
+rules:
+- enabled: true
+  rule_id: mandate_revoked
+- enabled: true
+  rule_id: mandate_validity
+- enabled: true
+  rule_id: agent_allowed
+- enabled: true
+  rule_id: agent_disabled
+- enabled: true
+  rule_id: currency_match
+- enabled: true
+  rule_id: mcc_high_risk
+- enabled: true
+  rule_id: mcc_allowed
+- enabled: true
+  rule_id: per_txn_cap
+- enabled: true
+  rule_id: monthly_cap
+- enabled: true
+  rule_id: step_up_threshold
+- enabled: true
+  rule_id: monthly_cap_near
+- enabled: true
+  rule_id: velocity
+- enabled: true
+  rule_id: merchant_new
+- enabled: true
+  rule_id: intent
+- enabled: true
+  rule_id: price_drift
+velocity:
+  max_decisions: 5
+  window_seconds: 600
+version: 1.6.0
