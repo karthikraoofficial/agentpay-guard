@@ -12,7 +12,7 @@ the stored check without calling the model again.
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Request, Response
-from pydantic import AwareDatetime, BaseModel, ConfigDict
+from pydantic import AwareDatetime, BaseModel
 
 from api.deps import (
     ClockDep,
@@ -31,7 +31,7 @@ from core.domain.decisions import LineItem, Merchant
 from core.domain.intents import (
     FailureCause,
     IntentCheck,
-    IntentContent,
+    IntentCreate,
     IntentId,
     IntentVerdict,
     PayerInstruction,
@@ -47,16 +47,6 @@ router = APIRouter(prefix="/v1/intents", tags=["intents"])
 # Used when the active Policy pack sets no `intent` section (packs before 1.1.0); the
 # same value 1.1.0 sets.
 DEFAULT_VERDICT_TTL = timedelta(minutes=30)
-
-
-class IntentCreate(IntentContent):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    mandate_id: MandateId
-    agent_id: AgentId
-
-    def content(self) -> IntentContent:
-        return IntentContent.model_validate(self.model_dump(exclude={"mandate_id", "agent_id"}))
 
 
 class IntentCreated(BaseModel):

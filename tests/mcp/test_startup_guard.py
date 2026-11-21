@@ -71,6 +71,7 @@ async def test_a_decide_key_is_accepted(api: Api) -> None:
 
     assert {tool.name for tool in tools.tools} == {
         "request_decision",
+        "check_intent",
         "get_decision",
         "get_consent_request",
     }

@@ -183,6 +183,7 @@ claude mcp add agentpay-guard \
 | Tool | Calls | Does |
 | --- | --- | --- |
 | `request_decision` | `POST /v1/decisions` | Ask before paying: an Agent payment request plus an `idempotency_key`. Returns the API's Decision: allow, step_up (a person must approve; don't pay yet) or block, with its Reason codes |
+| `check_intent` | `POST /v1/intents` | Get an Intent check on the Payer's instruction and the cart, plus an `idempotency_key`. Returns only `{intent_id, expires_at}`: cite `intent_id` in `request_decision`. The verdict is never shown to the Agent; the model call happens inside the API, with its timeout and fail-closed default |
 | `get_decision` | `GET /v1/decisions/{id}` | Read a Decision again; on a step_up, `consent.status` shows whether the Payer has answered |
 | `get_consent_request` | `GET /v1/consent-requests/{id}` | Check a step_up's Consent request: `pending`, `approved`, `declined`, `expired` or `blocked` |
 
