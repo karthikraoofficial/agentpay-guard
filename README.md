@@ -448,6 +448,8 @@ The test suite replays every Decision it makes and verifies every chain it touch
 
 The decision rules, and the Dispute rules behind each Evidence pack's network codes and Evidence strength, read their parameters from a Policy pack, `policy_packs/<id>/<version>.yaml`. `policy_packs/manifest.json` records each released version's hash and which version is active. The API refuses to start if the active pack doesn't match its hash, and CI fails any PR that edits, renames or deletes a released pack file or its declarations file.
 
+CI also runs the Release gate on every pull request that adds a pack file or a declarations file, or changes the Manifest. It gates each version the pull request adds, and the Manifest's new active version if it moves, against the active version on the base branch, so a pack released inactive is still checked. The gate's summary goes to the job summary: cases compared, changed, declared and undeclared, high-risk loosenings, lower Evidence strengths, and the step-up rate on each pack. A failing gate fails the `ci` check. Other pull requests skip it.
+
 To change a value, release a new version:
 
 1. Copy the current file to the next version, for example `default/1.5.1.yaml`. Then edit `version` and the values.

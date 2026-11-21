@@ -45,7 +45,7 @@ class Manifest(_Strict):
 
 def load_pack(root: Path, pack_id: str, version: str) -> LoadedPack:
     """Load one released version and check it against the Manifest."""
-    entry = _manifest(root).packs.get(pack_id)
+    entry = load_manifest(root).packs.get(pack_id)
     expected = entry.versions.get(version) if entry else None
     if expected is None:
         raise PackError(f"{pack_id}@{version} is not in the Manifest")
@@ -66,13 +66,13 @@ def load_pack(root: Path, pack_id: str, version: str) -> LoadedPack:
 
 
 def load_active_pack(root: Path, pack_id: str) -> LoadedPack:
-    entry = _manifest(root).packs.get(pack_id)
+    entry = load_manifest(root).packs.get(pack_id)
     if entry is None:
         raise PackError(f"no pack {pack_id!r} in the Manifest")
     return load_pack(root, pack_id, entry.active)
 
 
-def _manifest(root: Path) -> Manifest:
+def load_manifest(root: Path) -> Manifest:
     path = root / "manifest.json"
     try:
         return Manifest.model_validate_json(path.read_text(encoding="utf-8"))
