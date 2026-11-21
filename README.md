@@ -446,15 +446,33 @@ The test suite replays every Decision it makes and verifies every chain it touch
 
 ## Policy packs
 
-The decision rules, and the Dispute rules behind each Evidence pack's network codes and Evidence strength, read their parameters from a Policy pack, `policy_packs/<id>/<version>.yaml`. `policy_packs/manifest.json` records each released version's hash and which version is active. The API refuses to start if the active pack doesn't match its hash, and CI fails any PR that edits or deletes a released pack file.
+The decision rules, and the Dispute rules behind each Evidence pack's network codes and Evidence strength, read their parameters from a Policy pack, `policy_packs/<id>/<version>.yaml`. `policy_packs/manifest.json` records each released version's hash and which version is active. The API refuses to start if the active pack doesn't match its hash, and CI fails any PR that edits, renames or deletes a released pack file or its declarations file.
 
 To change a value, release a new version:
 
 1. Copy the current file to the next version, for example `default/1.5.1.yaml`. Then edit `version` and the values.
 2. Run `uv run python -m core.policy.packs --hash policy_packs/default/1.5.1.yaml`, then add the printed hash under `versions` in the manifest. Point `active` at the new version.
-3. Keep the old version. Replay needs every released pack.
+3. Run the Release gate: `uv run python -m evals.release_gate --candidate default@1.5.1`. It decides every Decision and approval golden case on the active pack and on yours, and lists each case whose answer changes, marked declared or undeclared.
+4. If a change is intended, declare it in `default/1.5.1.declared-changes.yaml`, next to the pack file, then run the gate again. The gate passes only when the changes it finds are exactly the ones declared. A loosening on a high-risk case fails even when declared.
+5. Keep the old version. Replay needs every released pack.
 
-`policy_packs/schema.json` documents the format. It is generated from the pack model: regenerate it with `uv run python -m core.policy.packs --write-schema`, and a test fails if it's stale.
+A declarations file lists each Declared change. It isn't part of the pack, so it changes no Pack hash:
+
+```yaml
+changes:
+  - file: phase2.jsonl
+    case_id: allow-basic
+    active: {outcome: allow, risk_tier: low, reason_codes: []}
+    candidate:
+      outcome: step_up
+      risk_tier: high
+      reason_codes: [AMOUNT_ABOVE_STEP_UP_THRESHOLD, INTENT_MISSING]
+    reason: INR 1,000 and up is high risk
+```
+
+Add it in the same PR as its pack. Once released it is as immutable as the pack, and CI refuses one added later for a pack that is already released (ADR-0028).
+
+`policy_packs/schema.json` documents the format. It is generated from the pack model: regenerate it with `uv run python -m core.policy.packs --write-schema`, and a test fails if it's stale. `policy_packs/declared-changes.schema.json` documents declarations files the same way, regenerated with `uv run python -m evals.release_gate --write-schema`.
 
 ## License
 
