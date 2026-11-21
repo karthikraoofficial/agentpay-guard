@@ -64,6 +64,7 @@ from core.domain.parties import (
     Agent,
     AgentId,
     AgentStatus,
+    ApiKeyDetails,
     ApiKeyGrant,
     ApiKeyScope,
     Payer,
@@ -909,6 +910,21 @@ class PostgresStore:
         if row is None:
             return None
         return ApiKeyGrant(tenant_id=TenantId(row.tenant_id), scopes=frozenset(row.scopes))
+
+    def api_key_details(self, tenant_id: TenantId, key_hash: str) -> ApiKeyDetails | None:
+        query = select(
+            api_keys.c.tenant_id, api_keys.c.key_prefix, api_keys.c.scopes, api_keys.c.created_at
+        ).where(api_keys.c.tenant_id == tenant_id, api_keys.c.key_hash == key_hash)
+        with self._engine.connect() as conn:
+            row = conn.execute(query).one_or_none()
+        if row is None:
+            return None
+        return ApiKeyDetails(
+            tenant_id=TenantId(row.tenant_id),
+            key_prefix=row.key_prefix,
+            scopes=frozenset(row.scopes),
+            created_at=row.created_at,
+        )
 
     def consent_link(self, token_hash: str) -> ConsentLink | None:
         query = select(consent_links).where(consent_links.c.token_hash == token_hash)

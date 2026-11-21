@@ -86,11 +86,17 @@ def authenticated_key(
     authorization: Annotated[str | None, Header()] = None,
 ) -> ApiKeyGrant:
     """The key that signed the request. tenant_id never comes from a body."""
-    scheme, _, key = (authorization or "").partition(" ")
-    grant = store.api_key(hash_api_key(key)) if scheme == "Bearer" and key else None
+    grant = store.api_key(bearer_key_hash(authorization))
     if grant is None:
         raise ApiError(401, "UNAUTHENTICATED", "Send a valid API key as `Authorization: Bearer`.")
     return grant
+
+
+def bearer_key_hash(authorization: str | None) -> str:
+    """The hash of the Bearer key in an Authorization header; "" when there is none, which
+    matches no stored key."""
+    scheme, _, key = (authorization or "").partition(" ")
+    return hash_api_key(key) if scheme == "Bearer" and key else ""
 
 
 def authenticated_tenant(grant: Annotated[ApiKeyGrant, Depends(authenticated_key)]) -> TenantId:

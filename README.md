@@ -93,6 +93,7 @@ Send a key as `Authorization: Bearer apg_test_…` on every call, and an `Idempo
 
 | Endpoint | Scope | Does |
 | --- | --- | --- |
+| `GET /v1/api-keys/self` | any | The key that signed the request: `{tenant_id, key_prefix, scopes, created_at}`, never the secret. `key_prefix` is the key's first 16 characters, so you can tell which key you handed out. Check an Agent's key holds only `decide` |
 | `POST /v1/payers`, `GET /v1/payers/{id}` | manage / any | Register and fetch a Payer. `contact_ref` must be a token you can resolve, not a raw email or phone number. |
 | `POST /v1/agents`, `GET /v1/agents/{id}` | manage / any | Register and fetch an Agent |
 | `POST /v1/agents/{id}/disable`, `/enable` | manage | Stop an Agent under every Mandate, or let it act again |

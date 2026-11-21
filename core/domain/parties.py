@@ -66,6 +66,15 @@ class ApiKeyGrant(_Frozen):
     scopes: frozenset[ApiKeyScope]
 
 
+class ApiKeyDetails(_Frozen):
+    """What a Tenant may see about one of its keys: never the secret or its hash."""
+
+    tenant_id: TenantId
+    key_prefix: str
+    scopes: frozenset[ApiKeyScope]
+    created_at: datetime
+
+
 def new_id(prefix: str) -> str:
     """A random, URL-safe identifier such as `pay_3fJ…`."""
     return f"{prefix}_{secrets.token_urlsafe(16)}"
