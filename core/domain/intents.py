@@ -74,3 +74,16 @@ class IntentCheck(_Frozen):
     latency_ms: int | None = None
     created_at: AwareDatetime
     expires_at: AwareDatetime
+
+
+class IntentCreate(IntentContent):
+    """An Intent check request (POST /v1/intents): the content, and whose payment it is for.
+    Shared by the API and the MCP server's `check_intent` tool, so the two can't drift."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    mandate_id: MandateId
+    agent_id: AgentId
+
+    def content(self) -> IntentContent:
+        return IntentContent.model_validate(self.model_dump(exclude={"mandate_id", "agent_id"}))

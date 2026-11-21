@@ -11,6 +11,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from core.domain.decisions import AgentPaymentRequest
+from core.domain.intents import IntentCreate
 
 IDEMPOTENCY_KEY = "idempotency_key"
 
@@ -81,6 +82,21 @@ TOOLS: tuple[Tool, ...] = (
         method="POST",
         path="/v1/decisions",
         body=AgentPaymentRequest,
+    ),
+    Tool(
+        name="check_intent",
+        description=(
+            "Before request_decision, get an Intent check on what the Payer asked for: their "
+            "instruction in their own words, the merchant, the cart's line items and the "
+            "quoted total. Returns an intent_id (and when it expires): pass it as intent_id "
+            "in request_decision, which needs it for larger payments. You won't see the "
+            "check's verdict; the Decision takes it into account. The idempotency key makes a "
+            "retry safe: reuse it when you retry the same check, and pick a new one for a new "
+            "cart."
+        ),
+        method="POST",
+        path="/v1/intents",
+        body=IntentCreate,
     ),
     Tool(
         name="get_decision",
