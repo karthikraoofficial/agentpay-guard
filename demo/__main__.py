@@ -1,7 +1,8 @@
 """`uv run python -m demo --base-url <api>`: run the demo journeys against a deployment.
 
 `--scenario <id>` runs one Scenario from the catalogue (demo/scenarios/) through the step
-engine the Demo runner uses; `--journey 1..4` runs the original four journeys.
+engine the Demo runner uses; `--journey 1..4` runs the original four journeys, of which
+journey 2 (a step-up the Payer approves) is now Scenario E1.
 
 The Demo Tenant's keys come from settings (AGENTPAY_DEMO_AGENT_KEY and
 AGENTPAY_DEMO_TENANT_KEY), never from the command line, and are never printed. The
@@ -22,6 +23,8 @@ from demo.journeys import Demo, StepFailed
 from demo.scenario import Scenario, catalogue
 
 JOURNEYS = ("1", "2", "3", "4")
+# Journeys that now run as a Scenario through the step engine (#276).
+AS_SCENARIO = {"2": "E1"}
 
 
 def main(argv: Sequence[str] | None = None, settings: Settings | None = None) -> int:
@@ -45,14 +48,10 @@ def main(argv: Sequence[str] | None = None, settings: Settings | None = None) ->
         )
         return 2
 
-    if args.scenario is not None:
-        scenario = catalogue().get(args.scenario)
-        if scenario is None:
-            print(f"No Scenario {args.scenario}.", file=sys.stderr)
-            return 2
-        agent_key = settings.demo_agent_key.get_secret_value()
-        tenant_key = settings.demo_tenant_key.get_secret_value()
+    agent_key = settings.demo_agent_key.get_secret_value()
+    tenant_key = settings.demo_tenant_key.get_secret_value()
 
+    def play_scenario(scenario: Scenario) -> int:
         async def go() -> int:
             async with (
                 _client(args.base_url, agent_key) as agent,
@@ -70,18 +69,30 @@ def main(argv: Sequence[str] | None = None, settings: Settings | None = None) ->
 
         return anyio.run(go)
 
+    if args.scenario is not None:
+        scenario = catalogue().get(args.scenario)
+        if scenario is None:
+            print(f"No Scenario {args.scenario}.", file=sys.stderr)
+            return 2
+        return play_scenario(scenario)
+
     journeys = JOURNEYS if args.journey == "all" else (args.journey,)
     with httpx.Client(base_url=args.base_url, timeout=30.0) as client:
         demo = Demo(
             client=client,
-            agent_key=settings.demo_agent_key.get_secret_value(),
-            tenant_key=settings.demo_tenant_key.get_secret_value(),
+            agent_key=agent_key,
+            tenant_key=tenant_key,
             say=lambda line: print(line, flush=True),
             wait=lambda: time.sleep(args.interval),
             now=lambda: datetime.now(UTC),
             patience=max(1, int(args.timeout / args.interval)),
         )
         for number in journeys:
+            if number in AS_SCENARIO:
+                if play_scenario(catalogue()[AS_SCENARIO[number]]) != 0:
+                    return 1
+                print()
+                continue
             try:
                 getattr(demo, f"journey_{number}")()
             except StepFailed as failed:
@@ -106,6 +117,12 @@ def _describe(card: engine.Card) -> str:
     call = card.call
     if call is None:
         return f"step {card.step}"
+    if card.refused is not None:
+        return f"{call.name}: refused, {card.refused}"
+    if card.actor == "payer" and card.consent is not None:
+        blocked = card.consent.reason_codes
+        why = f" ({', '.join(blocked)})" if blocked else ""
+        return f"Asha's answer: {card.consent.status}{why}"
     if card.decision is not None:
         d = card.decision
         reasons = ", ".join(d.reason_codes) or "none"
@@ -114,6 +131,8 @@ def _describe(card: engine.Card) -> str:
             f"pack {d.policy_pack}, Audit record {d.audit_record_id})"
         )
     response = call.response
+    if card.consent is not None:
+        return f"{call.name}: Consent request {card.consent.status}"
     for name in ("mandate_id", "payment_id", "refund_id", "dispute_id"):
         if name in response:
             status = response.get("status")
@@ -146,6 +165,8 @@ async def run_scenario(
             told.add(card.step)
             for line in card.chat:
                 say(f"  {_SPEAKERS[line.speaker]}: {line.text}")
+            if card.link and card.waiting:
+                say(f"  - Consent link (open it and answer as Asha): {card.link}")
         if card.waiting:
             waits += 1
             if waits > patience:

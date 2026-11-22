@@ -1,0 +1,106 @@
+{
+  "id": "E1",
+  "title": "Asha approves",
+  "group": "E",
+  "playlists": [
+    "pitch"
+  ],
+  "story": "The INR 6,000 party order steps up. Asha gets a link, sees the amount, the shop and the reasons, and taps Approve. The approval is recorded, and ShopBot may now pay, within 15 minutes.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 600000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Order the party food from FreshMart for Saturday."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "The party order at FreshMart comes to INR 6,000. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "payer",
+      "action": "approve",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "This one needs your approval, Asha. I've sent it to your phone."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_consent_request",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Asha approved. Checking the approval before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Paying FreshMart INR 6,000 now."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": [
+        "captured",
+        "failed"
+      ],
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The payment is scheduled. I'll let you know once the money is taken."
+        }
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "step_up",
+    "reason_codes": [
+      "AMOUNT_ABOVE_STEP_UP_THRESHOLD",
+      "MERCHANT_NEW",
+      "INTENT_MISSING"
+    ],
+    "consent_status": "approved",
+    "payment_status": "captured"
+  },
+  "what_to_notice": "Approve on Asha's phone is the real consent screen, opened on a real Consent link. ShopBot can't approve anything: it only waits, checks the Consent request, and pays once Asha has said yes."
+}

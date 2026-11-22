@@ -1,0 +1,79 @@
+{
+  "id": "E2",
+  "title": "Asha declines",
+  "group": "E",
+  "playlists": [],
+  "story": "Asha sees the INR 6,000 request and thinks \"I didn't ask for that.\" She taps Decline. No payment can be made on that request: the human has the final say on anything unusual.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 600000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Order the party food from FreshMart for Saturday."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "The party order at FreshMart comes to INR 6,000. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "payer",
+      "action": "decline",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "This one needs your approval, Asha. I've sent it to your phone."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_consent_request",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Asha declined, so I won't pay."
+        }
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "step_up",
+    "reason_codes": [
+      "AMOUNT_ABOVE_STEP_UP_THRESHOLD",
+      "MERCHANT_NEW",
+      "INTENT_MISSING"
+    ],
+    "consent_status": "declined"
+  },
+  "what_to_notice": "After a decline the Consent request stays declined for good. ShopBot gets nothing it can pay with, and a new request would be a new Decision with its own Audit record."
+}

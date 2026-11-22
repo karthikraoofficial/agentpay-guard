@@ -22,9 +22,9 @@ import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from core.domain.decisions import Merchant
 from core.domain.money import Money
@@ -103,36 +103,59 @@ class Setup(_Model):
     history: list[PriorPayment] = []
 
 
+# An HTTP route as `METHOD /v1/path`; `{name}` is filled from the run: mandate_id,
+# agent_id, decision_id, payment_id or consent_request_id.
+Route = Annotated[str, StringConstraints(pattern=r"^(GET|POST) /v1/\S+$")]
+
+
 class AgentStep(_Model):
     """ShopBot calls a guard_mcp tool. The run fills in what it already knows (Mandate,
-    Agent, merchant, the last Decision or Payment, the step's idempotency key)."""
+    Agent, merchant, the last Decision or Payment, the step's idempotency key).
+
+    `route` instead of `tool` has ShopBot call an HTTP route with its decide key, for
+    journeys that show a call no tool makes, e.g. trying to approve its own step_up."""
 
     actor: Literal["agent"]
-    tool: AgentTool
+    tool: AgentTool | None = None
+    route: Route | None = None
     chat: list[ChatLine] = []
     # request_decision: the amount to ask for.
     amount: Money | None = None
     # A read the run repeats until the answer's `status` is one of these (the worker or a
     # person has to act first). The step waits while it isn't.
     until_status: list[str] | None = None
+    # The error code the API answers with, when the journey shows a refusal.
+    expect_refusal: str | None = None
+
+    @model_validator(mode="after")
+    def _tool_or_route(self) -> Self:
+        if (self.tool is None) == (self.route is None):
+            raise ValueError("an Agent step names exactly one of tool or route")
+        return self
 
 
 class TenantStep(_Model):
     """The wallet app calls an HTTP route with the tenant key, e.g.
-    `POST /v1/payments/{payment_id}/refunds`. `{name}` is filled from the run."""
+    `POST /v1/mandates/{mandate_id}/revoke`."""
 
     actor: Literal["tenant"]
-    route: Annotated[str, StringConstraints(pattern=r"^(GET|POST) /v1/\S+$")]
+    route: Route
     chat: list[ChatLine] = []
     body: dict[str, Any] | None = None
+    expect_refusal: str | None = None
 
 
 class HumanStep(_Model):
-    """A person acts: Asha on her Consent link, or the reviewer on a Review link."""
+    """A person acts: Asha on her Consent link, or the reviewer on a Review link.
+
+    The run mints the link. When a visitor plays Asha, the step waits until she has
+    answered on the consent screen; in CI the engine answers for her, sending each of
+    `taps` with one idempotency key, as a double tap on a slow connection would."""
 
     actor: Literal["payer", "reviewer"]
     action: Literal["approve", "decline", "ignore", "sign_off", "regenerate", "withdraw"]
     chat: list[ChatLine] = []
+    taps: int = Field(default=1, ge=1, le=3)
 
 
 Step = Annotated[AgentStep | TenantStep | HumanStep, Field(discriminator="actor")]
@@ -149,6 +172,8 @@ class Expected(_Model):
     refund_status: Literal["pending", "processed", "failed"] | None = None
     dispute_status: str | None = None
     evidence_strength: Literal["strong", "mixed", "weak"] | None = None
+    # The last Consent request's status at the end of the run.
+    consent_status: Literal["pending", "approved", "declined", "expired", "blocked"] | None = None
 
 
 class ModelReply(_Model):

@@ -1,7 +1,8 @@
 """The four demo journeys, over HTTP only, so they run against any deployment.
 
 1. An Agent pays within its Mandate: allow, then a Payment.
-2. A step-up: the Payer approves through the printed Consent link, then the Payment.
+2. A step-up the Payer approves: now Scenario E1 (demo/scenarios/E1.json), which
+   `python -m demo --journey 2` plays through the step engine (#276).
 3. A dispute: a captured Payment is disputed, a reviewer signs off its Evidence pack
    through the printed Review link, and the pack is verified against its Sign-off.
 4. A refund: a captured Payment is refunded in two parts, and the Monthly cap it used is
@@ -29,7 +30,6 @@ Json = dict[str, Any]
 
 GROCER = {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"}
 SMALL = {"minor": 1_250_00, "currency": "INR"}  # low tier: allowed
-LARGE = {"minor": 6_000_00, "currency": "INR"}  # over the INR 5,000 step-up threshold
 # The mock rail's test token whose debits capture (adapters/memory/rail.py).
 MOCK_CARD = {
     "rail": "mock",
@@ -227,28 +227,6 @@ class Demo:
     def journey_1(self) -> Json:
         self.say("Journey 1: an Agent pays within its Mandate")
         decision = self._decide(SMALL, "allow")
-        return self._pay(decision["decision_id"])
-
-    def journey_2(self) -> Json:
-        self.say("Journey 2: a large payment needs the Payer's approval")
-        decision = self._decide(LARGE, "step_up")
-        csr = decision["step_up"]["consent_request_id"]
-        link = self._call(
-            "Make a Consent link", "POST", f"/v1/consent-requests/{csr}/link", self.tenant_key
-        )
-        self._step(f"Consent link (open it and approve as the Payer): {link['url']}")
-
-        step = "Wait for the Payer to approve"
-
-        def resolved() -> str | None:
-            got = self._call(step, "GET", f"/v1/consent-requests/{csr}", self.tenant_key)
-            status: str = got["status"]
-            return None if status == "pending" else status
-
-        status = self._until(step, resolved)
-        self._step(f"Consent request {csr}: {status}")
-        if status != "approved":
-            raise StepFailed(step, f"the Consent request was {status}")
         return self._pay(decision["decision_id"])
 
     def journey_3(self) -> Json:
