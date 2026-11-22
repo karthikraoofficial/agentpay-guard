@@ -1,10 +1,10 @@
 # web/
 
-Next.js (App Router + Tailwind) front end for AgentPay Guard: the consent screen (Phase 3)
-the dispute viewer (Phase 5) and the Ops console (Phase 6).
+Next.js (App Router + Tailwind) front end for AgentPay Guard: the consent screen (Phase 3),
+the dispute viewer (Phase 5), the Ops console (Phase 6) and the demo page (`/demo`).
 
 ```bash
-cp .env.example .env.local   # NEXT_PUBLIC_API_URL, default http://localhost:8000
+cp .env.example .env.local   # NEXT_PUBLIC_API_URL and NEXT_PUBLIC_DEMO_RUNNER_URL
 npm ci
 npm run dev                  # http://localhost:3000
 npm run lint
@@ -58,6 +58,37 @@ To try it locally:
 2. Open a Dispute on a captured Payment, let the worker build its pack, and mint a link
    with `POST /v1/disputes/{id}/review-link`.
 3. Open the returned URL.
+
+## The demo page (`/demo`)
+
+A visitor picks a journey, grouped A–H, and watches it play. The page has three panes,
+which become tabs at phone width:
+- **Chat:** Asha's and ShopBot's scripted lines. After each Guard call comes a tool-call
+  card (the MCP tool name or HTTP route, with the request and response) and, for a
+  Decision, a verdict card with the Outcome and every Reason code in plain words.
+- **Asha's phone:** empty for now; later journeys open the consent screen here.
+- **Guard inspector:** the latest Decision's Outcome, Reason codes, Policy pack version,
+  Pack hash, Decision id and Audit record id. "What to notice" shows at the end.
+
+The visitor can step one turn at a time or press Play. A step that waits on the worker
+(a Payment being taken) is polled until it moves on.
+
+- **The calls are real.** The page calls the Demo runner (ADR-0031) at
+  `NEXT_PUBLIC_DEMO_RUNNER_URL`: `POST /runs` to start a run, then
+  `POST /runs/{id}/next` for each step. The runner holds the Demo Tenant's keys, so the
+  browser never sees one, and only this app's origin (`AGENTPAY_WEB_ORIGIN`) may call it.
+  A 429 from the runner shows as "The demo is busy. Try again in N seconds."
+- **The catalogue is fixed at build time.** Before `dev`, `lint`, `typecheck` and
+  `build`, `scripts/sync-scenarios.mjs` checks every `../demo/scenarios/*.json` against
+  `../demo/scenario.schema.json` (with Ajv) and copies them into `src/data/scenarios.json`
+  (git-ignored). A malformed Scenario file fails the build. If the build can't see
+  `../demo`, the page lists no journeys.
+- **Reason code text** is in `src/lib/reason-codes.ts`; a Python test
+  (`tests/test_web_reason_codes.py`) fails if a Reason code is missing from it.
+
+Locally: run the API with mock settle (`AGENTPAY_MOCK_SETTLE_AFTER_SECONDS`), the
+worker, and the Demo runner (`uv run python -m demo_runner`, port 8100) with the Demo
+Tenant's keys, then `npm run dev` and open http://localhost:3000/demo.
 
 ## The Ops console (`/ops`)
 
