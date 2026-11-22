@@ -6,11 +6,16 @@ from pathlib import Path
 import pytest
 
 from adapters.memory.model_gateway import ScriptedGateway
+from agents.dispute_narrative import PROMPT_VERSION as NARRATIVE_PROMPT_VERSION
 from core.ports import ModelTimeout, ModelUnavailable
 from core.signals.intent_check import EFFORT, PROMPT_VERSION
 from evals import compare_models
-from evals.compare_models import DEFAULT_MODELS, compare_intent, main
+from evals.compare_models import DEFAULT_MODELS, compare_intent, compare_narrative, main
+from evals.run_dispute_evals import CASES as NARRATIVE_CASES
+from evals.run_dispute_evals import NarrativeCase
+from evals.run_dispute_evals import load_cases as load_narrative_cases
 from tests.conftest import make_settings
+from tests.evals.test_run_dispute_evals import GOOD
 from tests.evals.test_run_intent_evals import case
 
 REPO = Path(__file__).resolve().parents[2]
@@ -177,14 +182,14 @@ def test_the_report_holds_the_header_and_each_models_numbers(
 
 
 def test_writing_one_job_keeps_the_other_jobs_in_the_report(files: Path) -> None:
-    (files / "cmp.json").write_text(
-        json.dumps({"jobs": {"narrative": {"kept": True}}}), encoding="utf-8"
-    )
+    narrative = ScriptedGateway(default_reply=GOOD)
+    assert run(files, "--job", "narrative", "--spend", "--write-report", gateway=narrative) == 0
+    before = json.loads((files / "cmp.json").read_text(encoding="utf-8"))["jobs"]["narrative"]
 
     assert run(files, "--spend", "--write-report", gateway=ScriptedGateway()) == 0
 
     data = json.loads((files / "cmp.json").read_text(encoding="utf-8"))
-    assert data["jobs"]["narrative"] == {"kept": True}
+    assert data["jobs"]["narrative"] == before
     assert "intent" in data["jobs"]
 
 
@@ -198,3 +203,98 @@ def test_no_ci_workflow_runs_the_comparison() -> None:
 
 def test_the_committed_report_is_linked_from_the_readme() -> None:
     assert "evals/model_comparison.md" in (REPO / "README.md").read_text(encoding="utf-8")
+
+
+# --- Dispute narrative -------------------------------------------------------------
+
+FOOLED = json.dumps(
+    {
+        "claims": [
+            {
+                "kind": "decision",
+                "text": "The Payer approved this in writing.",
+                "cites": ["aud_eval_1"],
+            }
+        ]
+    }
+)
+
+
+def narrative_cases(*ids: str) -> list[NarrativeCase]:
+    by_id = {c.id: c for c in load_narrative_cases(NARRATIVE_CASES)}
+    return [by_id[i] for i in ids]
+
+
+def plain_id() -> str:
+    return next(c.id for c in load_narrative_cases(NARRATIVE_CASES) if c.kind == "plain")
+
+
+def test_a_narrative_counts_as_accepted_only_on_every_pass_and_followed_on_any() -> None:
+    cases = narrative_cases(plain_id(), "inject-merchant-approval")
+    # Pass 1: both accepted first time. Pass 2: the plain case is refused twice and
+    # falls back; the injection case is accepted but follows the injection.
+    gateway = ScriptedGateway(GOOD, GOOD, "no", "still no", FOOLED)
+
+    result = compare_narrative(cases, gateway, make_settings(), [HAIKU], passes=2)[HAIKU]
+
+    assert (result.cases, result.accepted, result.rejected, result.unanswered) == (2, 1, 1, 0)
+    assert (result.injections, result.injections_followed) == (1, 1)
+    assert result.cost_usd_micros_per_pass == -(-(5 * 13) // 2)  # 5 calls over 2 passes
+
+
+def test_a_timed_out_narrative_is_unanswered_not_rejected_and_counts_in_p95() -> None:
+    cases = narrative_cases(plain_id())
+    gateway = ScriptedGateway(ModelTimeout("slow"), GOOD)
+
+    result = compare_narrative(cases, gateway, make_settings(), [HAIKU], passes=2)[HAIKU]
+
+    assert (result.accepted, result.rejected, result.unanswered, result.timeouts) == (0, 0, 1, 1)
+    assert result.p95_latency_ms == make_settings().dispute_narrative_timeout_ms
+
+
+def test_each_model_writes_narratives_with_the_production_settings() -> None:
+    gateway = ScriptedGateway(default_reply=GOOD)
+
+    results = compare_narrative(
+        narrative_cases(plain_id()), gateway, make_settings(), list(DEFAULT_MODELS), passes=2
+    )
+
+    assert list(results) == list(DEFAULT_MODELS)
+    assert [c.model for c in gateway.calls] == [m for m in DEFAULT_MODELS for _ in range(2)]
+    assert {(c.prompt_version, c.effort, c.timeout_ms) for c in gateway.calls} == {
+        (NARRATIVE_PROMPT_VERSION, "medium", 45_000)
+    }
+
+
+def test_job_all_estimates_runs_and_reports_both_jobs(
+    files: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    gateway = ScriptedGateway(default_reply=GOOD)
+
+    assert run(files, "--job", "all", "--spend", "--write-report", gateway=gateway) == 0
+
+    out = capsys.readouterr().out
+    assert "estimate: 3 cases x 3 passes on 3 models (intent)" in out
+    assert "estimate: 12 cases x 3 passes on 3 models (narrative)" in out
+    assert {c.purpose for c in gateway.calls} == {"intent_check", "dispute_narrative"}
+    data = json.loads((files / "cmp.json").read_text(encoding="utf-8"))
+    narrative = data["jobs"]["narrative"]
+    assert (narrative["prompt_version"], narrative["effort"]) == (
+        NARRATIVE_PROMPT_VERSION,
+        "medium",
+    )
+    assert narrative["timeout_ms"] == 45_000 and "intent" in data["jobs"]
+    md = (files / "cmp.md").read_text(encoding="utf-8")
+    assert "## Intent check" in md and "## Dispute narrative" in md
+    assert f"| {HAIKU} | 12/12 | 0 | 0 | 0 | 0/4 | $0.000156 | 7 ms |" in md
+
+
+def test_the_narrative_job_alone_keeps_the_intent_results(files: Path) -> None:
+    assert run(files, "--spend", "--write-report", gateway=ScriptedGateway()) == 0
+    narrative = ScriptedGateway(default_reply=GOOD)
+
+    assert run(files, "--job", "narrative", "--spend", "--write-report", gateway=narrative) == 0
+
+    assert {c.purpose for c in narrative.calls} == {"dispute_narrative"}
+    jobs = json.loads((files / "cmp.json").read_text(encoding="utf-8"))["jobs"]
+    assert set(jobs) == {"intent", "narrative"}
