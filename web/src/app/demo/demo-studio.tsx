@@ -4,12 +4,13 @@ import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { OUTCOME_TEXT, reasonText } from "@/lib/reason-codes";
-import { nextStep, startRun, type Card, type Failure } from "@/lib/runner-api";
+import { nextStep, startRun, type Card, type ConsentStatus, type Failure } from "@/lib/runner-api";
 import { GROUPS, SCENARIOS, type Scenario } from "@/lib/scenarios";
 
 const STEP_PAUSE_MS = 1200; // between turns while playing
 const POLL_MS = 2000; // while a step waits on the worker or a person
-const MAX_POLLS = 120; // about four minutes
+const MAX_POLLS = 120; // about four minutes, for the worker
+const HUMAN_POLLS = 330; // about eleven minutes: past a Consent request's 10-minute TTL
 
 type Pane = "chat" | "phone" | "inspector";
 
@@ -94,7 +95,7 @@ export function DemoStudio() {
       runId = started.data.run_id;
       update(gen, { runId, steps: started.data.steps });
     }
-    for (let polls = 0; polls <= MAX_POLLS; polls += 1) {
+    for (let polls = 0; ; polls += 1) {
       const answer = await nextStep(runId, r.next);
       if (gen !== generation.current) return false;
       if (!answer.ok) {
@@ -103,12 +104,17 @@ export function DemoStudio() {
       }
       const card = answer.data;
       if (!card.waiting) {
+        // Asha has answered: at phone width, go back to the chat, which carries on.
+        if (card.actor === "payer" && window.matchMedia("(max-width: 767px)").matches) setPane("chat");
         const cards = [...(current.current?.cards ?? []), card];
         update(gen, { cards, next: r.next + 1, busy: false, waiting: null });
         if (card.finished) update(gen, { playing: false });
         return !card.finished;
       }
       update(gen, { waiting: card });
+      // Asha answers on her phone: at phone width, show it.
+      if (card.link && window.matchMedia("(max-width: 767px)").matches) setPane("phone");
+      if (polls >= (card.actor === "payer" ? HUMAN_POLLS : MAX_POLLS)) break;
       await sleep(POLL_MS);
       if (gen !== generation.current) return false;
     }
@@ -135,6 +141,8 @@ export function DemoStudio() {
 
   const finished = run.cards.at(-1)?.finished ?? false;
   const decision = [...run.cards].reverse().find((c) => c.decision)?.decision ?? null;
+  // The latest Payer step: still waiting on Asha, or answered.
+  const asking = [...run.cards, ...(run.waiting ? [run.waiting] : [])].reverse().find((c) => c.link) ?? null;
 
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-4 px-4 py-6">
@@ -210,7 +218,7 @@ export function DemoStudio() {
         </section>
         <section className={`${pane === "phone" ? "" : "hidden"} min-w-0 md:block`} aria-label="Phone">
           <h2 className="mb-2 text-sm font-semibold text-neutral-500">Asha&apos;s phone</h2>
-          <Phone />
+          <Phone card={asking} />
         </section>
         <section className={`${pane === "inspector" ? "" : "hidden"} min-w-0 md:block`} aria-label="Guard inspector">
           <h2 className="mb-2 text-sm font-semibold text-neutral-500">Guard inspector</h2>
@@ -304,14 +312,18 @@ function Chat({ cards, waiting }: { cards: Card[]; waiting: Card | null }) {
             </p>
           ))}
           {card.call && <CallCard card={card} />}
+          {card.refused && <Refused code={card.refused} />}
           {card.decision && <Verdict decision={card.decision} />}
+          {card.actor === "payer" && card.consent && <Answer consent={card.consent} />}
         </li>
       ))}
       {waiting && (
         <li className="text-sm text-neutral-500" aria-live="polite">
-          {waiting.call?.name === "get_payment"
-            ? "Waiting for the bank to take the money…"
-            : "Waiting…"}
+          {waiting.actor === "payer"
+            ? "Waiting for Asha to approve or decline on her phone…"
+            : waiting.call?.name === "get_payment"
+              ? "Waiting for the bank to take the money…"
+              : "Waiting…"}
         </li>
       )}
     </ol>
@@ -323,7 +335,9 @@ function CallCard({ card }: { card: Card }) {
   return (
     <div className="min-w-0 rounded-md border border-neutral-300 p-2 text-sm dark:border-neutral-700">
       <div className="flex flex-wrap items-baseline gap-x-2">
-        <span className="text-xs text-neutral-500">{ACTOR[card.actor]} called</span>
+        <span className="text-xs text-neutral-500">
+          {card.actor === "payer" && call.name.startsWith("GET ") ? "Wallet app checked" : `${ACTOR[card.actor]} called`}
+        </span>
         <code className="font-mono text-xs font-semibold break-all">{call.name}</code>
         <span className="text-xs text-neutral-500">{call.kind === "tool" ? "(MCP tool)" : "(HTTP route)"}</span>
       </div>
@@ -372,13 +386,70 @@ function Verdict({ decision }: { decision: NonNullable<Card["decision"]> }) {
   );
 }
 
-function Phone() {
+const ANSWER_TEXT: Record<ConsentStatus, string> = {
+  pending: "Asha hasn't answered yet.",
+  approved: "Asha approved. ShopBot may now pay.",
+  declined: "Asha declined. No payment can be made on this request.",
+  expired: "Asha didn't answer in time, so the request expired. Silence never means yes.",
+  blocked: "Asha approved, but the Guard checked again and blocked it:",
+};
+
+const ANSWER_TONE: Record<ConsentStatus, string> = {
+  pending: "border-neutral-300 dark:border-neutral-700",
+  approved: "border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950",
+  declined: "border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950",
+  expired: "border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950",
+  blocked: "border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950",
+};
+
+function Answer({ consent }: { consent: NonNullable<Card["consent"]> }) {
   return (
-    <div className="mx-auto flex aspect-[9/16] w-full max-w-[260px] flex-col rounded-[2rem] border-4 border-neutral-800 p-3 dark:border-neutral-300">
-      <div className="mx-auto mb-3 h-1.5 w-16 rounded-full bg-neutral-300 dark:bg-neutral-700" />
-      <p className="m-auto text-center text-sm text-neutral-500">
-        Nothing for Asha to approve in this journey.
-      </p>
+    <div className={`rounded-md border p-2 text-sm ${ANSWER_TONE[consent.status]}`}>
+      <div className="font-semibold">{ANSWER_TEXT[consent.status]}</div>
+      {consent.reason_codes?.[0] && (
+        // The re-check's primary Reason code says why (ADR-0010).
+        <p className="mt-1 text-xs">
+          <code className="font-mono font-semibold">{consent.reason_codes[0]}</code>:{" "}
+          {reasonText(consent.reason_codes[0])}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function Refused({ code }: { code: string }) {
+  return (
+    <div className={`rounded-md border p-2 text-sm ${OUTCOME_TONE.block}`}>
+      <span className="font-semibold">Refused: </span>
+      <code className="font-mono">{code}</code>
+      {code === "INSUFFICIENT_SCOPE" && (
+        <p className="text-xs">ShopBot&apos;s key can ask for Decisions, never approve them.</p>
+      )}
+    </div>
+  );
+}
+
+// Asha's phone. While she must answer, it is the real consent screen on the run's Consent
+// link (the token is in the #fragment, ADR-0008); afterwards, her answer.
+function Phone({ card }: { card: Card | null }) {
+  const asking = card?.waiting && card.link;
+  return (
+    <div className="mx-auto flex aspect-[9/16] w-full max-w-[300px] flex-col overflow-hidden rounded-[2rem] border-4 border-neutral-800 p-2 dark:border-neutral-300">
+      <div className="mx-auto mb-2 h-1.5 w-16 shrink-0 rounded-full bg-neutral-300 dark:bg-neutral-700" />
+      {asking ? (
+        <iframe
+          key={card.link}
+          src={card.link!}
+          title="Asha's consent screen"
+          className="min-h-0 w-full flex-1 rounded-xl border-0 bg-white"
+        />
+      ) : card?.consent ? (
+        <div className="m-auto flex flex-col gap-2 p-2 text-center text-sm">
+          <Answer consent={card.consent} />
+        </div>
+      ) : (
+        <p className="m-auto text-center text-sm text-neutral-500">Nothing for Asha to approve yet.</p>
+      )}
     </div>
   );
 }

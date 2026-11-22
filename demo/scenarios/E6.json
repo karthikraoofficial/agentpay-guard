@@ -1,0 +1,105 @@
+{
+  "id": "E6",
+  "title": "Asha taps Approve twice",
+  "group": "E",
+  "playlists": [],
+  "story": "On a slow connection Asha taps Approve, nothing seems to happen, and she taps again. Exactly one approval is recorded: no double approvals, no confusion in the records.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 600000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Order the party food from FreshMart for Saturday."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "The party order at FreshMart comes to INR 6,000. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "payer",
+      "action": "approve",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "This one needs your approval, Asha. I've sent it to your phone."
+        }
+      ],
+      "taps": 2
+    },
+    {
+      "actor": "agent",
+      "tool": "get_consent_request",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Asha approved. Checking the approval before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Paying FreshMart INR 6,000 now."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": [
+        "captured",
+        "failed"
+      ],
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The payment is scheduled. I'll let you know once the money is taken."
+        }
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "step_up",
+    "reason_codes": [
+      "AMOUNT_ABOVE_STEP_UP_THRESHOLD",
+      "MERCHANT_NEW",
+      "INTENT_MISSING"
+    ],
+    "consent_status": "approved",
+    "payment_status": "captured"
+  },
+  "what_to_notice": "Both taps carry the same idempotency key, so the second gets back the first answer, the same approval and Audit record, instead of making another."
+}

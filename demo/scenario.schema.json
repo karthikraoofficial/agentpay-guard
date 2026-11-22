@@ -2,7 +2,7 @@
   "$defs": {
     "AgentStep": {
       "additionalProperties": false,
-      "description": "ShopBot calls a guard_mcp tool. The run fills in what it already knows (Mandate,\nAgent, merchant, the last Decision or Payment, the step's idempotency key).",
+      "description": "ShopBot calls a guard_mcp tool. The run fills in what it already knows (Mandate,\nAgent, merchant, the last Decision or Payment, the step's idempotency key).\n\n`route` instead of `tool` has ShopBot call an HTTP route with its decide key, for\njourneys that show a call no tool makes, e.g. trying to approve its own step_up.",
       "properties": {
         "actor": {
           "const": "agent",
@@ -28,17 +28,50 @@
           "title": "Chat",
           "type": "array"
         },
-        "tool": {
-          "enum": [
-            "request_decision",
-            "check_intent",
-            "get_decision",
-            "get_consent_request",
-            "create_payment",
-            "get_payment"
+        "expect_refusal": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "title": "Tool",
-          "type": "string"
+          "default": null,
+          "title": "Expect Refusal"
+        },
+        "route": {
+          "anyOf": [
+            {
+              "pattern": "^(GET|POST) /v1/\\S+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Route"
+        },
+        "tool": {
+          "anyOf": [
+            {
+              "enum": [
+                "request_decision",
+                "check_intent",
+                "get_decision",
+                "get_consent_request",
+                "create_payment",
+                "get_payment"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool"
         },
         "until_status": {
           "anyOf": [
@@ -57,8 +90,7 @@
         }
       },
       "required": [
-        "actor",
-        "tool"
+        "actor"
       ],
       "title": "AgentStep",
       "type": "object"
@@ -92,6 +124,25 @@
       "additionalProperties": false,
       "description": "What the run must end with; CI checks each field that is set.",
       "properties": {
+        "consent_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "pending",
+                "approved",
+                "declined",
+                "expired",
+                "blocked"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Consent Status"
+        },
         "dispute_status": {
           "anyOf": [
             {
@@ -205,7 +256,7 @@
     },
     "HumanStep": {
       "additionalProperties": false,
-      "description": "A person acts: Asha on her Consent link, or the reviewer on a Review link.",
+      "description": "A person acts: Asha on her Consent link, or the reviewer on a Review link.\n\nThe run mints the link. When a visitor plays Asha, the step waits until she has\nanswered on the consent screen; in CI the engine answers for her, sending each of\n`taps` with one idempotency key, as a double tap on a slow connection would.",
       "properties": {
         "action": {
           "enum": [
@@ -234,6 +285,13 @@
           },
           "title": "Chat",
           "type": "array"
+        },
+        "taps": {
+          "default": 1,
+          "maximum": 3,
+          "minimum": 1,
+          "title": "Taps",
+          "type": "integer"
         }
       },
       "required": [
@@ -418,7 +476,7 @@
     },
     "TenantStep": {
       "additionalProperties": false,
-      "description": "The wallet app calls an HTTP route with the tenant key, e.g.\n`POST /v1/payments/{payment_id}/refunds`. `{name}` is filled from the run.",
+      "description": "The wallet app calls an HTTP route with the tenant key, e.g.\n`POST /v1/mandates/{mandate_id}/revoke`.",
       "properties": {
         "actor": {
           "const": "tenant",
@@ -445,6 +503,18 @@
           },
           "title": "Chat",
           "type": "array"
+        },
+        "expect_refusal": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expect Refusal"
         },
         "route": {
           "pattern": "^(GET|POST) /v1/\\S+$",

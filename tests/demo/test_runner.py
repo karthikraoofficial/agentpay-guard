@@ -279,3 +279,45 @@ def test_the_runner_refuses_a_live_key(
     assert code == 1
     assert "only test keys" in err
     assert live not in err
+
+
+async def test_a_payer_step_waits_on_its_consent_link_until_asha_answers(
+    api: Api, keys: tuple[str, str]
+) -> None:
+    async with runner(api, keys) as client:
+        run_id = (await start(client, "E1")).json()["run_id"]
+        await client.post(f"/runs/{run_id}/next", json={"step": 0})
+        await client.post(f"/runs/{run_id}/next", json={"step": 1})  # step_up
+
+        first = (await client.post(f"/runs/{run_id}/next", json={"step": 2})).json()
+        again = (await client.post(f"/runs/{run_id}/next", json={"step": 2})).json()
+        token = first["link"].split("#", 1)[1]
+        tapped = api.client.post(
+            "/v1/consent-link/approve", headers={"Consent-Link": token, "Idempotency-Key": "tap-1"}
+        )
+        answered = (await client.post(f"/runs/{run_id}/next", json={"step": 2})).json()
+
+    assert first["waiting"] and first["actor"] == "payer"
+    assert "/consent#" in first["link"]
+    assert again["waiting"] and again["link"] == first["link"]  # one link, not a new one
+    assert tapped.status_code == 200
+    assert not answered["waiting"]
+    assert answered["consent"]["status"] == "approved"
+
+
+async def test_a_blocked_approval_shows_why_on_the_payers_card(
+    api: Api, keys: tuple[str, str]
+) -> None:
+    async with runner(api, keys) as client:
+        run_id = (await start(client, "E4")).json()["run_id"]
+        for step in (0, 1, 2):  # setup, step_up, the Mandate revoked
+            await client.post(f"/runs/{run_id}/next", json={"step": step})
+        asking = (await client.post(f"/runs/{run_id}/next", json={"step": 3})).json()
+        token = asking["link"].split("#", 1)[1]
+        api.client.post(
+            "/v1/consent-link/approve", headers={"Consent-Link": token, "Idempotency-Key": "tap-1"}
+        )
+        answered = (await client.post(f"/runs/{run_id}/next", json={"step": 3})).json()
+
+    assert answered["consent"]["status"] == "blocked"
+    assert answered["consent"]["reason_codes"][0] == "MANDATE_REVOKED"  # the primary reason

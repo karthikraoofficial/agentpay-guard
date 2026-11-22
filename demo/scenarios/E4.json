@@ -1,0 +1,92 @@
+{
+  "id": "E4",
+  "title": "Things changed while Asha was deciding",
+  "group": "E",
+  "playlists": [],
+  "story": "A request steps up. Before Asha opens the link, she cancels ShopBot's permission from another device, forgets, then opens the link and taps Approve. On approval the Guard re-checks everything, so the result is blocked, not approved.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 600000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Order the party food from FreshMart for Saturday."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "The party order at FreshMart comes to INR 6,000. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/mandates/{mandate_id}/revoke",
+      "body": {
+        "revoked_by": "payer"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Actually, cancel ShopBot's permission to pay for me."
+        }
+      ]
+    },
+    {
+      "actor": "payer",
+      "action": "approve",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The INR 6,000 order is still waiting for your approval on your phone."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_consent_request",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The approval was blocked: my permission was withdrawn, so I won't pay."
+        }
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "step_up",
+    "reason_codes": [
+      "AMOUNT_ABOVE_STEP_UP_THRESHOLD",
+      "MERCHANT_NEW",
+      "INTENT_MISSING"
+    ],
+    "consent_status": "blocked"
+  },
+  "what_to_notice": "The approval is checked again against the Mandate as it is now. It was revoked, so the approval is blocked with MANDATE_REVOKED: an approval can never bring back a permission that was withdrawn."
+}

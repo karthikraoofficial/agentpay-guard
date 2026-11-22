@@ -25,7 +25,8 @@ async def test_each_scenario_ends_with_its_expected_result(
 ) -> None:
     operator = Operator(api, [])
     async with clients(api, keys) as (agent, tenant):
-        run = Run(scenario, agent=agent, tenant=tenant, now=api.clock.now)
+        # In CI the engine plays Asha; on the demo page a visitor does.
+        run = Run(scenario, agent=agent, tenant=tenant, now=api.clock.now, people="engine")
 
         cards = await play(run, wait=operator.wait, patience=20)
 
@@ -80,3 +81,50 @@ def test_the_cli_refuses_an_unknown_scenario(capsys: pytest.CaptureFixture[str])
 
     assert code == 2
     assert "No Scenario Z9" in capsys.readouterr().err
+
+
+async def test_e6_a_double_tap_records_one_approval(api: Api, keys: tuple[str, str]) -> None:
+    operator = Operator(api, [])
+    async with clients(api, keys) as (agent, tenant):
+        run = Run(catalogue()["E6"], agent=agent, tenant=tenant, now=api.clock.now, people="engine")
+
+        cards = await play(run, wait=operator.wait, patience=20)
+
+    tapped = next(card for card in cards if card.actor == "payer")
+    assert tapped.consent is not None and tapped.consent.status == "approved"
+    assert tapped.call is not None and tapped.call.response["taps"] == 2
+    assert tapped.call.response["distinct_answers"] == 1
+
+
+async def test_e5_shows_the_refusal_on_its_card(api: Api, keys: tuple[str, str]) -> None:
+    operator = Operator(api, [])
+    async with clients(api, keys) as (agent, tenant):
+        run = Run(catalogue()["E5"], agent=agent, tenant=tenant, now=api.clock.now, people="engine")
+
+        cards = await play(run, wait=operator.wait, patience=20)
+
+    refused = next(card for card in cards if card.refused)
+    assert refused.actor == "agent"
+    assert refused.refused == "INSUFFICIENT_SCOPE"
+    assert refused.call is not None and refused.call.kind == "route"
+
+
+async def test_the_cli_prints_the_consent_link_and_waits_for_asha(
+    api: Api, keys: tuple[str, str]
+) -> None:
+    out: list[str] = []
+    operator = Operator(api, out)  # approves through the link the CLI prints
+    async with clients(api, keys) as (agent, tenant):
+        code = await run_scenario(
+            catalogue()["E1"],
+            agent=agent,
+            tenant=tenant,
+            say=out.append,
+            wait=operator.wait,
+            now=api.clock.now,
+            patience=20,
+        )
+
+    assert code == 0, "\n".join(out)
+    assert operator.used, "the CLI never printed a Consent link"
+    assert any("approved" in line for line in out)

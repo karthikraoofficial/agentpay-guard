@@ -1,4 +1,5 @@
-"""The demo CLI (#138): the three demo journeys over HTTP against the in-process app, on
+"""The demo CLI (#138): demo journeys 1, 3 and 4 (journey 2 is Scenario E1, tested in
+tests/demo/test_scenarios.py) over HTTP against the in-process app, on
 the mock rail with mock settle on.
 
 The CLI only talks HTTP. Each time it waits, this test plays the worker (the mock settle
@@ -44,19 +45,6 @@ def test_journey_1_an_allow_becomes_a_payment(api: Api, keys: tuple[str, str]) -
     assert any("allow" in line for line in out)
 
 
-def test_journey_2_a_step_up_is_approved_through_the_consent_link_then_paid(
-    api: Api, keys: tuple[str, str]
-) -> None:
-    out: list[str] = []
-    operator = Operator(api, out)
-
-    payment = demo(api, keys, out, operator).journey_2()
-
-    assert payment["status"] == "scheduled"
-    assert any("step_up" in line for line in out)
-    assert operator.used, "the CLI never printed a Consent link"
-
-
 def test_journey_3_a_captured_payment_is_disputed_signed_off_and_verified(
     api: Api, keys: tuple[str, str]
 ) -> None:
@@ -92,7 +80,6 @@ def test_the_journeys_run_one_after_another_and_never_print_a_key(
     run = demo(api, keys, out)
 
     run.journey_1()
-    run.journey_2()
     run.journey_3()
     run.journey_4()
 
@@ -118,15 +105,15 @@ def test_waiting_gives_up_and_says_on_what(api: Api, keys: tuple[str, str]) -> N
         agent_key=keys[0],
         tenant_key=keys[1],
         say=out.append,
-        wait=lambda: None,  # nobody approves
+        wait=lambda: None,  # no worker settles the Payment
         now=api.clock.now,
         patience=3,
     )
 
     with pytest.raises(StepFailed) as failed:
-        never.journey_2()
+        never.journey_3()
 
-    assert failed.value.step == "Wait for the Payer to approve"
+    assert failed.value.step == "Wait for the Payment to be captured"
 
 
 def test_the_cli_refuses_to_start_without_the_demo_keys(capsys: pytest.CaptureFixture[str]) -> None:

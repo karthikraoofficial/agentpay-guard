@@ -66,7 +66,10 @@ which become tabs at phone width:
 - **Chat:** Asha's and ShopBot's scripted lines. After each Guard call comes a tool-call
   card (the MCP tool name or HTTP route, with the request and response) and, for a
   Decision, a verdict card with the Outcome and every Reason code in plain words.
-- **Asha's phone:** empty for now; later journeys open the consent screen here.
+- **Asha's phone:** on a step_up, the real consent screen in a phone frame, opened on the
+  run's Consent link (`/consent#<token>`, ADR-0008). The visitor approves or declines as
+  Asha, and the chat carries on with her answer, including a blocked approval's reason.
+  At phone width the page switches to this tab while Asha must answer, and back after.
 - **Guard inspector:** the latest Decision's Outcome, Reason codes, Policy pack version,
   Pack hash, Decision id and Audit record id. "What to notice" shows at the end.
 

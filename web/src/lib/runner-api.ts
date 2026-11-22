@@ -19,10 +19,18 @@ export type Card = {
     pack_hash: string;
     audit_record_id: string;
   } | null;
+  // A Payer step: the Consent link Asha answers on (the consent screen, ADR-0008).
+  link: string | null;
+  // The Consent request as this step left it.
+  consent: { consent_request_id: string; status: ConsentStatus; reason_codes: string[] | null } | null;
+  // The error code of a refusal the journey shows, e.g. INSUFFICIENT_SCOPE.
+  refused: string | null;
   waiting: boolean;
   finished: boolean;
   mismatches: string[];
 };
+
+export type ConsentStatus = "pending" | "approved" | "declined" | "expired" | "blocked";
 
 export type Started = { run_id: string; scenario: string; steps: number };
 
