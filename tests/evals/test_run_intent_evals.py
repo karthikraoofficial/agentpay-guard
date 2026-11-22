@@ -158,3 +158,49 @@ def test_the_command_refuses_to_run_without_an_api_key(
 
 def test_the_eval_set_is_not_collected_by_pytest() -> None:
     assert not list(Path(CASES).parent.glob("test_*.py"))
+
+
+def test_the_run_takes_a_model_and_defaults_to_the_configured_one() -> None:
+    cases = [case("match", ["match"])]
+    configured, chosen = ScriptedGateway(), ScriptedGateway()
+
+    assert run_cases(cases, configured, make_settings()).model == "claude-haiku-5-5"
+    report = run_cases(cases, chosen, make_settings(), model="claude-sonnet-5-5")
+
+    assert report.model == "claude-sonnet-5-5"
+    assert [c.model for c in configured.calls + chosen.calls] == [
+        "claude-haiku-5-5",
+        "claude-sonnet-5-5",
+    ]
+
+
+def test_the_report_gives_p95_latency_with_timeouts_and_the_timeout_count() -> None:
+    cases = [case("match", ["match"], f"c{n}") for n in range(20)]
+    timeout_ms = make_settings().intent_check_timeout_ms
+    script = [*["MATCH"] * 17, ModelUnavailable("x"), ModelTimeout("a"), ModelTimeout("b")]
+
+    report = run_cases(cases, ScriptedGateway(*script), make_settings())
+
+    # 17 replies at 7 ms and 2 timeouts; the API error has no latency. Of those 19 calls
+    # the 19th (ceil(0.95 * 19)) is a timeout.
+    assert (report.timeouts, report.p95_latency_ms) == (2, timeout_ms)
+    assert run_cases(cases[:1], ScriptedGateway(), make_settings()).p95_latency_ms == 7
+
+
+def test_the_command_prints_p95_latency_and_timeouts(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    import evals.run_intent_evals as runner
+
+    cases = tmp_path / "cases.jsonl"
+    cases.write_text(case("match", ["match"]).model_dump_json() + "\n", encoding="utf-8")
+    monkeypatch.setattr(runner, "get_settings", lambda: make_settings(anthropic_api_key="sk-t"))
+    gateway = ScriptedGateway()
+    monkeypatch.setattr(runner, "ClaudeGateway", lambda *_: gateway)
+
+    assert main(["--cases", str(cases), "--model", "claude-opus-5-5"]) == 0
+
+    out = capsys.readouterr().out
+    assert "model: claude-opus-5-5" in out
+    assert "latency: p95 7 ms over 1 call(s), 0 timed out" in out
+    assert gateway.calls[0].model == "claude-opus-5-5"

@@ -24,7 +24,6 @@ false-block is the reverse.
 
 import argparse
 import json
-import math
 import time
 from collections.abc import Sequence
 from datetime import datetime
@@ -49,6 +48,7 @@ from evals.disputes import (
     run_dispute_cases,
     run_narrative_cases,
 )
+from evals.model_calls import p95
 
 GOLDEN = Path(__file__).resolve().parent / "golden"
 PACKS = Path(__file__).resolve().parents[1] / "policy_packs"
@@ -230,12 +230,6 @@ def run_cases(cases: Sequence[Case], pack_root: Path = PACKS) -> Report:
         engine_ms=engine_ms,
         **outcomes,
     )
-
-
-def p95(samples: Sequence[float]) -> float:
-    """Nearest-rank 95th percentile."""
-    ordered = sorted(samples)
-    return ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)]
 
 
 def main(argv: list[str] | None = None) -> int:
