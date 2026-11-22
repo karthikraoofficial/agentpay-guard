@@ -94,3 +94,38 @@ def test_production_keys_are_live_keys(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert len(created) == 2
     assert all(prefix.startswith("apg_live_") for prefix in created)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["create-tenant", "Demo", "--test"],
+        ["create-key", "--tenant", "ten_x", "--scopes", "decide", "--test"],
+    ],
+)
+def test_test_keys_can_be_issued_in_production_for_the_demo(
+    monkeypatch: pytest.MonkeyPatch, command: list[str]
+) -> None:
+    """The hosted demo runs with env=production, and the Demo runner takes only test keys
+    (ADR-0031), so its Demo Tenant's keys are issued with --test."""
+    created: list[str] = []
+
+    class Directory:
+        def create_tenant(self, tenant_id, name, created_at):  # type: ignore[no-untyped-def]
+            pass
+
+        def add_api_key(self, tenant_id, key_prefix, key_hash, scopes, created_at):  # type: ignore[no-untyped-def]
+            created.append(key_prefix)
+            return True
+
+    monkeypatch.setattr(
+        admin,
+        "get_settings",
+        lambda: make_settings(env="production", anthropic_api_key=SecretStr("sk-test")),
+    )
+    monkeypatch.setattr(admin, "PostgresStore", lambda _engine: Directory())
+
+    assert admin.main(command) == 0
+
+    assert created
+    assert all(prefix.startswith("apg_test_") for prefix in created)

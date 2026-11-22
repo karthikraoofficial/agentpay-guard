@@ -5,6 +5,9 @@
   (ADR-0011). Only hashes are stored.
 - `create-key --tenant <id> --scopes decide,consent,manage`: issues another key with
   exactly those scopes. Exit 3 if there is no such Tenant.
+- Keys are live (`apg_live_`) when `AGENTPAY_ENV=production`, test (`apg_test_`)
+  otherwise. `--test` on either command issues test keys even in production: the hosted
+  demo runs with env=production, and its Demo runner takes only test keys (ADR-0031).
 - `replay <audit_record_id> --tenant <id>`: re-runs a recorded engine run (a Decision,
   or an approved or blocked Consent resolution) and checks the output is byte-identical.
   A declined or expired resolution has nothing to re-run and exits 0. Exit 0 identical,
@@ -189,9 +192,15 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     create = commands.add_parser("create-tenant", help="create a Tenant and print its keys")
     create.add_argument("name")
+    test_help = (
+        "issue test keys (apg_test_) even in production: for the hosted Demo Tenant, whose "
+        "keys the Demo runner holds and which takes only test keys (ADR-0031)"
+    )
+    create.add_argument("--test", action="store_true", help=test_help)
     key = commands.add_parser("create-key", help="issue another API key for a Tenant")
     key.add_argument("--tenant", required=True)
     key.add_argument("--scopes", required=True, type=_scope_list)
+    key.add_argument("--test", action="store_true", help=test_help)
     rep = commands.add_parser("replay", help="re-run a recorded Decision and compare bytes")
     rep.add_argument("audit_record_id")
     rep.add_argument("--tenant", required=True)
@@ -214,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         return verify_pack_command(
             store, TenantId(args.tenant), args.dispute_id, settings.policy_packs_dir, print
         )
-    live = settings.env == "production"
+    live = settings.env == "production" and not args.test
     if args.command == "create-key":
         issued = create_key(
             store, TenantId(args.tenant), args.scopes, live=live, clock=SystemClock()

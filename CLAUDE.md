@@ -36,6 +36,7 @@ Run from the repo root. These are the same commands CI runs.
 - Migrations: `uv run alembic upgrade head`
 - Create a Tenant (prints an agent key and a tenant key once): `uv run python -m api.admin create-tenant <name>`
 - Issue another API key: `uv run python -m api.admin create-key --tenant <id> --scopes decide,consent,manage` (any subset; ADR-0011)
+- Keys are `apg_live_` with `AGENTPAY_ENV=production`, `apg_test_` otherwise; `--test` on either command issues test keys in production too, as the hosted Demo Tenant needs for the Demo runner (ADR-0031)
 - Replay a Decision / verify a Tenant's Audit chain: `uv run python -m api.admin replay <audit_record_id> --tenant <id>` and `uv run python -m api.admin verify --tenant <id>`; check a Dispute's Evidence packs: `uv run python -m api.admin verify-pack <dispute_id> --tenant <id>`
 - Policy pack hash / schema: `uv run python -m core.policy.packs --hash <pack.yaml>` and `--write-schema`
 - Evals: `uv run python -m evals.run_evals` (every golden file in `evals/golden/`, each on its pinned pack; fails on any false-allow, false-block or wrong reason code, and on any Dispute case with the wrong network codes, Evidence strength or missing evidence, or any model reply the citation checker judges wrongly, and when the committed Eval report or README eval table is stale; regenerate both with `uv run python -m evals.run_evals --write-report`)
