@@ -1,0 +1,95 @@
+{
+  "id": "E3",
+  "title": "Asha doesn't answer",
+  "group": "E",
+  "playlists": [
+    "payments-pm"
+  ],
+  "story": "The INR 6,000 party order steps up, but Asha is in a meeting and ignores the link. After 10 minutes the request expires and counts as a no: silence never means yes, and ShopBot must ask again.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 600000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Order the party food from FreshMart for Saturday."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "The party order at FreshMart comes to INR 6,000. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "payer",
+      "action": "ignore",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "This one needs your approval, Asha. I've sent it to your phone."
+        }
+      ]
+    },
+    {
+      "actor": "visitor",
+      "control": "expire_consent",
+      "label": "Skip 10 minutes",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Asha is in a meeting and hasn't opened the link."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_consent_request",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The request expired without an answer, so I won't pay. I'll ask again later."
+        }
+      ]
+    }
+  ],
+  "demo_controls": [
+    "expire_consent"
+  ],
+  "expected": {
+    "outcome": "step_up",
+    "reason_codes": [
+      "AMOUNT_ABOVE_STEP_UP_THRESHOLD",
+      "MERCHANT_NEW",
+      "INTENT_MISSING"
+    ],
+    "consent_status": "expired"
+  },
+  "what_to_notice": "Fast-forward didn't move any clock or edit the request: a Demo control ended its 10 minutes now and ran the same expiry the timer runs, with its own Audit record naming the control."
+}

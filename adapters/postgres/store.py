@@ -27,6 +27,7 @@ from adapters.postgres.tables import (
     consent_requests,
     consent_resolutions,
     decisions,
+    demo_controls,
     disputes,
     evidence_packs,
     idempotency_keys,
@@ -54,6 +55,7 @@ from core.domain.consent import (
     ConsentStatus,
 )
 from core.domain.decisions import AuditRecordId, Decision, DecisionId, PackRef
+from core.domain.demo_controls import DemoControl, DemoControlKind
 from core.domain.disputes import Dispute, DisputeId, Reviewer, ReviewLink, SignOff
 from core.domain.evidence import EvidencePack
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
@@ -466,6 +468,24 @@ class PostgresTransaction:
             .one_or_none()
         )
         return None if row is None else Void.model_validate(dict(row))
+
+    def add_demo_control(self, control: DemoControl) -> None:
+        self._own(control.tenant_id)
+        self._conn.execute(insert(demo_controls).values(**control.model_dump()))
+
+    def get_demo_control(self, kind: DemoControlKind, target_id: str) -> DemoControl | None:
+        c = demo_controls.c
+        row = (
+            self._conn.execute(
+                select(demo_controls)
+                .where(c.tenant_id == self._tenant_id, c.kind == kind, c.target_id == target_id)
+                .order_by(c.at, c.control_id)
+                .limit(1)
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return None if row is None else DemoControl.model_validate(dict(row))
 
     def update_payment(self, payment: Payment) -> None:
         self._own(payment.tenant_id)
@@ -1000,6 +1020,24 @@ class PostgresStore:
         with self._engine.connect() as conn:
             rows = conn.execute(query).all()
         return [(TenantId(t), PaymentId(i)) for t, i in rows]
+
+    def notice_ended_by_control(self, tenant_id: TenantId) -> list[PaymentId]:
+        p, c = payments.c, demo_controls.c
+        query = (
+            select(p.payment_id)
+            .join(demo_controls, (c.tenant_id == p.tenant_id) & (c.target_id == p.payment_id))
+            .where(
+                p.tenant_id == tenant_id,
+                c.kind == "expire_notice",
+                p.status == "scheduled",
+                p.rail_payment_id.is_(None),
+            )
+            .distinct()
+            .order_by(p.payment_id)
+        )
+        with self._engine.connect() as conn:
+            rows = conn.execute(query).all()
+        return [PaymentId(i) for (i,) in rows]
 
     def expired_unresolved_consents(self, expired_before: datetime) -> int:
         r, s = consent_requests.c, consent_resolutions.c

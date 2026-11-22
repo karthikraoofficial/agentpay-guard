@@ -45,8 +45,14 @@ from core.tenant_events import dispute_changed
 def get_audit_trail(
     tx: TenantTransaction, decision_ids: set[DecisionId], up_to_seq: int
 ) -> tuple[BundleRecord, ...]:
-    """These Decisions' Audit records, in chain order, up to `up_to_seq`."""
-    return tuple(_bundled(s) for s in tx.audit_records_for(decision_ids, up_to_seq))
+    """These Decisions' Audit records, in chain order, up to `up_to_seq`. Demo control
+    records are left out (ADR-0032): they end the hosted demo's timers early, and are not
+    evidence about the payment. They stay in the Audit chain, which `verify` checks."""
+    return tuple(
+        _bundled(s)
+        for s in tx.audit_records_for(decision_ids, up_to_seq)
+        if s.record.kind != "demo_control"
+    )
 
 
 def get_mandate(trail: tuple[BundleRecord, ...]) -> Mandate:

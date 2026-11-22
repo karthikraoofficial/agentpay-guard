@@ -1,0 +1,58 @@
+{
+  "id": "B10",
+  "title": "Permission expired",
+  "group": "B",
+  "playlists": [],
+  "story": "ShopBot tries to pay under a permission that ran out yesterday. The Guard blocks it with MANDATE_EXPIRED: no payment is made under an expired permission, and approving can't bring it back.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ],
+      "expired_days_ago": 1
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Reorder my usual milk and bread, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    }
+  ],
+  "demo_controls": [],
+  "expected": {
+    "outcome": "block",
+    "reason_codes": [
+      "MANDATE_EXPIRED"
+    ]
+  },
+  "what_to_notice": "Nothing was fast-forwarded and nothing was edited: Asha's permission was granted for a period that ended yesterday, and the Guard's fixed rule compares that end with the real time of the request. The inspector's Mandate snapshot shows the dates."
+}

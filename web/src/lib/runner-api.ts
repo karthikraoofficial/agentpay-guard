@@ -8,7 +8,7 @@ export type Json = Record<string, unknown>;
 
 export type Card = {
   step: number;
-  actor: "agent" | "tenant" | "payer" | "reviewer";
+  actor: "agent" | "tenant" | "payer" | "reviewer" | "visitor";
   chat: ChatLine[];
   call: { kind: "tool" | "route"; name: string; request: Json | null; response: Json } | null;
   decision: {
@@ -25,6 +25,8 @@ export type Card = {
   consent: { consent_request_id: string; status: ConsentStatus; reason_codes: string[] | null } | null;
   // The error code of a refusal the journey shows, e.g. INSUFFICIENT_SCOPE.
   refused: string | null;
+  // A fast-forward waiting for the visitor's press: the button's words (ADR-0032).
+  fast_forward: string | null;
   waiting: boolean;
   finished: boolean;
   mismatches: string[];
@@ -80,6 +82,7 @@ export function startRun(scenario: string): Promise<Result<Started>> {
 
 // `step` is the step the page means: asking again for the one just run gives its card
 // back instead of running it twice, so a double click or a retry is safe.
-export function nextStep(runId: string, step: number): Promise<Result<Card>> {
-  return post(`/runs/${encodeURIComponent(runId)}/next`, { step });
+// `press` is the visitor pressing the fast-forward this step is waiting on.
+export function nextStep(runId: string, step: number, press = false): Promise<Result<Card>> {
+  return post(`/runs/${encodeURIComponent(runId)}/next`, { step, press });
 }

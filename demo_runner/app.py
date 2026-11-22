@@ -2,7 +2,8 @@
 
 - `POST /runs` `{"scenario": "A1"}`: start a run (201). The answer holds an unguessable
   run id and the number of steps. Each run grants its own Payer, Agent and Mandate.
-- `POST /runs/{run_id}/next` `{"step": n}`: run step n and return its Card. Asking again
+- `POST /runs/{run_id}/next` `{"step": n, "press": false}`: run step n and return its Card.
+  A fast-forward step waits until `press` is true (ADR-0032). Asking again
   for the step just run returns its Card without running it twice; a step that failed
   runs again with the same idempotency key. A waiting Card means: ask for the same step
   again later.
@@ -49,6 +50,8 @@ class StartBody(BaseModel):
 
 class NextBody(BaseModel):
     step: int | None = Field(default=None, ge=0)
+    # The visitor pressed the fast-forward this step is waiting on (ADR-0032).
+    press: bool = False
 
 
 class Started(BaseModel):
@@ -155,7 +158,7 @@ def create_app(
             return _problem(404, "RUN_NOT_FOUND", "No such run: it may have expired.")
         async with live.lock:
             try:
-                card = await live.run.next(body.step)
+                card = await live.run.next(body.step, press=body.press)
             except WrongStep as wrong:
                 return _problem(409, "WRONG_STEP", str(wrong))
             except StepFailed as failed:

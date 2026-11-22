@@ -1,0 +1,96 @@
+{
+  "id": "F7",
+  "title": "The advance notice couldn't be sent",
+  "group": "F",
+  "playlists": [
+    "risk-compliance"
+  ],
+  "story": "ShopBot pays INR 1,250, but the bank couldn't deliver the required advance notice to Asha. The payment is never charged (RAIL_NOTICE_FAILED), because charging without notice would break the rules.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_notice_fails"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Reorder my usual milk and bread, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Allowed. Paying FreshMart now; your bank will send the advance notice first."
+        }
+      ]
+    },
+    {
+      "actor": "visitor",
+      "control": "expire_notice",
+      "label": "Skip to the end of the notice period",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The payment is waiting out the notice period."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": [
+        "captured",
+        "failed"
+      ],
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Checking whether the payment went through."
+        }
+      ]
+    }
+  ],
+  "demo_controls": [
+    "expire_notice"
+  ],
+  "expected": {
+    "outcome": "allow",
+    "reason_codes": [],
+    "payment_status": "failed",
+    "payment_failure_code": "RAIL_NOTICE_FAILED"
+  },
+  "what_to_notice": "The pretend bank's notice-fails card shows what happens when the advance notice can't be delivered: the payment fails with RAIL_NOTICE_FAILED and is never charged, even though the Guard allowed it."
+}

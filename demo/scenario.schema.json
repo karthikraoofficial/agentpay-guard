@@ -189,6 +189,18 @@
           "default": null,
           "title": "Outcome"
         },
+        "payment_failure_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Payment Failure Code"
+        },
         "payment_status": {
           "anyOf": [
             {
@@ -312,6 +324,20 @@
           },
           "title": "Allowed Mccs",
           "type": "array"
+        },
+        "expired_days_ago": {
+          "anyOf": [
+            {
+              "maximum": 300,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expired Days Ago"
         },
         "monthly_cap": {
           "$ref": "#/$defs/Money"
@@ -528,6 +554,47 @@
       ],
       "title": "TenantStep",
       "type": "object"
+    },
+    "VisitorStep": {
+      "additionalProperties": false,
+      "description": "The visitor presses fast-forward: a Demo control ends a timer now (ADR-0032). On the\ndemo page the run waits for the press; the CLI and CI press it at once.",
+      "properties": {
+        "actor": {
+          "const": "visitor",
+          "title": "Actor",
+          "type": "string"
+        },
+        "chat": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ChatLine"
+          },
+          "title": "Chat",
+          "type": "array"
+        },
+        "control": {
+          "enum": [
+            "expire_consent",
+            "expire_payment_window",
+            "expire_notice"
+          ],
+          "title": "Control",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor",
+        "control",
+        "label"
+      ],
+      "title": "VisitorStep",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -609,7 +676,8 @@
             "agent": "#/$defs/AgentStep",
             "payer": "#/$defs/HumanStep",
             "reviewer": "#/$defs/HumanStep",
-            "tenant": "#/$defs/TenantStep"
+            "tenant": "#/$defs/TenantStep",
+            "visitor": "#/$defs/VisitorStep"
           },
           "propertyName": "actor"
         },
@@ -622,6 +690,9 @@
           },
           {
             "$ref": "#/$defs/HumanStep"
+          },
+          {
+            "$ref": "#/$defs/VisitorStep"
           }
         ]
       },

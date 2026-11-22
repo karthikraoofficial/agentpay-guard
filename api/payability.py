@@ -4,16 +4,28 @@ An allow can be paid until its Decision time plus the window of the pack it was 
 with. An approved step-up can be paid until its Consent resolution time plus the window
 of the pack the approval was re-checked with (ADR-0010). A Voided Decision, and anything
 else, has no window.
+For the Demo Tenant only, an expire-now Demo control ends the window at the control's time
+if that comes first (ADR-0032).
 The engine never sees this, and no Audit record carries it."""
 
 from datetime import datetime
 from pathlib import Path
 
+from core.demo_controls import control_for
 from core.domain.consent import ConsentRequest, ConsentResolution
 from core.domain.decisions import Decision, PackRef
+from core.domain.demo_controls import ends
+from core.domain.parties import TenantId
 from core.policy.pack import PolicyPack
 from core.policy.packs import LoadedPack, load_pack
 from core.ports import TenantTransaction
+from core.settings import Settings
+
+
+def demo_tenant(settings: Settings) -> TenantId | None:
+    """The one Tenant whose Demo controls are honoured, if any (ADR-0032)."""
+    tenant = settings.demo_controls_tenant_id
+    return None if tenant is None else TenantId(tenant)
 
 
 def window_end(granted_at: datetime, pack: PolicyPack) -> datetime:
@@ -46,16 +58,23 @@ def payable_until(
     consent: ConsentRequest | None,
     active: LoadedPack,
     packs_dir: Path,
+    *,
+    demo_tenant: TenantId | None = None,
 ) -> datetime | None:
+    """`demo_tenant` is `AGENTPAY_DEMO_CONTROLS_TENANT_ID`: only that Tenant's Demo
+    controls are honoured (ADR-0032)."""
     if tx.get_void(decision.decision_id) is not None:
         return None
     if decision.outcome == "allow":
-        return window_end(decision.decided_at, _pack(decision.policy_pack, active, packs_dir))
-    resolution = approval(consent)
-    if resolution is None:
-        return None
-    sealed = tx.get_audit_record(resolution.audit_record_id)
-    ref = sealed.record.pack if sealed else None
-    if ref is None:
-        raise RuntimeError(f"Approval {resolution.audit_record_id} has no recorded pack")
-    return window_end(resolution.resolved_at, _pack(ref, active, packs_dir))
+        end = window_end(decision.decided_at, _pack(decision.policy_pack, active, packs_dir))
+    else:
+        resolution = approval(consent)
+        if resolution is None:
+            return None
+        sealed = tx.get_audit_record(resolution.audit_record_id)
+        ref = sealed.record.pack if sealed else None
+        if ref is None:
+            raise RuntimeError(f"Approval {resolution.audit_record_id} has no recorded pack")
+        end = window_end(resolution.resolved_at, _pack(ref, active, packs_dir))
+    control = control_for(tx, demo_tenant, "expire_payment_window", decision.decision_id)
+    return ends(end, control)

@@ -37,6 +37,7 @@ from core.ports import (
     ModelCallCounter,
     PaymentRail,
     Telemetry,
+    TenantId,
     UnitOfWork,
 )
 from core.reconcile import SweepStore, sweep
@@ -149,7 +150,9 @@ async def sweep_forever(
     synchronous, so each pass runs in a thread."""
     older_than = sweep_age(settings)
     while True:
-        debits = await asyncio.to_thread(run_debit_step, store, rail, clock)
+        demo = settings.demo_controls_tenant_id
+        demo_tenant = None if demo is None else TenantId(demo)  # Demo controls, ADR-0032
+        debits = await asyncio.to_thread(run_debit_step, store, rail, clock, demo_tenant)
         if debits.checked:
             log.info("debit step checked %d Payment(s), %d error(s)", debits.checked, debits.errors)
         result = await asyncio.to_thread(sweep, store, rail, clock, older_than)

@@ -167,6 +167,14 @@ async def run_scenario(
                 say(f"  {_SPEAKERS[line.speaker]}: {line.text}")
             if card.link and card.waiting:
                 say(f"  - Consent link (open it and answer as Asha): {card.link}")
+        if card.fast_forward:
+            # No button in a terminal: press fast-forward at once (a Demo control).
+            say(f"  - Fast-forward: {card.fast_forward}")
+            try:
+                card = await run.next(press=True)
+            except engine.StepFailed as failed:
+                say(f"Failed at '{failed.step}': {failed.detail}")
+                return 1
         if card.waiting:
             waits += 1
             if waits > patience:

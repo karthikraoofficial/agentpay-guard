@@ -48,6 +48,7 @@ AuditKind = Literal[
     "dispute_opened",
     "dispute_signed_off",
     "refund",
+    "demo_control",
 ]
 ZERO_HASH = "sha256:" + "00" * 32
 
@@ -144,6 +145,14 @@ class RefundEvidence(_Frozen):
         )
 
 
+class DemoControlEvidence(_Frozen):
+    """A Demo control that ended one of the Decision's timers early (ADR-0032)."""
+
+    control_id: str
+    control: str  # DemoControlKind
+    target_id: str
+
+
 class AuditRecord(_Frozen):
     audit_record_id: AuditRecordId
     tenant_id: TenantId
@@ -171,6 +180,8 @@ class AuditRecord(_Frozen):
     sign_off: SignOffEvidence | None = None
     # Only on a refund record.
     refund: RefundEvidence | None = None
+    # Only on a demo_control record.
+    demo_control: DemoControlEvidence | None = None
 
     @model_validator(mode="after")
     def _matches_kind(self) -> Self:
@@ -185,10 +196,19 @@ class AuditRecord(_Frozen):
             raise ValueError("a dispute_opened record, and only that, has a dispute")
         if (self.kind == "dispute_signed_off") != (self.sign_off is not None):
             raise ValueError("a dispute_signed_off record, and only that, has a sign_off")
+        if (self.kind == "demo_control") != (self.demo_control is not None):
+            raise ValueError("a demo_control record, and only that, has a demo_control")
         if self.kind == "decision":
             if None in ran or self.resolution is not None:
                 raise ValueError("a decision record has inputs, pack and output, no resolution")
-        elif self.kind in ("payment", "void", "dispute_opened", "dispute_signed_off", "refund"):
+        elif self.kind in (
+            "payment",
+            "void",
+            "dispute_opened",
+            "dispute_signed_off",
+            "refund",
+            "demo_control",
+        ):
             if ran != (None, None, None) or self.resolution is not None:
                 raise ValueError(f"a {self.kind} record has no engine run and no resolution")
         elif self.kind == "consent_resolution":
@@ -213,7 +233,18 @@ class AuditRecord(_Frozen):
 
 
 _OPTIONAL = frozenset(
-    {"inputs", "pack", "output", "resolution", "payment", "void", "dispute", "sign_off", "refund"}
+    {
+        "inputs",
+        "pack",
+        "output",
+        "resolution",
+        "payment",
+        "void",
+        "dispute",
+        "sign_off",
+        "refund",
+        "demo_control",
+    }
 )
 
 

@@ -25,7 +25,7 @@ from api.deps import (
 )
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
-from api.payability import payable_until, was_granted, window_end
+from api.payability import demo_tenant, payable_until, was_granted, window_end
 from core.domain.audit import AuditRecord, DecisionInputs, seal
 from core.domain.consent import ConsentRequest, ConsentRequestId, ConsentStatus
 from core.domain.decisions import (
@@ -325,7 +325,14 @@ def get_decision(
         inactive = consent is not None and mandate_inactive(
             tx.get_mandate(decision.mandate_id), tx.get_agent(decision.agent_id), now
         )
-        until = payable_until(tx, decision, consent, pack, settings.policy_packs_dir)
+        until = payable_until(
+            tx,
+            decision,
+            consent,
+            pack,
+            settings.policy_packs_dir,
+            demo_tenant=demo_tenant(settings),
+        )
     return _out(decision, consent, now, until, inactive)
 
 

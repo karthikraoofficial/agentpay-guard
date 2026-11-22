@@ -86,6 +86,9 @@ class MandateTerms(_Model):
     allowed_mccs: list[Annotated[str, StringConstraints(pattern=r"^[0-9]{4}$")]]
     # How long the Mandate has been valid, and how long it still is.
     valid_for_days: int = Field(default=30, ge=1, le=365)
+    # Granted already expired: its validity ended this many days ago (B10). The real rule
+    # then gives MANDATE_EXPIRED, with no Demo control and nothing edited (ADR-0032).
+    expired_days_ago: int | None = Field(default=None, ge=1, le=300)
 
 
 class PriorPayment(_Model):
@@ -158,7 +161,22 @@ class HumanStep(_Model):
     taps: int = Field(default=1, ge=1, le=3)
 
 
-Step = Annotated[AgentStep | TenantStep | HumanStep, Field(discriminator="actor")]
+# The Demo controls a visitor can press as fast-forward (#280; the rest come later).
+FastForward = Literal["expire_consent", "expire_payment_window", "expire_notice"]
+
+
+class VisitorStep(_Model):
+    """The visitor presses fast-forward: a Demo control ends a timer now (ADR-0032). On the
+    demo page the run waits for the press; the CLI and CI press it at once."""
+
+    actor: Literal["visitor"]
+    control: FastForward
+    # The button's words, e.g. "Skip 10 minutes".
+    label: Text
+    chat: list[ChatLine] = []
+
+
+Step = Annotated[AgentStep | TenantStep | HumanStep | VisitorStep, Field(discriminator="actor")]
 
 
 class Expected(_Model):
@@ -172,6 +190,8 @@ class Expected(_Model):
     refund_status: Literal["pending", "processed", "failed"] | None = None
     dispute_status: str | None = None
     evidence_strength: Literal["strong", "mixed", "weak"] | None = None
+    # The last Payment's failure code, when it failed, e.g. MANDATE_REVOKED.
+    payment_failure_code: str | None = None
     # The last Consent request's status at the end of the run.
     consent_status: Literal["pending", "approved", "declined", "expired", "blocked"] | None = None
 
@@ -196,6 +216,13 @@ class Scenario(_Model):
     expected: Expected
     model_replies: list[ModelReply] = []
     what_to_notice: Text
+
+    @model_validator(mode="after")
+    def _controls_listed(self) -> Self:
+        pressed = {step.control for step in self.steps if isinstance(step, VisitorStep)}
+        if missing := pressed - set(self.demo_controls):
+            raise ValueError(f"steps press Demo controls not in demo_controls: {sorted(missing)}")
+        return self
 
 
 def load(path: Path) -> Scenario:

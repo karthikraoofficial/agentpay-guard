@@ -321,3 +321,22 @@ async def test_a_blocked_approval_shows_why_on_the_payers_card(
 
     assert answered["consent"]["status"] == "blocked"
     assert answered["consent"]["reason_codes"][0] == "MANDATE_REVOKED"  # the primary reason
+
+
+async def test_fast_forward_waits_for_the_visitors_press(api: Api, keys: tuple[str, str]) -> None:
+    async with runner(api, keys) as client:
+        run_id = (await start(client, "E3")).json()["run_id"]
+        for step in (0, 1, 2):  # setup, step_up, Asha ignores the link
+            card = (await client.post(f"/runs/{run_id}/next", json={"step": step})).json()
+            assert not card["waiting"], card
+        asking = (await client.post(f"/runs/{run_id}/next", json={"step": 3})).json()
+        still = (await client.post(f"/runs/{run_id}/next", json={"step": 3})).json()
+        pressed = (
+            await client.post(f"/runs/{run_id}/next", json={"step": 3, "press": True})
+        ).json()
+
+    assert asking["waiting"] and asking["fast_forward"] == "Skip 10 minutes"
+    assert still["waiting"]
+    assert not pressed["waiting"]
+    assert pressed["call"]["name"].startswith("POST /v1/demo/consent-requests/")
+    assert pressed["consent"]["status"] == "expired"

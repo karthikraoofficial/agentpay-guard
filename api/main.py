@@ -23,6 +23,7 @@ from api.routes import (
     consent_links,
     consent_requests,
     decisions,
+    demo_controls,
     disputes,
     intents,
     mandates,
@@ -90,7 +91,7 @@ def create_app(
     # Only resolutions signal from here (best effort); the worker's relay starts workflows.
     app.state.workflow = workflow or TemporalWorkflow.from_settings(settings)
     app.state.secret_box = secret_box or build_secret_box(settings)
-    app.state.rail = rail or build_rail(settings)
+    app.state.rail = rail or build_rail(settings, app.state.store)
     app.state.rail_breaker = RailBreaker(
         settings.rail_breaker_failures,
         timedelta(seconds=settings.rail_breaker_open_seconds),
@@ -109,6 +110,9 @@ def create_app(
     app.include_router(review_links.router)
     app.include_router(rail_webhooks.router)
     app.include_router(webhook_endpoint.router)
+    if settings.demo_controls_tenant_id is not None:
+        # Demo controls exist only for the configured Demo Tenant on the mock rail (ADR-0032).
+        app.include_router(demo_controls.router)
     app.add_middleware(_LinkCors, origin=settings.web_origin)
 
     @app.get("/healthz", tags=["ops"])

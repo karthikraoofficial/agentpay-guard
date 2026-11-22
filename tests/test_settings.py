@@ -84,3 +84,21 @@ def test_a_key_that_is_not_a_test_key_is_refused_on_any_rail(rail: str, key_id: 
 def test_an_unknown_rail_is_refused() -> None:
     with pytest.raises(ValidationError, match="rail"):
         make_settings(rail="stripe")
+
+
+def test_demo_controls_are_for_the_mock_rail_only() -> None:
+    """Demo controls end timers early, so they must never reach real money (ADR-0032)."""
+    assert make_settings(demo_controls_tenant_id="ten_demo").demo_controls_tenant_id == "ten_demo"
+    with pytest.raises(ValidationError, match="AGENTPAY_DEMO_CONTROLS_TENANT_ID"):
+        make_settings(demo_controls_tenant_id="ten_demo", **RAZORPAY)
+
+
+def test_the_mock_notice_period_is_for_the_mock_rail_with_mock_settle() -> None:
+    """The deployed mock rail's Pre-debit notice period: only the worker's mock settle
+    debits it, so it needs mock settle, and it is refused with a real rail."""
+    on = make_settings(mock_notice_seconds=120, mock_settle_after_seconds=60)
+    assert on.mock_notice_seconds == 120
+    with pytest.raises(ValidationError, match="AGENTPAY_MOCK_NOTICE_SECONDS"):
+        make_settings(mock_notice_seconds=120)
+    with pytest.raises(ValidationError, match="AGENTPAY_MOCK_NOTICE_SECONDS"):
+        make_settings(mock_notice_seconds=120, **RAZORPAY)

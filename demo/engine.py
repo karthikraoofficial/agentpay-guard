@@ -21,12 +21,20 @@ import re
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import httpx
 from pydantic import BaseModel
 
-from demo.scenario import AgentStep, ChatLine, HumanStep, Scenario, TenantStep
+from demo.scenario import (
+    AgentStep,
+    ChatLine,
+    FastForward,
+    HumanStep,
+    Scenario,
+    TenantStep,
+    VisitorStep,
+)
 from guard_mcp.server import call
 from guard_mcp.tools import TOOLS
 
@@ -44,8 +52,22 @@ _AGENT_TOOLS = {
     "create_payment",
     "get_payment",
 }
-_PAYER_ACTIONS = {"approve", "decline"}
-_CHECKED = {"outcome", "reason_codes", "payment_status", "consent_status", "refusal_code"}
+_PAYER_ACTIONS = {"approve", "decline", "ignore"}
+_CHECKED = {
+    "outcome",
+    "reason_codes",
+    "payment_status",
+    "payment_failure_code",
+    "consent_status",
+    "refusal_code",
+}
+_FAST_FORWARDS = set(get_args(FastForward))
+# Each fast-forward's Demo control route (ADR-0032) and the run's id it ends.
+_CONTROL_ROUTES = {
+    "expire_consent": "POST /v1/demo/consent-requests/{consent_request_id}/expire",
+    "expire_payment_window": "POST /v1/demo/decisions/{decision_id}/expire-payment-window",
+    "expire_notice": "POST /v1/demo/payments/{payment_id}/expire-notice",
+}
 # The mock rail's test customer (adapters/memory/rail.py).
 _MOCK_CUSTOMER = "cust_mock"
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
@@ -107,6 +129,8 @@ class Card(BaseModel):
     consent: ConsentView | None = None
     # The error code of a refusal the journey expects, e.g. INSUFFICIENT_SCOPE.
     refused: str | None = None
+    # A fast-forward waiting for the visitor's press: the button's words.
+    fast_forward: str | None = None
     # The step is waiting on the worker or a person: ask for the same step again.
     waiting: bool = False
     finished: bool = False
@@ -146,8 +170,8 @@ def check_supported(scenario: Scenario) -> None:
         elif isinstance(step, HumanStep):
             if step.actor != "payer" or step.action not in _PAYER_ACTIONS:
                 problems.append(f"{step.actor} {step.action} steps")
-    if scenario.demo_controls:
-        problems.append("Demo controls")
+    if unknown := set(scenario.demo_controls) - _FAST_FORWARDS:
+        problems.append(f"the Demo controls {sorted(unknown)}")
     unchecked = scenario.expected.model_fields_set - _CHECKED
     problems += [f"checking {name}" for name in sorted(unchecked)]
     if problems:
@@ -192,9 +216,10 @@ class Run:
         """The step's idempotency key: made once, reused on every retry of that step."""
         return self._keys.setdefault(index, f"demo-{uuid.uuid4().hex}")
 
-    async def next(self, step: int | None = None) -> Card:
+    async def next(self, step: int | None = None, *, press: bool = False) -> Card:
         """Run one step. `step`, when given, is the step the caller means: the one just
-        run (a retried request) gets its Card back without running anything again."""
+        run (a retried request) gets its Card back without running anything again.
+        `press` is the visitor pressing a fast-forward this step is waiting on."""
         if step is not None and self._last is not None and step == self._last.step:
             if not self._last.waiting:
                 return self._last
@@ -211,6 +236,8 @@ class Run:
             scenario_step = self.scenario.steps[index - 1]
             if isinstance(scenario_step, HumanStep):
                 card = await self._payer_step(index, scenario_step)
+            elif isinstance(scenario_step, VisitorStep):
+                card = await self._fast_forward(index, scenario_step, press)
             elif isinstance(scenario_step, AgentStep) and scenario_step.tool is not None:
                 card = await self._tool_step(index, scenario_step)
             else:
@@ -296,6 +323,12 @@ class Run:
         agent = await self._post(step, "/v1/agents", {"name": "ShopBot"}, f"{key}-agent")
         now = self._now()
         terms = setup.mandate
+        # Valid until now, or (B10) granted for a period that already ended.
+        until = now + timedelta(days=terms.valid_for_days)
+        since = now - timedelta(minutes=5)
+        if terms.expired_days_ago is not None:
+            until = now - timedelta(days=terms.expired_days_ago)
+            since = until - timedelta(days=terms.valid_for_days)
         mandate_body: Json = {
             "payer_id": payer["payer_id"],
             "allowed_agent_ids": [agent["agent_id"]],
@@ -303,12 +336,12 @@ class Run:
             "per_txn_cap": terms.per_txn_cap.model_dump(),
             "monthly_cap": terms.monthly_cap.model_dump(),
             "allowed_mccs": terms.allowed_mccs,
-            "valid_from": _iso(now - timedelta(minutes=5)),
-            "expires_at": _iso(now + timedelta(days=terms.valid_for_days)),
+            "valid_from": _iso(since),
+            "expires_at": _iso(until),
             "consent_evidence": {
                 "method": "in_app_confirm",
                 "reference": "demo-consent",
-                "captured_at": _iso(now - timedelta(minutes=6)),
+                "captured_at": _iso(since - timedelta(minutes=1)),
             },
             "rail_token": {
                 "rail": "mock",
@@ -436,27 +469,42 @@ class Run:
             self._links[index] = str(minted["url"])
         return consent_request_id, self._links[index]
 
-    async def _payer_step(self, index: int, step: HumanStep) -> Card:
-        consent_request_id, link = await self._link(index)
-        if self.people == "engine":
-            return await self._tap(index, step, link)
-        # The Decision read carries the Consent request's status and, when an approval
-        # was blocked, the re-check's Reason codes.
+    async def _read_consent(self, step: str) -> tuple[str, Json]:
+        """The Consent request as the Decision read shows it: status and, for a blocked
+        approval, the re-check's Reason codes."""
+        consent_request_id = self._consent_request_id()
         decision_id = (self.decision or {}).get("decision_id")
         path = f"/v1/decisions/{decision_id}"
-        response = await self._send(self._tenant, "Asha's answer", "GET", path)
+        response = await self._send(self._tenant, step, "GET", path)
         if not response.is_success:
-            raise StepFailed("Asha's answer", _problem(response))
+            raise StepFailed(step, _problem(response))
         consent = {
             **(_body(response).get("consent") or {}),
             "consent_request_id": consent_request_id,
         }
         self.consent = consent
+        return f"GET {path}", consent
+
+    async def _payer_step(self, index: int, step: HumanStep) -> Card:
+        if step.action == "ignore":
+            # Asha has her link but never opens it: the request stays pending.
+            name, consent = await self._read_consent("Asha's phone")
+            return Card(
+                step=index,
+                actor="payer",
+                chat=step.chat,
+                call=Call(kind="route", name=name, request=None, response=consent),
+                consent=_consent_view(consent),
+            )
+        _, link = await self._link(index)
+        if self.people == "engine":
+            return await self._tap(index, step, link)
+        name, consent = await self._read_consent("Asha's answer")
         return Card(
             step=index,
             actor="payer",
             chat=step.chat,
-            call=Call(kind="route", name=f"GET {path}", request=None, response=consent),
+            call=Call(kind="route", name=name, request=None, response=consent),
             link=link,
             consent=_consent_view(consent),
             waiting=consent.get("status") == "pending",
@@ -491,6 +539,37 @@ class Run:
             consent=_consent_view(answers[0]),
         )
 
+    # --- Fast-forward: a Demo control the visitor presses (ADR-0032) ----------------------
+
+    async def _fast_forward(self, index: int, step: VisitorStep, press: bool) -> Card:
+        if self.people == "visitor" and not press:
+            return Card(
+                step=index,
+                actor="visitor",
+                chat=step.chat,
+                call=None,
+                fast_forward=step.label,
+                waiting=True,
+            )
+        route = _CONTROL_ROUTES[step.control]
+        method, path = self._fill(route)
+        headers = {"Idempotency-Key": self._key(index)}
+        response = await self._send(self._tenant, step.label, method, path, None, headers)
+        if not response.is_success:
+            raise StepFailed(step.label, _problem(response))
+        answer = _body(response)
+        consent = None
+        if step.control == "expire_consent":
+            _, read = await self._read_consent(step.label)
+            consent = _consent_view(read)
+        return Card(
+            step=index,
+            actor="visitor",
+            chat=step.chat,
+            call=Call(kind="route", name=f"POST {path}", request=None, response=answer),
+            consent=consent,
+        )
+
     # --- The expected result ----------------------------------------------------------------
 
     def mismatches(self) -> list[str]:
@@ -507,6 +586,11 @@ class Run:
             got = sorted(decision.get("reason_codes", []))
             check("reason codes", sorted(expected.reason_codes), got)
         check("payment status", expected.payment_status, (self.payment or {}).get("status"))
+        check(
+            "payment failure code",
+            expected.payment_failure_code,
+            (self.payment or {}).get("failure_code"),
+        )
         check("consent status", expected.consent_status, (self.consent or {}).get("status"))
         check("refusal", expected.refusal_code, self.refusal)
         return found
@@ -542,6 +626,8 @@ async def play(run: Run, wait: Callable[[], None], patience: int = 200) -> list[
     waits = 0
     while True:
         card = await run.next()
+        if card.fast_forward:  # nobody to press it here: press it at once
+            card = await run.next(press=True)
         cards.append(card)
         if card.finished:
             return cards
