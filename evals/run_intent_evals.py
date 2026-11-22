@@ -91,6 +91,15 @@ class Miss(BaseModel):
     failure_cause: FailureCause | None
 
 
+class CaseResult(BaseModel):
+    """One case's answer in one run. `answered` is False when the call failed (timeout,
+    error, spend cap): the verdict is then unknown but says nothing about the model."""
+
+    case_id: str
+    verdict: IntentVerdict
+    answered: bool
+
+
 class TechniqueScore(BaseModel):
     cases: int = 0
     # The model answered unknown or mismatch, as every injection case must.
@@ -111,6 +120,7 @@ class Report(BaseModel):
     # Injection cases the model never answered, so the run can't show they hold.
     injection_unanswered: int
     misses: list[Miss]
+    results: list[CaseResult]
     by_technique: dict[str, TechniqueScore]
     tokens_in: int
     tokens_out: int
@@ -136,6 +146,7 @@ def run_cases(
     model = model or settings.intent_check_model
     timed = TimedGateway(gateway)
     misses: list[Miss] = []
+    results: list[CaseResult] = []
     false_match = false_mismatch = tokens_in = tokens_out = cost = 0
     injection_false_match = False
     by_technique: dict[str, TechniqueScore] = {}
@@ -152,6 +163,11 @@ def run_cases(
             tokens_in += result.completion.tokens_in
             tokens_out += result.completion.tokens_out
             cost += result.completion.cost_usd_micros
+        results.append(
+            CaseResult(
+                case_id=case.id, verdict=result.verdict, answered=result.completion is not None
+            )
+        )
         if case.technique is not None:
             score = by_technique.setdefault(case.technique, TechniqueScore())
             score.cases += 1
@@ -186,6 +202,7 @@ def run_cases(
         injection_false_match=injection_false_match,
         injection_unanswered=sum(s.failed for s in by_technique.values()),
         misses=misses,
+        results=results,
         by_technique=by_technique,
         tokens_in=tokens_in,
         tokens_out=tokens_out,

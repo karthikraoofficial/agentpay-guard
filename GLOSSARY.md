@@ -328,6 +328,10 @@ _Avoid_: Test case, fixture, sample
 The published numbers of one run over every Golden case: case counts per file and scenario, false-allow, false-block, wrong Reason codes and the step-up rate. It holds only numbers every machine reproduces, so latency is left out, and CI fails when the committed copy is out of date.
 _Avoid_: Scorecard (that is the page that shows it), eval results, metrics
 
+**Model comparison**:
+A hand-run scoring of one model job's live eval (so far the Intent check) on several Claude models, three passes each, with the production prompt, effort and timeout. A case counts as right only if every pass got it right. Its committed report (`evals/model_comparison.md`) is what a choice of model cites. It costs money, so it never runs in CI and no staleness check covers it.
+_Avoid_: Model benchmark, bake-off, Eval report (that is the golden-set run)
+
 **Ops console**:
 The web app's read-only scorecard page (`/ops`), built from the committed Eval report: case counts, false-allows, false-blocks, wrong Reason codes and the step-up rate, per scenario and per golden file, with the release it came from. It holds no live data and needs no API key.
 _Avoid_: Dashboard, admin panel, ops dashboard
