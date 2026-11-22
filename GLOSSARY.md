@@ -29,7 +29,7 @@ An Agent its Tenant has switched off. Its requests are blocked under every Manda
 _Avoid_: Revoked agent, suspended agent
 
 **Demo Tenant**:
-The Tenant the owner creates on the hosted demo with `api.admin create-tenant`, so visitors can run the demo journeys. It is an ordinary Tenant on the mock rail with mock settle on, held to the Model spend cap like any other. No code treats it differently.
+The Tenant the owner creates on the hosted demo with `api.admin create-tenant`, so visitors can run the demo journeys. It is an ordinary Tenant on the mock rail with mock settle on, held to the Model spend cap like any other. Its two keys are named in config (`AGENTPAY_DEMO_AGENT_KEY`, `AGENTPAY_DEMO_TENANT_KEY`), test keys only, and held by the Demo runner and `python -m demo`, never by a browser (ADR-0031). The API itself still treats it like any other Tenant.
 _Avoid_: Test tenant, sandbox tenant, public tenant
 
 ## Authority
@@ -335,3 +335,17 @@ _Avoid_: Model benchmark, bake-off, Eval report (that is the golden-set run)
 **Ops console**:
 The web app's read-only scorecard page (`/ops`), built from the committed Eval report: case counts, false-allows, false-blocks, wrong Reason codes and the step-up rate, per scenario and per golden file, with the release it came from. It holds no live data and needs no API key.
 _Avoid_: Dashboard, admin panel, ops dashboard
+
+## Demo
+
+**Scenario**:
+One demo journey as data: a JSON file holding its id (from `docs/demo-journeys.md`), title, group, playlists, plain-English story, setup (Mandate terms, merchant, mock rail card, history), ordered steps with the chat lines said before each, Demo controls used, expected result, scripted model replies and "what to notice". Each step names its actor: an Agent step names a `guard_mcp` tool, a Tenant step an HTTP route, a Payer or reviewer step what the person does. CI runs every Scenario against the in-process app and checks its expected result.
+_Avoid_: Journey script, demo case, Golden case (that is an engine input with its labelled answer)
+
+**Scenario catalogue**:
+Every Scenario file, one per journey, in `demo/scenarios/`, read by the web app, `python -m demo --scenario` and the Demo runner. Its format is one Pydantic model (`demo/scenario.py`) with a committed JSON Schema that CI checks for staleness.
+_Avoid_: Journey list (that is `docs/demo-journeys.md`), scenario library
+
+**Demo runner**:
+The small server beside the API (`python -m demo_runner`) that plays Scenarios for the web app's /demo page, one step per browser request, each step answered with a card. It holds the Demo Tenant's keys so the browser never does, talks to the API over HTTP only, makes no model call of its own, grants each run its own Payer, Agent and Mandate, and is rate-limited per client IP and overall (ADR-0031).
+_Avoid_: Demo server, demo backend, demo proxy

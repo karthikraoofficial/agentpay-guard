@@ -423,7 +423,8 @@ pause
 # ── 9 ──────────────────────────────────────────────────────────────────────
 stage "Start the stack"
 say "Builds the image on the VM and starts Postgres, Temporal, the collector, the"
-say "migration, the API, the worker and Caddy. The first build takes a few minutes."
+say "migration, the API, the worker, the Demo runner and Caddy. The first build takes a"
+say "few minutes. The Demo runner restarts until stage 10 gives it the Demo Tenant keys."
 if confirm "Start (or update) the stack on the VM now?"; then
   vm "cd agentpay-guard && git pull --ff-only && $COMPOSE up -d --build"
 fi
@@ -462,6 +463,26 @@ elif confirm "Create the Demo Tenant on the hosted stack?"; then
   fi
   unset created agent_key tenant_key
 fi
+# The Demo runner on the VM holds the same two keys (ADR-0031), so it can play Scenarios
+# for the web app's /demo page. It refuses to start without them.
+agent_key=$(ENV_FILE=.env _existing AGENTPAY_DEMO_AGENT_KEY || true)
+tenant_key=$(ENV_FILE=.env _existing AGENTPAY_DEMO_TENANT_KEY || true)
+if [[ -n "$agent_key" && -n "$tenant_key" ]]; then
+  prod_write AGENTPAY_DEMO_AGENT_KEY "$agent_key"
+  prod_write AGENTPAY_DEMO_TENANT_KEY "$tenant_key"
+  scp -i "$SSH_KEY" -q "$PROD" "$VM_USER@$VM_IP:agentpay-guard/.env"
+  vm 'chmod 600 agentpay-guard/.env'
+  if vm "cd agentpay-guard && $COMPOSE up -d demo-runner" &&      curl -fsS --max-time 10 "https://$API_HOST/demo-runner/healthz" >/dev/null 2>&1; then
+    printf '  %s✓ the Demo runner answers at https://%s/demo-runner/healthz%s
+' "$GREEN" "$API_HOST" "$RESET"
+  else
+    warn "the Demo runner didn't answer. On the VM: cd agentpay-guard && $COMPOSE logs demo-runner"
+    SKIPPED+=("the Demo runner at https://$API_HOST/demo-runner/healthz")
+  fi
+else
+  SKIPPED+=("the Demo runner: it needs the Demo Tenant keys in $PROD")
+fi
+unset agent_key tenant_key
 pause
 
 # ── 11 ─────────────────────────────────────────────────────────────────────

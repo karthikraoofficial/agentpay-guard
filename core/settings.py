@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, model_validator
+from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from core.domain.rails import RailName
@@ -174,6 +174,47 @@ class McpSettings(BaseSettings):
     api_key: SecretStr
     # Each API call's timeout. A Decision answers well inside a second.
     http_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+
+
+class DemoRunnerSettings(BaseSettings):
+    """The Demo runner's settings (#273, ADR-0031), separate from the API's: the runner is
+    a client of the HTTP API, so it never needs the database, rail or model settings that
+    `Settings` checks at startup. It holds the Demo Tenant's two keys and refuses to start
+    with a live one."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="AGENTPAY_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        frozen=True,
+    )
+
+    # The Demo Tenant's keys, as `api.admin create-tenant` printed them. Sent only as
+    # Bearer tokens to the API, never to the browser, a Card or a log.
+    demo_agent_key: SecretStr
+    demo_tenant_key: SecretStr
+    # Where the API runs, from the runner: http://api:8000 on the hosted compose network.
+    demo_runner_api_base_url: AnyHttpUrl = AnyHttpUrl("http://localhost:8000")
+    # The web app's origin: the only one whose pages may call the runner (CORS).
+    web_origin: str = Field(default="http://localhost:3000", pattern=r"^https?://[^/\s]+$")
+    # Rate limits: runs one client IP may start a minute, and runs in progress at once.
+    # Past either the runner answers 429 with Retry-After.
+    demo_runner_runs_per_ip_per_minute: int = Field(default=5, ge=1)
+    demo_runner_runs_in_progress_max: int = Field(default=20, ge=1)
+    # How long a run is kept after it starts. A restart ends every run in progress.
+    demo_runner_run_ttl_seconds: int = Field(default=1800, gt=0, le=6 * 3600)
+    demo_runner_http_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+
+    @field_validator("demo_agent_key", "demo_tenant_key")
+    @classmethod
+    def _test_keys_only(cls, key: SecretStr) -> SecretStr:
+        if not key.get_secret_value().startswith("apg_test_"):
+            raise ValueError(
+                "the Demo runner takes only test keys (apg_test_...): the demo is public, "
+                "so a live key must never be behind it"
+            )
+        return key
 
 
 @lru_cache

@@ -166,13 +166,14 @@
     },
     {
       "id": "demo",
-      "label": "demo CLI",
+      "label": "demo (Scenarios, step engine, CLI)",
       "phase": "3 Async & API",
-      "description": "A command-line tool that runs the three demo stories against a live server.",
+      "description": "The demo stories (one file each) and the step engine that plays them, with a command-line tool that runs them against a live server.",
       "cmd": "uv run ruff check demo && uv run python -m compileall -q demo",
       "dependsOn": [
         "domain",
-        "core-services"
+        "core-services",
+        "mcp"
       ]
     },
     {
@@ -184,6 +185,18 @@
       "dependsOn": [
         "domain",
         "core-services"
+      ]
+    },
+    {
+      "id": "demo-runner",
+      "label": "demo_runner (Demo runner)",
+      "phase": "3 Async & API",
+      "description": "The small server behind the website's demo page. It plays a demo story one step at a time, holding the demo account's keys so the browser never does.",
+      "cmd": "uv run ruff check demo_runner && uv run python -m compileall -q demo_runner",
+      "dependsOn": [
+        "core-services",
+        "demo",
+        "mcp"
       ]
     },
     {
@@ -205,6 +218,7 @@
         "api",
         "workflows",
         "demo",
+        "demo-runner",
         "mcp"
       ]
     },
@@ -218,6 +232,7 @@
         "api",
         "workflows",
         "demo",
+        "demo-runner",
         "mcp"
       ],
       "timeoutSec": 600

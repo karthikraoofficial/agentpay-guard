@@ -24,10 +24,15 @@ CODE_DIRS = [
     "evals",
     "migrations",
     "guard_mcp",
+    "demo",
+    "demo_runner",
 ]
 # The MCP server is a thin client over the HTTP API (#242): it never decides or stores
 # anything itself, so it imports none of these.
 MCP_FORBIDDEN = ("core.policy", "api", "adapters", "workflows", "agents", "evals")
+# The demo's step engine and the Demo runner are HTTP clients of the API too (#273,
+# ADR-0031): no model call of their own, no store, no engine.
+DEMO_FORBIDDEN = (*MCP_FORBIDDEN, "anthropic")
 SETTINGS = "core/settings.py"
 
 
@@ -113,6 +118,12 @@ def test_vendor_home_rule_flags_imports_outside_the_adapter() -> None:
 def test_the_mcp_server_is_a_thin_client_and_core_never_imports_it() -> None:
     violations = imports_from(REPO, ["guard_mcp"], MCP_FORBIDDEN)
     violations += imports_from(REPO, ["core"], ("guard_mcp",))
+    assert violations == [], _report(violations)
+
+
+def test_the_demo_and_its_runner_only_talk_to_the_api() -> None:
+    violations = imports_from(REPO, ["demo", "demo_runner"], DEMO_FORBIDDEN)
+    violations += imports_from(REPO, ["core"], ("demo", "demo_runner"))
     assert violations == [], _report(violations)
 
 

@@ -1,4 +1,4 @@
-# One image for the API, the consent worker and the one-shot migration (infra/docker-compose.prod.yml).
+# One image for the API, the consent worker, the Demo runner and the one-shot migration (infra/docker-compose.prod.yml).
 FROM python:3.12.11-slim-bookworm
 
 COPY --from=ghcr.io/astral-sh/uv:0.8.15 /uv /bin/uv

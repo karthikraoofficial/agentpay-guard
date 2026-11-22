@@ -50,6 +50,7 @@ docker compose --env-file .env -f infra/docker-compose.yml up -d  # Postgres 18,
 uv run uvicorn api.main:asgi_app --factory --reload
 uv run python -m workflows.worker                 # in a second terminal: the consent worker
 cd web && npm ci && npm run dev                   # in a third: the consent screen, dispute viewer and Ops console on :3000
+uv run python -m demo_runner                      # optional, in a fourth: the Demo runner on :8100 (see Demo)
 ```
 
 Upgrading a local stack from before Postgres 18 (#196): Postgres 18 won't start on the old Postgres 16 volume. Run `bash infra/pg-upgrade.sh` once, then the `up -d` step above. It copies your data into a new `pgdata18` volume by dump and restore and checks every table's row count. The old `pgdata` volume and the dump (in `~/agentpay-pg-upgrade-<time>`) are kept until you remove them by hand (ADR-0022).
@@ -276,7 +277,8 @@ Allow, step-up and block count decision-stage cases; approval re-checks are labe
 | `agents/` | The dispute evidence agent: tools and versioned prompts |
 | `policy_packs/` | Released policy packs and their hash manifest |
 | `guard_mcp/` | The MCP server: a stdio thin client over the API for an Agent's MCP host, holding one `decide` key (`python -m guard_mcp`, ADR-0029) |
-| `demo/` | The demo CLI: the four demo journeys over HTTP (`python -m demo`) |
+| `demo/` | The Scenario catalogue (`demo/scenarios/`, its model and schema), the step engine that plays a Scenario over HTTP, and the demo CLI (`python -m demo`), which also runs the four original journeys |
+| `demo_runner/` | The Demo runner: plays Scenarios for the web app's demo page, holding the Demo Tenant's keys (`python -m demo_runner`, ADR-0031) |
 | `evals/` | Labelled golden cases and the eval gate; the live Intent check eval set |
 | `migrations/` | Alembic migrations |
 | `infra/` | Docker Compose for local dev, the OTel collector configs, and the hosted demo's production overlay, Caddyfile and smoke test |
@@ -420,7 +422,7 @@ To put it live, run `bash infra/provision-wizard.sh` from the repo root (on Wind
 - turning on nightly backups (below);
 - setting up alerts by email, from outside and on metrics (below).
 
-It never shows a secret. Generated passwords and keys go into the git-ignored `.env.production`, which is copied to the VM. The Demo Tenant's keys go into your local `.env` for `python -m demo`. Re-running it keeps the values already saved.
+It never shows a secret. Generated passwords and keys go into the git-ignored `.env.production`, which is copied to the VM. The Demo Tenant's keys go into your local `.env` for `python -m demo`, and into the VM's `.env` for the Demo runner, which the stage then starts. Re-running it keeps the values already saved.
 
 By hand, on the VM:
 
@@ -457,12 +459,12 @@ $C exec api python -m api.admin verify --tenant <id>
 ```
 
 What the production overlay does:
-- **One image, three services.** The root `Dockerfile` builds a single image that runs the API, the worker and a one-shot `migrate` service. The API and worker wait until migrations have finished.
-- **Only Caddy is public.** It serves `AGENTPAY_API_HOST` over HTTPS with a certificate it gets and renews itself. A free hostname with no account is `api.<the VM's IP, dashes for dots>.sslip.io`. Postgres, Temporal and the collector have no published ports.
+- **One image, four services.** The root `Dockerfile` builds a single image that runs the API, the worker, the Demo runner and a one-shot `migrate` service. The API and worker wait until migrations have finished, and the Demo runner until the API is healthy.
+- **Only Caddy is public.** It serves `AGENTPAY_API_HOST` over HTTPS with a certificate it gets and renews itself, and the Demo runner under `/demo-runner/` on the same host (ADR-0031). A free hostname with no account is `api.<the VM's IP, dashes for dots>.sslip.io`. Postgres, Temporal and the collector have no published ports.
 - **Settings for a public demo.** `.env.production.example` lists every hosted setting. It sets the mock rail with mock settle, so demo journey 3 runs, and the Model spend cap.
 - **Vercel.** The web app deploys from `web/` (`web/vercel.json`). Set `NEXT_PUBLIC_API_URL=https://<AGENTPAY_API_HOST>` in Vercel, and set `AGENTPAY_WEB_ORIGIN` on the VM to the Vercel URL.
 
-`bash infra/smoke-prod.sh` checks the whole thing on your own machine, and CI's `deploy` job runs it on every PR. It builds and starts the production stack from `.env.production.example` on `localhost`, checks that `/healthz` answers through Caddy, then tears it down. It runs as a separate compose project on ports 8080 and 8443, so your dev stack is left alone.
+`bash infra/smoke-prod.sh` checks the whole thing on your own machine, and CI's `deploy` job runs it on every PR. It builds and starts the production stack from `.env.production.example` on `localhost`, checks that the API's `/healthz` and the Demo runner's `/demo-runner/healthz` answer through Caddy, then tears it down. It runs as a separate compose project on ports 8080 and 8443, so your dev stack is left alone.
 
 ## Demo
 
@@ -482,6 +484,15 @@ What the production overlay does:
    - The same INR 1,250 is now allowed, because the refunds gave the cap back, and the Payment is still `captured` with INR 1,250 refunded.
 
 It reads the Demo Tenant's keys from `AGENTPAY_DEMO_AGENT_KEY` and `AGENTPAY_DEMO_TENANT_KEY` in `.env`, as `create-tenant` printed them, and never prints them. `--journey 1|2|3|4` runs one journey. Each journey sets up its own Mandate, so any one can run alone. A failure names the step that failed and exits 1. `--interval` and `--timeout` set how often it checks and how long it waits. `tests/api/test_demo_cli.py` runs it against the in-process app with mock settle on, playing the worker, the Payer and the reviewer.
+
+**Scenarios.** Every journey in [docs/demo-journeys.md](docs/demo-journeys.md) is becoming a **Scenario**: one JSON file in `demo/scenarios/`, named after its journey id, holding the story, the setup, the steps with their chat lines, and the expected result. Today the catalogue holds A1. `uv run python -m demo --base-url <api> --scenario A1` plays one, printing the chat and each Guard call, and exits 1 if it doesn't end as expected. Agent steps go through the MCP server's tool layer with the decide key. Each run grants its own Payer, Agent and Mandate. The format is one Pydantic model in `demo/scenario.py`. `uv run python -m demo.scenario --write-schema` regenerates `demo/scenario.schema.json`, and a test fails when it is stale. `tests/demo/test_scenarios.py` runs every Scenario file against the in-process app and checks its expected result.
+
+**The Demo runner** (ADR-0031) plays Scenarios for the web app's demo page, so the browser never holds a key. Run it with `uv run python -m demo_runner` (port 8100; `--host`, `--port`). It needs the two Demo Tenant keys, which must be test keys (`apg_test_...`), and `AGENTPAY_DEMO_RUNNER_API_BASE_URL` (default `http://localhost:8000`). Only `AGENTPAY_WEB_ORIGIN` may call it from a browser. Its API:
+- `POST /runs` with `{"scenario": "A1"}` starts a run and answers `201` with an unguessable `run_id` and the number of steps.
+- `POST /runs/{run_id}/next` with `{"step": n}` runs step n and answers its card: the chat lines, the tool or route, the request and response, and for a Decision its Outcome, Reason codes, Policy pack version, Pack hash and Audit record id. Asking again for the step just run returns the same card, and a failed step (`502 STEP_FAILED`) runs again with the same idempotency key. A card with `waiting: true` means ask for the same step again shortly. The last card has `finished: true` and any `mismatches` with the expected result. A step out of turn is `409 WRONG_STEP`.
+- Past `AGENTPAY_DEMO_RUNNER_RUNS_PER_IP_PER_MINUTE` (5) runs started from one client IP, or `AGENTPAY_DEMO_RUNNER_RUNS_IN_PROGRESS_MAX` (20) runs in progress, it answers `429` with `Retry-After`. Runs are kept in memory for `AGENTPAY_DEMO_RUNNER_RUN_TTL_SECONDS` (30 minutes), and a restart ends them.
+
+It makes no model call of its own: an Intent check goes through `POST /v1/intents` under the Demo Tenant's Model spend cap. On the hosted demo it runs behind Caddy at `https://<AGENTPAY_API_HOST>/demo-runner/`.
 
 ## Going live
 

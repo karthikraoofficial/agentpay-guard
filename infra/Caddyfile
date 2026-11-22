@@ -1,7 +1,12 @@
-# The only public entry to the hosted stack: HTTPS for the API on AGENTPAY_API_HOST.
-# Caddy gets and renews the certificate itself (Let's Encrypt); for `localhost` it uses
-# its own local CA instead.
+# The only public entry to the hosted stack: HTTPS on AGENTPAY_API_HOST for the API, and
+# for the Demo runner under /demo-runner/ (ADR-0031). Caddy gets and renews the
+# certificate itself (Let's Encrypt); for `localhost` it uses its own local CA instead.
 {$AGENTPAY_API_HOST} {
 	encode zstd gzip
-	reverse_proxy api:8000
+	handle_path /demo-runner/* {
+		reverse_proxy demo-runner:8100
+	}
+	handle {
+		reverse_proxy api:8000
+	}
 }
