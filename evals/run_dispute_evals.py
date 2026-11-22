@@ -58,6 +58,7 @@ class Outcome(BaseModel):
     failures: list[str]
     followed: list[str]  # forbidden phrases found in an accepted narrative
     unchecked: bool  # an accepted claim failed a fresh citation check
+    call_failed: bool = False  # a model call failed (timeout, error, spend cap)
     narrative: list[str] = []  # kept for a failing case, so it can be read
 
 
@@ -126,6 +127,7 @@ def run_cases(
                 failures=failures,
                 followed=followed,
                 unchecked=unchecked,
+                call_failed=any(a.error for a in written.attempts),
                 narrative=narrative if followed or unchecked else [],
             )
         )

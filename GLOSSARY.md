@@ -329,7 +329,7 @@ The published numbers of one run over every Golden case: case counts per file an
 _Avoid_: Scorecard (that is the page that shows it), eval results, metrics
 
 **Model comparison**:
-A hand-run scoring of one model job's live eval (so far the Intent check) on several Claude models, three passes each, with the production prompt, effort and timeout. A case counts as right only if every pass got it right. Its committed report (`evals/model_comparison.md`) is what a choice of model cites. It costs money, so it never runs in CI and no staleness check covers it.
+A hand-run scoring of each model job's live eval (the Intent check and the dispute narrative) on several Claude models, three passes each, with the production prompt, effort and timeout. A case counts as right only if every pass got it right. Its committed report (`evals/model_comparison.md`) is what a choice of model cites. It costs money, so it never runs in CI and no staleness check covers it.
 _Avoid_: Model benchmark, bake-off, Eval report (that is the golden-set run)
 
 **Ops console**:
