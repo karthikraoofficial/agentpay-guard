@@ -6,6 +6,8 @@ We considered two other shapes. **Next.js server routes on Vercel** could hold t
 
 What may surprise a reader is that the Demo Tenant is now named in config. Until now it was an ordinary Tenant that no code treated differently. Its keys are still ordinary keys, and the API still treats it like any other Tenant. But the runner's settings name them (`AGENTPAY_DEMO_AGENT_KEY`, `AGENTPAY_DEMO_TENANT_KEY`), and refuse anything but test keys (`apg_test_...`), because a public page must never sit in front of a live key.
 
+The hosted demo runs with `AGENTPAY_ENV=production`, where `api.admin` issues live keys by default, so its Demo Tenant's keys are issued with `--test` (`create-tenant Demo --test`, or `create-key --tenant <id> --scopes ... --test`). The prefix says only what a key is for. The API treats test and live keys the same, so the Demo Tenant stays an ordinary Tenant. _(Added: #291, after the first hosted deploy found the Demo Tenant's keys were live.)_
+
 ## Consequences
 
 - **The runner is an HTTP client of the API, like the MCP server (ADR-0029).** `demo_runner/` and the step engine in `demo/` import nothing from `core.policy`, `api`, `adapters`, `workflows`, `agents`, `evals` or `anthropic`, and `core/` imports neither. An architecture test checks this. Agent steps call `guard_mcp`'s tool layer (`guard_mcp.server.call`) with the decide key, so a demo Decision is made exactly as an Agent in an MCP host would make it.

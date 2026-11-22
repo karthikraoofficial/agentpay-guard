@@ -448,7 +448,7 @@ if [[ -n "$(ENV_FILE=.env _existing AGENTPAY_DEMO_AGENT_KEY || true)" ]] && \
    ! confirm "The local .env already has Demo Tenant keys. Create a new Demo Tenant anyway?"; then
   note "keeping the existing Demo Tenant keys"
 elif confirm "Create the Demo Tenant on the hosted stack?"; then
-  created=$(vm "cd agentpay-guard && $COMPOSE exec -T api python -m api.admin create-tenant Demo")
+  created=$(vm "cd agentpay-guard && $COMPOSE exec -T api python -m api.admin create-tenant Demo --test")
   tenant_id=$(printf '%s\n' "$created" | sed -n 's/^tenant_id: //p')
   agent_key=$(printf '%s\n' "$created" | sed -n 's/^agent_key ([^)]*): //p')
   tenant_key=$(printf '%s\n' "$created" | sed -n 's/^tenant_key ([^)]*): //p')

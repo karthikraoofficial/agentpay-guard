@@ -430,7 +430,7 @@ By hand, on the VM:
 cp .env.production.example .env    # then replace every placeholder
 docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.prod.yml up -d --build
 docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.prod.yml \
-  exec api python -m api.admin create-tenant "Demo"   # the Demo Tenant; prints its keys once
+  exec api python -m api.admin create-tenant "Demo" --test   # the Demo Tenant; prints its keys once
 ```
 
 To move the hosted demo's Postgres to a new major version, run `bash infra/pg-upgrade.sh --prod` on the VM after pulling, then the `up -d --build` step below. It stops the stack, copies the database into the new volume, and checks every table's row count. The `migrate` service then runs on the new database. The old volume and the dump stay as the rollback (ADR-0022).
