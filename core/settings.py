@@ -58,7 +58,8 @@ class Settings(BaseSettings):
     # version, off every request path. Without a key, or on failure, the narrative is
     # written by code. Off: always written by code, no model call.
     dispute_narrative_enabled: bool = True
-    dispute_narrative_model: str = "claude-sonnet-5-5"
+    # Chosen by the Model comparison rule (ADR-0030).
+    dispute_narrative_model: str = "claude-haiku-5-5"
     dispute_narrative_timeout_ms: int = Field(default=45_000, gt=0, le=120_000)
 
     # The Model spend cap (ADR-0020): model calls each Tenant may make per UTC day, per

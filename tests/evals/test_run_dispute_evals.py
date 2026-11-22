@@ -120,12 +120,12 @@ def test_the_run_takes_a_model_and_defaults_to_the_configured_one() -> None:
     configured, chosen = ScriptedGateway(default_reply=GOOD), ScriptedGateway(default_reply=GOOD)
 
     default = run_dispute_evals.run_cases(cases, configured, make_settings())
-    report = run_dispute_evals.run_cases(cases, chosen, make_settings(), model="claude-haiku-5-5")
+    report = run_dispute_evals.run_cases(cases, chosen, make_settings(), model="claude-opus-5-5")
 
-    assert (default.model, report.model) == ("claude-sonnet-5-5", "claude-haiku-5-5")
+    assert (default.model, report.model) == ("claude-haiku-5-5", "claude-opus-5-5")
     assert [c.model for c in configured.calls + chosen.calls] == [
-        "claude-sonnet-5-5",
         "claude-haiku-5-5",
+        "claude-opus-5-5",
     ]
 
 

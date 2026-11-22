@@ -2,7 +2,7 @@
 
 The Claude API is down, slow or erroring, or a Tenant has reached its Model spend cap (ADR-0020). Two features call a model, both through ModelGateway:
 - **The Intent check:** `claude-haiku-5-5` by default, with a 2.5 s timeout.
-- **The dispute narrative:** `claude-sonnet-5-5` by default, with a 45 s timeout.
+- **The dispute narrative:** `claude-haiku-5-5` by default (ADR-0030), with a 45 s timeout.
 
 ## How you'd notice
 
