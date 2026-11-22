@@ -1,0 +1,211 @@
+"""The Scenario file format (#273): one JSON file per demo journey in the Scenario
+catalogue (`demo/scenarios/`), keyed by the journey ids in `docs/demo-journeys.md`.
+
+This model is the one source of the format. `demo/scenario.schema.json` is generated from
+it (`uv run python -m demo.scenario --write-schema`), and a test fails when the committed
+schema is stale, so the web app, `python -m demo` and the Demo runner read one format.
+
+The fields follow `docs/demo-journeys.md` section 8. The chat script is carried on the
+steps (each step's `chat` lines come before its call), and the human steps (approve,
+decline, ignore, sign off, regenerate, withdraw) are steps of their own, so the order of
+what is said and done is the order of one list.
+
+Each step names its actor. An Agent step names a `guard_mcp` tool and goes through that
+tool layer with the decide key; a Tenant step names an HTTP route; a Payer or reviewer
+step names what the person does, on the Consent link or Review link the run was given.
+
+Money is integer minor units and an ISO currency (CLAUDE.md non-negotiable 8).
+"""
+
+import argparse
+import json
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Annotated, Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+from core.domain.decisions import Merchant
+from core.domain.money import Money
+
+CATALOGUE = Path(__file__).parent / "scenarios"
+SCHEMA = Path(__file__).parent / "scenario.schema.json"
+
+ScenarioId = Annotated[str, StringConstraints(pattern=r"^[A-H][0-9]{1,2}$")]
+Text = Annotated[str, StringConstraints(min_length=1, max_length=2000)]
+# The tools guard_mcp publishes (guard_mcp/tools.py); a test checks the two lists agree.
+AgentTool = Literal[
+    "request_decision",
+    "check_intent",
+    "get_decision",
+    "get_consent_request",
+    "create_payment",
+    "get_payment",
+]
+# The Demo controls in the Demo Studio PRD (#272): expire-now, settle-now and switches.
+DemoControl = Literal[
+    "expire_consent",
+    "expire_payment_window",
+    "expire_intent",
+    "expire_notice",
+    "expire_dispute",
+    "expire_mandate",
+    "settle_now",
+    "ai_off",
+    "rail_declining",
+    "lose_payment",
+    "tamper_copy",
+    "rail_down",
+]
+# The mock rail's test tokens (adapters/memory/rail.py), each a pretend-bank behaviour.
+MockCard = Literal[
+    "token_mock_captures",
+    "token_mock_fails",
+    "token_mock_refused",
+    "token_mock_times_out",
+    "token_mock_notice_fails",
+]
+Playlist = Literal["pitch", "payments-pm", "risk-compliance", "engineering", "disputes"]
+
+
+class _Model(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class ChatLine(_Model):
+    speaker: Literal["asha", "shopbot"]
+    text: Text
+
+
+class MandateTerms(_Model):
+    """What Asha grants ShopBot. Each run grants its own Payer, Agent and Mandate."""
+
+    per_txn_cap: Money
+    monthly_cap: Money
+    allowed_mccs: list[Annotated[str, StringConstraints(pattern=r"^[0-9]{4}$")]]
+    # How long the Mandate has been valid, and how long it still is.
+    valid_for_days: int = Field(default=30, ge=1, le=365)
+
+
+class PriorPayment(_Model):
+    """History built before the steps: an allowed, captured Payment, e.g. for Spent this
+    month."""
+
+    amount: Money
+    merchant: Merchant | None = None
+
+
+class Setup(_Model):
+    mandate: MandateTerms
+    merchant: Merchant
+    card: MockCard = "token_mock_captures"
+    history: list[PriorPayment] = []
+
+
+class AgentStep(_Model):
+    """ShopBot calls a guard_mcp tool. The run fills in what it already knows (Mandate,
+    Agent, merchant, the last Decision or Payment, the step's idempotency key)."""
+
+    actor: Literal["agent"]
+    tool: AgentTool
+    chat: list[ChatLine] = []
+    # request_decision: the amount to ask for.
+    amount: Money | None = None
+    # A read the run repeats until the answer's `status` is one of these (the worker or a
+    # person has to act first). The step waits while it isn't.
+    until_status: list[str] | None = None
+
+
+class TenantStep(_Model):
+    """The wallet app calls an HTTP route with the tenant key, e.g.
+    `POST /v1/payments/{payment_id}/refunds`. `{name}` is filled from the run."""
+
+    actor: Literal["tenant"]
+    route: Annotated[str, StringConstraints(pattern=r"^(GET|POST) /v1/\S+$")]
+    chat: list[ChatLine] = []
+    body: dict[str, Any] | None = None
+
+
+class HumanStep(_Model):
+    """A person acts: Asha on her Consent link, or the reviewer on a Review link."""
+
+    actor: Literal["payer", "reviewer"]
+    action: Literal["approve", "decline", "ignore", "sign_off", "regenerate", "withdraw"]
+    chat: list[ChatLine] = []
+
+
+Step = Annotated[AgentStep | TenantStep | HumanStep, Field(discriminator="actor")]
+
+
+class Expected(_Model):
+    """What the run must end with; CI checks each field that is set."""
+
+    outcome: Literal["allow", "step_up", "block"] | None = None
+    reason_codes: list[str] | None = None
+    # The error code of an HTTP refusal the journey shows, e.g. DECISION_ALREADY_PAID.
+    refusal_code: str | None = None
+    payment_status: Literal["scheduled", "captured", "failed"] | None = None
+    refund_status: Literal["pending", "processed", "failed"] | None = None
+    dispute_status: str | None = None
+    evidence_strength: Literal["strong", "mixed", "weak"] | None = None
+
+
+class ModelReply(_Model):
+    """A scripted model reply CI plays through the fake model gateway, so CI makes no paid
+    call. The live demo compares the live verdict with it."""
+
+    job: Literal["intent_check", "dispute_narrative"]
+    reply: dict[str, Any]
+
+
+class Scenario(_Model):
+    id: ScenarioId
+    title: Text
+    group: Literal["A", "B", "C", "D", "E", "F", "G", "H"]
+    playlists: list[Playlist] = []
+    story: Text
+    setup: Setup
+    steps: list[Step] = Field(min_length=1)
+    demo_controls: list[DemoControl] = []
+    expected: Expected
+    model_replies: list[ModelReply] = []
+    what_to_notice: Text
+
+
+def load(path: Path) -> Scenario:
+    return Scenario.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+def catalogue(root: Path = CATALOGUE) -> dict[str, Scenario]:
+    """Every Scenario file, by id. A file's name must be its id."""
+    found: dict[str, Scenario] = {}
+    for path in sorted(root.glob("*.json")):
+        scenario = load(path)
+        if scenario.id != path.stem:
+            raise ValueError(
+                f"{path.name} holds Scenario {scenario.id}; name it {scenario.id}.json"
+            )
+        found[scenario.id] = scenario
+    return found
+
+
+def schema_text() -> str:
+    return json.dumps(Scenario.model_json_schema(), indent=2, sort_keys=True) + "\n"
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="python -m demo.scenario")
+    parser.add_argument("--write-schema", action="store_true", help=f"rewrite {SCHEMA.name}")
+    args = parser.parse_args(argv)
+    if args.write_schema:
+        SCHEMA.write_text(schema_text(), encoding="utf-8", newline="\n")
+        print(f"Wrote {SCHEMA}")
+        return 0
+    for scenario_id in catalogue():
+        print(scenario_id)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

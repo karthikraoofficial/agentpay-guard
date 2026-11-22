@@ -1,0 +1,593 @@
+{
+  "$defs": {
+    "AgentStep": {
+      "additionalProperties": false,
+      "description": "ShopBot calls a guard_mcp tool. The run fills in what it already knows (Mandate,\nAgent, merchant, the last Decision or Payment, the step's idempotency key).",
+      "properties": {
+        "actor": {
+          "const": "agent",
+          "title": "Actor",
+          "type": "string"
+        },
+        "amount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Money"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "chat": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ChatLine"
+          },
+          "title": "Chat",
+          "type": "array"
+        },
+        "tool": {
+          "enum": [
+            "request_decision",
+            "check_intent",
+            "get_decision",
+            "get_consent_request",
+            "create_payment",
+            "get_payment"
+          ],
+          "title": "Tool",
+          "type": "string"
+        },
+        "until_status": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Until Status"
+        }
+      },
+      "required": [
+        "actor",
+        "tool"
+      ],
+      "title": "AgentStep",
+      "type": "object"
+    },
+    "ChatLine": {
+      "additionalProperties": false,
+      "properties": {
+        "speaker": {
+          "enum": [
+            "asha",
+            "shopbot"
+          ],
+          "title": "Speaker",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "speaker",
+        "text"
+      ],
+      "title": "ChatLine",
+      "type": "object"
+    },
+    "Expected": {
+      "additionalProperties": false,
+      "description": "What the run must end with; CI checks each field that is set.",
+      "properties": {
+        "dispute_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dispute Status"
+        },
+        "evidence_strength": {
+          "anyOf": [
+            {
+              "enum": [
+                "strong",
+                "mixed",
+                "weak"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Strength"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "allow",
+                "step_up",
+                "block"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outcome"
+        },
+        "payment_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "scheduled",
+                "captured",
+                "failed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Payment Status"
+        },
+        "reason_codes": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason Codes"
+        },
+        "refund_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "pending",
+                "processed",
+                "failed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Refund Status"
+        },
+        "refusal_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Refusal Code"
+        }
+      },
+      "title": "Expected",
+      "type": "object"
+    },
+    "HumanStep": {
+      "additionalProperties": false,
+      "description": "A person acts: Asha on her Consent link, or the reviewer on a Review link.",
+      "properties": {
+        "action": {
+          "enum": [
+            "approve",
+            "decline",
+            "ignore",
+            "sign_off",
+            "regenerate",
+            "withdraw"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "actor": {
+          "enum": [
+            "payer",
+            "reviewer"
+          ],
+          "title": "Actor",
+          "type": "string"
+        },
+        "chat": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ChatLine"
+          },
+          "title": "Chat",
+          "type": "array"
+        }
+      },
+      "required": [
+        "actor",
+        "action"
+      ],
+      "title": "HumanStep",
+      "type": "object"
+    },
+    "MandateTerms": {
+      "additionalProperties": false,
+      "description": "What Asha grants ShopBot. Each run grants its own Payer, Agent and Mandate.",
+      "properties": {
+        "allowed_mccs": {
+          "items": {
+            "pattern": "^[0-9]{4}$",
+            "type": "string"
+          },
+          "title": "Allowed Mccs",
+          "type": "array"
+        },
+        "monthly_cap": {
+          "$ref": "#/$defs/Money"
+        },
+        "per_txn_cap": {
+          "$ref": "#/$defs/Money"
+        },
+        "valid_for_days": {
+          "default": 30,
+          "maximum": 365,
+          "minimum": 1,
+          "title": "Valid For Days",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "per_txn_cap",
+        "monthly_cap",
+        "allowed_mccs"
+      ],
+      "title": "MandateTerms",
+      "type": "object"
+    },
+    "Merchant": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "mcc": {
+          "pattern": "^\\d{4}$",
+          "title": "Mcc",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "mcc"
+      ],
+      "title": "Merchant",
+      "type": "object"
+    },
+    "ModelReply": {
+      "additionalProperties": false,
+      "description": "A scripted model reply CI plays through the fake model gateway, so CI makes no paid\ncall. The live demo compares the live verdict with it.",
+      "properties": {
+        "job": {
+          "enum": [
+            "intent_check",
+            "dispute_narrative"
+          ],
+          "title": "Job",
+          "type": "string"
+        },
+        "reply": {
+          "additionalProperties": true,
+          "title": "Reply",
+          "type": "object"
+        }
+      },
+      "required": [
+        "job",
+        "reply"
+      ],
+      "title": "ModelReply",
+      "type": "object"
+    },
+    "Money": {
+      "additionalProperties": false,
+      "description": "An amount in minor units (paise, cents). Floats are rejected, not rounded.",
+      "properties": {
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "title": "Currency",
+          "type": "string"
+        },
+        "minor": {
+          "description": "Amount in minor units, e.g. 12_500 = INR 125.00",
+          "minimum": 0,
+          "title": "Minor",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "minor",
+        "currency"
+      ],
+      "title": "Money",
+      "type": "object"
+    },
+    "PriorPayment": {
+      "additionalProperties": false,
+      "description": "History built before the steps: an allowed, captured Payment, e.g. for Spent this\nmonth.",
+      "properties": {
+        "amount": {
+          "$ref": "#/$defs/Money"
+        },
+        "merchant": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Merchant"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "amount"
+      ],
+      "title": "PriorPayment",
+      "type": "object"
+    },
+    "Setup": {
+      "additionalProperties": false,
+      "properties": {
+        "card": {
+          "default": "token_mock_captures",
+          "enum": [
+            "token_mock_captures",
+            "token_mock_fails",
+            "token_mock_refused",
+            "token_mock_times_out",
+            "token_mock_notice_fails"
+          ],
+          "title": "Card",
+          "type": "string"
+        },
+        "history": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PriorPayment"
+          },
+          "title": "History",
+          "type": "array"
+        },
+        "mandate": {
+          "$ref": "#/$defs/MandateTerms"
+        },
+        "merchant": {
+          "$ref": "#/$defs/Merchant"
+        }
+      },
+      "required": [
+        "mandate",
+        "merchant"
+      ],
+      "title": "Setup",
+      "type": "object"
+    },
+    "TenantStep": {
+      "additionalProperties": false,
+      "description": "The wallet app calls an HTTP route with the tenant key, e.g.\n`POST /v1/payments/{payment_id}/refunds`. `{name}` is filled from the run.",
+      "properties": {
+        "actor": {
+          "const": "tenant",
+          "title": "Actor",
+          "type": "string"
+        },
+        "body": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Body"
+        },
+        "chat": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ChatLine"
+          },
+          "title": "Chat",
+          "type": "array"
+        },
+        "route": {
+          "pattern": "^(GET|POST) /v1/\\S+$",
+          "title": "Route",
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor",
+        "route"
+      ],
+      "title": "TenantStep",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "demo_controls": {
+      "default": [],
+      "items": {
+        "enum": [
+          "expire_consent",
+          "expire_payment_window",
+          "expire_intent",
+          "expire_notice",
+          "expire_dispute",
+          "expire_mandate",
+          "settle_now",
+          "ai_off",
+          "rail_declining",
+          "lose_payment",
+          "tamper_copy",
+          "rail_down"
+        ],
+        "type": "string"
+      },
+      "title": "Demo Controls",
+      "type": "array"
+    },
+    "expected": {
+      "$ref": "#/$defs/Expected"
+    },
+    "group": {
+      "enum": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H"
+      ],
+      "title": "Group",
+      "type": "string"
+    },
+    "id": {
+      "pattern": "^[A-H][0-9]{1,2}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "model_replies": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ModelReply"
+      },
+      "title": "Model Replies",
+      "type": "array"
+    },
+    "playlists": {
+      "default": [],
+      "items": {
+        "enum": [
+          "pitch",
+          "payments-pm",
+          "risk-compliance",
+          "engineering",
+          "disputes"
+        ],
+        "type": "string"
+      },
+      "title": "Playlists",
+      "type": "array"
+    },
+    "setup": {
+      "$ref": "#/$defs/Setup"
+    },
+    "steps": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "agent": "#/$defs/AgentStep",
+            "payer": "#/$defs/HumanStep",
+            "reviewer": "#/$defs/HumanStep",
+            "tenant": "#/$defs/TenantStep"
+          },
+          "propertyName": "actor"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/AgentStep"
+          },
+          {
+            "$ref": "#/$defs/TenantStep"
+          },
+          {
+            "$ref": "#/$defs/HumanStep"
+          }
+        ]
+      },
+      "minItems": 1,
+      "title": "Steps",
+      "type": "array"
+    },
+    "story": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Story",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "what_to_notice": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "What To Notice",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "title",
+    "group",
+    "story",
+    "setup",
+    "steps",
+    "expected",
+    "what_to_notice"
+  ],
+  "title": "Scenario",
+  "type": "object"
+}

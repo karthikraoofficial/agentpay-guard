@@ -60,6 +60,23 @@ services:
       temporal:
         condition: service_started
 
+  # The Demo runner (ADR-0031): plays Scenarios for the web app's /demo page, holding the
+  # Demo Tenant's keys. A client of the API over HTTP only, so it needs no database.
+  # Public through Caddy at https://<AGENTPAY_API_HOST>/demo-runner/.
+  demo-runner:
+    <<: *app
+    command: ["python", "-m", "demo_runner", "--host", "0.0.0.0", "--port", "8100"]
+    environment:
+      AGENTPAY_DEMO_RUNNER_API_BASE_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/healthz')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   caddy:
     image: caddy:2.11.9
     restart: unless-stopped

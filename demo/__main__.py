@@ -1,5 +1,8 @@
 """`uv run python -m demo --base-url <api>`: run the demo journeys against a deployment.
 
+`--scenario <id>` runs one Scenario from the catalogue (demo/scenarios/) through the step
+engine the Demo runner uses; `--journey 1..4` runs the original four journeys.
+
 The Demo Tenant's keys come from settings (AGENTPAY_DEMO_AGENT_KEY and
 AGENTPAY_DEMO_TENANT_KEY), never from the command line, and are never printed. The
 deployment must use the mock rail; journeys 3 and 4 also need mock settle on and a worker."""
@@ -7,13 +10,16 @@ deployment must use the mock rail; journeys 3 and 4 also need mock settle on and
 import argparse
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 
+import anyio
 import httpx
 
 from core.settings import Settings, get_settings
+from demo import engine
 from demo.journeys import Demo, StepFailed
+from demo.scenario import Scenario, catalogue
 
 JOURNEYS = ("1", "2", "3", "4")
 
@@ -21,9 +27,11 @@ JOURNEYS = ("1", "2", "3", "4")
 def main(argv: Sequence[str] | None = None, settings: Settings | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m demo", description=__doc__)
     parser.add_argument("--base-url", required=True, help="the API, e.g. https://api.example")
-    parser.add_argument(
+    which = parser.add_mutually_exclusive_group()
+    which.add_argument(
         "--journey", choices=(*JOURNEYS, "all"), default="all", help="one journey, or all four"
     )
+    which.add_argument("--scenario", help="one Scenario from the catalogue, e.g. A1")
     parser.add_argument("--interval", type=float, default=3.0, help="seconds between checks")
     parser.add_argument("--timeout", type=float, default=600.0, help="seconds to wait for a step")
     args = parser.parse_args(argv)
@@ -36,6 +44,31 @@ def main(argv: Sequence[str] | None = None, settings: Settings | None = None) ->
             file=sys.stderr,
         )
         return 2
+
+    if args.scenario is not None:
+        scenario = catalogue().get(args.scenario)
+        if scenario is None:
+            print(f"No Scenario {args.scenario}.", file=sys.stderr)
+            return 2
+        agent_key = settings.demo_agent_key.get_secret_value()
+        tenant_key = settings.demo_tenant_key.get_secret_value()
+
+        async def go() -> int:
+            async with (
+                _client(args.base_url, agent_key) as agent,
+                _client(args.base_url, tenant_key) as tenant,
+            ):
+                return await run_scenario(
+                    scenario,
+                    agent=agent,
+                    tenant=tenant,
+                    say=lambda line: print(line, flush=True),
+                    wait=lambda: time.sleep(args.interval),
+                    now=lambda: datetime.now(UTC),
+                    patience=max(1, int(args.timeout / args.interval)),
+                )
+
+        return anyio.run(go)
 
     journeys = JOURNEYS if args.journey == "all" else (args.journey,)
     with httpx.Client(base_url=args.base_url, timeout=30.0) as client:
@@ -57,6 +90,78 @@ def main(argv: Sequence[str] | None = None, settings: Settings | None = None) ->
                 return 1
             print()
     print("Done.")
+    return 0
+
+
+def _client(base_url: str, key: str) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        base_url=base_url, headers={"Authorization": f"Bearer {key}"}, timeout=30.0
+    )
+
+
+_SPEAKERS = {"asha": "Asha", "shopbot": "ShopBot"}
+
+
+def _describe(card: engine.Card) -> str:
+    call = card.call
+    if call is None:
+        return f"step {card.step}"
+    if card.decision is not None:
+        d = card.decision
+        reasons = ", ".join(d.reason_codes) or "none"
+        return (
+            f"{call.name}: {d.outcome} (Reason codes: {reasons}; Decision {d.decision_id}, "
+            f"pack {d.policy_pack}, Audit record {d.audit_record_id})"
+        )
+    response = call.response
+    for name in ("mandate_id", "payment_id", "refund_id", "dispute_id"):
+        if name in response:
+            status = response.get("status")
+            return f"{call.name}: {response[name]}" + (f" {status}" if status else "")
+    return call.name
+
+
+async def run_scenario(
+    scenario: Scenario,
+    *,
+    agent: httpx.AsyncClient,
+    tenant: httpx.AsyncClient,
+    say: Callable[[str], None],
+    wait: Callable[[], None],
+    now: Callable[[], datetime],
+    patience: int,
+) -> int:
+    """Play a Scenario, printing each step: 0 if it ended as expected, 1 if not."""
+    say(f"Scenario {scenario.id}: {scenario.title}")
+    run = engine.Run(scenario, agent=agent, tenant=tenant, now=now)
+    told: set[int] = set()
+    waits = 0
+    while True:
+        try:
+            card = await run.next()
+        except engine.StepFailed as failed:
+            say(f"Failed at '{failed.step}': {failed.detail}")
+            return 1
+        if card.step not in told:
+            told.add(card.step)
+            for line in card.chat:
+                say(f"  {_SPEAKERS[line.speaker]}: {line.text}")
+        if card.waiting:
+            waits += 1
+            if waits > patience:
+                say(f"Failed at '{_describe(card)}': still waiting after {patience} checks")
+                return 1
+            wait()
+            continue
+        waits = 0
+        say(f"  - {_describe(card)}")
+        if card.finished:
+            break
+    if card.mismatches:
+        for mismatch in card.mismatches:
+            say(f"Not as expected: {mismatch}")
+        return 1
+    say(f"As expected. What to notice: {scenario.what_to_notice}")
     return 0
 
 

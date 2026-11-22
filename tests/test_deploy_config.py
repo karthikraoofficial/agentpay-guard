@@ -3,7 +3,9 @@ settings only, and they load."""
 
 from pathlib import Path
 
-from core.settings import Settings
+from pydantic import SecretStr
+
+from core.settings import DemoRunnerSettings, Settings
 
 EXAMPLE = Path(".env.production.example")
 # Read by docker compose or the infra scripts, never by the app.
@@ -35,7 +37,8 @@ def example() -> dict[str, str]:
 
 
 def test_every_variable_is_a_setting_or_read_by_compose() -> None:
-    fields = {f"AGENTPAY_{name.upper()}" for name in Settings.model_fields}
+    names = {*Settings.model_fields, *DemoRunnerSettings.model_fields}
+    fields = {f"AGENTPAY_{name.upper()}" for name in names}
 
     assert set(example()) - COMPOSE_ONLY <= fields
     assert not fields & COMPOSE_ONLY
@@ -47,9 +50,29 @@ def test_the_hosted_settings_load_as_a_production_demo_on_the_mock_rail() -> Non
         for name, value in example().items()
         if name not in COMPOSE_ONLY
     }
+    values = {name: value for name, value in values.items() if name in Settings.model_fields}
 
     settings = Settings(_env_file=None, **values, **FROM_COMPOSE)  # type: ignore[call-arg]
 
     assert settings.env == "production"
     assert (settings.rail, settings.mock_settle_after_seconds) == ("mock", 60)
     assert settings.web_origin.startswith("https://")
+
+
+def test_the_hosted_demo_runner_settings_load_with_test_keys() -> None:
+    values = {
+        name.removeprefix("AGENTPAY_").lower(): value
+        for name, value in example().items()
+        if name.removeprefix("AGENTPAY_").lower() in DemoRunnerSettings.model_fields
+    }
+
+    runner = DemoRunnerSettings(
+        _env_file=None,  # type: ignore[call-arg]
+        **values,
+        demo_agent_key=SecretStr("apg_test_agent"),
+        demo_tenant_key=SecretStr("apg_test_tenant"),
+        demo_runner_api_base_url="http://api:8000",  # set by infra/docker-compose.prod.yml
+    )
+
+    assert runner.web_origin.startswith("https://")
+    assert runner.demo_runner_runs_per_ip_per_minute == 5
