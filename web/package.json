@@ -3,14 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "node scripts/sync-eval-report.mjs",
+    "predev": "node scripts/sync-eval-report.mjs && node scripts/sync-scenarios.mjs",
     "dev": "next dev",
-    "prebuild": "node scripts/sync-eval-report.mjs",
+    "prebuild": "node scripts/sync-eval-report.mjs && node scripts/sync-scenarios.mjs",
     "build": "next build",
     "start": "next start",
-    "prelint": "node scripts/sync-eval-report.mjs",
+    "prelint": "node scripts/sync-eval-report.mjs && node scripts/sync-scenarios.mjs",
     "lint": "eslint",
-    "pretypecheck": "node scripts/sync-eval-report.mjs",
+    "pretypecheck": "node scripts/sync-eval-report.mjs && node scripts/sync-scenarios.mjs",
     "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
@@ -23,6 +23,7 @@
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "ajv": "8.17.1",
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
     "tailwindcss": "^4",

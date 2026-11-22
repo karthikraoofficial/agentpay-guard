@@ -282,7 +282,7 @@ Allow, step-up and block count decision-stage cases; approval re-checks are labe
 | `evals/` | Labelled golden cases and the eval gate; the live Intent check eval set |
 | `migrations/` | Alembic migrations |
 | `infra/` | Docker Compose for local dev, the OTel collector configs, and the hosted demo's production overlay, Caddyfile and smoke test |
-| `web/` | Next.js front end: the consent screen, the dispute viewer, the Ops console (`/ops`, the eval scorecard) and a plain-English map of the whole flow (`/how-it-works`, linked from the home page) |
+| `web/` | Next.js front end: the consent screen, the dispute viewer, the demo page (`/demo`, which plays Scenarios through the Demo runner), the Ops console (`/ops`, the eval scorecard) and a plain-English map of the whole flow (`/how-it-works`, linked from the home page) |
 | `tools/buildviz/` | A zero-dependency module build graph. `node tools/buildviz/buildviz.js` serves it at http://localhost:4477, with modules and dependencies taken from `buildviz.config.json` |
 
 ## Signals (Policy packs from `default@1.1.0`)
@@ -462,7 +462,7 @@ What the production overlay does:
 - **One image, four services.** The root `Dockerfile` builds a single image that runs the API, the worker, the Demo runner and a one-shot `migrate` service. The API and worker wait until migrations have finished, and the Demo runner until the API is healthy.
 - **Only Caddy is public.** It serves `AGENTPAY_API_HOST` over HTTPS with a certificate it gets and renews itself, and the Demo runner under `/demo-runner/` on the same host (ADR-0031). A free hostname with no account is `api.<the VM's IP, dashes for dots>.sslip.io`. Postgres, Temporal and the collector have no published ports.
 - **Settings for a public demo.** `.env.production.example` lists every hosted setting. It sets the mock rail with mock settle, so demo journey 3 runs, and the Model spend cap.
-- **Vercel.** The web app deploys from `web/` (`web/vercel.json`). Set `NEXT_PUBLIC_API_URL=https://<AGENTPAY_API_HOST>` in Vercel, and set `AGENTPAY_WEB_ORIGIN` on the VM to the Vercel URL.
+- **Vercel.** The web app deploys from `web/` (`web/vercel.json`). Set `NEXT_PUBLIC_API_URL=https://<AGENTPAY_API_HOST>` and `NEXT_PUBLIC_DEMO_RUNNER_URL=https://<AGENTPAY_API_HOST>/demo-runner` in Vercel, and set `AGENTPAY_WEB_ORIGIN` on the VM to the Vercel URL. Turn on "Include files outside the root directory", so the build can read `evals/report.json` and `demo/scenarios/`.
 
 `bash infra/smoke-prod.sh` checks the whole thing on your own machine, and CI's `deploy` job runs it on every PR. It builds and starts the production stack from `.env.production.example` on `localhost`, checks that the API's `/healthz` and the Demo runner's `/demo-runner/healthz` answer through Caddy, then tears it down. It runs as a separate compose project on ports 8080 and 8443, so your dev stack is left alone.
 
@@ -486,6 +486,8 @@ What the production overlay does:
 It reads the Demo Tenant's keys from `AGENTPAY_DEMO_AGENT_KEY` and `AGENTPAY_DEMO_TENANT_KEY` in `.env`, as `create-tenant` printed them, and never prints them. `--journey 1|2|3|4` runs one journey. Each journey sets up its own Mandate, so any one can run alone. A failure names the step that failed and exits 1. `--interval` and `--timeout` set how often it checks and how long it waits. `tests/api/test_demo_cli.py` runs it against the in-process app with mock settle on, playing the worker, the Payer and the reviewer.
 
 **Scenarios.** Every journey in [docs/demo-journeys.md](docs/demo-journeys.md) is becoming a **Scenario**: one JSON file in `demo/scenarios/`, named after its journey id, holding the story, the setup, the steps with their chat lines, and the expected result. Today the catalogue holds A1. `uv run python -m demo --base-url <api> --scenario A1` plays one, printing the chat and each Guard call, and exits 1 if it doesn't end as expected. Agent steps go through the MCP server's tool layer with the decide key. Each run grants its own Payer, Agent and Mandate. The format is one Pydantic model in `demo/scenario.py`. `uv run python -m demo.scenario --write-schema` regenerates `demo/scenario.schema.json`, and a test fails when it is stale. `tests/demo/test_scenarios.py` runs every Scenario file against the in-process app and checks its expected result.
+
+**The demo page.** The web app's `/demo` page lists the Scenario catalogue and plays a Scenario through the Demo runner: the chat with a card for each Guard call, a verdict card for each Decision, and an inspector with the Decision's Outcome, Reason codes, Policy pack version and Audit record id (see `web/README.md`).
 
 **The Demo runner** (ADR-0031) plays Scenarios for the web app's demo page, so the browser never holds a key. Run it with `uv run python -m demo_runner` (port 8100; `--host`, `--port`). It needs the two Demo Tenant keys, which must be test keys (`apg_test_...`), and `AGENTPAY_DEMO_RUNNER_API_BASE_URL` (default `http://localhost:8000`). Only `AGENTPAY_WEB_ORIGIN` may call it from a browser. Its API:
 - `POST /runs` with `{"scenario": "A1"}` starts a run and answers `201` with an unguessable `run_id` and the number of steps.
