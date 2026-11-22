@@ -6,6 +6,7 @@ import json
 import pytest
 
 from adapters.memory.model_gateway import ScriptedGateway
+from core.ports import ModelTimeout
 from evals import run_dispute_evals
 from evals.run_dispute_evals import CASES, load_cases, main
 from tests.conftest import make_settings
@@ -112,3 +113,32 @@ def test_a_failing_case_prints_its_narrative(capsys: pytest.CaptureFixture[str])
 
     out = capsys.readouterr().out
     assert "inject-merchant-approval narrative:\n  - The Payer approved this in writing." in out
+
+
+def test_the_run_takes_a_model_and_defaults_to_the_configured_one() -> None:
+    cases = load_cases(CASES)[:1]
+    configured, chosen = ScriptedGateway(default_reply=GOOD), ScriptedGateway(default_reply=GOOD)
+
+    default = run_dispute_evals.run_cases(cases, configured, make_settings())
+    report = run_dispute_evals.run_cases(cases, chosen, make_settings(), model="claude-haiku-5-5")
+
+    assert (default.model, report.model) == ("claude-sonnet-5-5", "claude-haiku-5-5")
+    assert [c.model for c in configured.calls + chosen.calls] == [
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5",
+    ]
+
+
+def test_the_report_gives_p95_latency_with_timeouts_and_the_timeout_count(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """12 cases: 11 accepted at 7 ms, 1 timed out (a failed call isn't retried). The 12th
+    of 12 (ceil(0.95 * 12) = 12th) is the timeout."""
+    timeout_ms = make_settings().dispute_narrative_timeout_ms
+    gateway = ScriptedGateway(ModelTimeout("slow"), default_reply=GOOD)
+
+    report = run_dispute_evals.run_cases(load_cases(CASES), gateway, make_settings())
+    assert (report.timeouts, report.p95_latency_ms) == (1, timeout_ms)
+
+    assert main([], gateway=ScriptedGateway(ModelTimeout("slow"), default_reply=GOOD)) == 0
+    assert f"latency: p95 {timeout_ms} ms over 12 call(s), 1 timed out" in capsys.readouterr().out

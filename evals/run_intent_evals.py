@@ -17,6 +17,10 @@ Injection cases name their technique, and are also scored per technique: how man
 got no answer because the call failed. A failed call is an unknown verdict, as in
 production, but it shows nothing about the model, so it never counts as held.
 
+It also reports p95 latency over every call, timeouts included at the timeout, and the
+number of timeouts (`evals.model_calls`). `--model` scores another model with the same
+prompt, effort and timeout; the default is the configured one.
+
 Exit codes: 0 every injection case answered and none matched, 1 an injection false match,
 2 no API key, 3 an injection case got no answer (a timeout, an API error, no credit).
 """
@@ -37,6 +41,7 @@ from core.domain.money import Money
 from core.ports import ModelGateway, TenantId
 from core.settings import Settings, get_settings
 from core.signals.intent_check import PROMPT_VERSION, run_intent_check
+from evals.model_calls import TimedGateway, latency_line
 
 CASES = Path(__file__).resolve().parent / "intent" / "cases.jsonl"
 TENANT = TenantId("ten_intent_eval")
@@ -110,6 +115,10 @@ class Report(BaseModel):
     tokens_in: int
     tokens_out: int
     cost_usd_micros: int
+    # Over every call with a reply or a timeout (a timeout counts at the timeout).
+    p95_latency_ms: int | None
+    timed_calls: int
+    timeouts: int
 
 
 def load_cases(path: Path) -> list[IntentCase]:
@@ -117,18 +126,26 @@ def load_cases(path: Path) -> list[IntentCase]:
     return [IntentCase.model_validate_json(line) for line in lines if line.strip()]
 
 
-def run_cases(cases: Sequence[IntentCase], gateway: ModelGateway, settings: Settings) -> Report:
+def run_cases(
+    cases: Sequence[IntentCase],
+    gateway: ModelGateway,
+    settings: Settings,
+    model: str | None = None,
+) -> Report:
+    """Run every case once on `model` (default: the configured Intent check model)."""
+    model = model or settings.intent_check_model
+    timed = TimedGateway(gateway)
     misses: list[Miss] = []
     false_match = false_mismatch = tokens_in = tokens_out = cost = 0
     injection_false_match = False
     by_technique: dict[str, TechniqueScore] = {}
     for case in cases:
         result = run_intent_check(
-            gateway,
+            timed,
             TENANT,
             case.content(),
             enabled=True,
-            model=settings.intent_check_model,
+            model=model,
             timeout_ms=settings.intent_check_timeout_ms,
         )
         if result.completion is not None:
@@ -160,7 +177,7 @@ def run_cases(cases: Sequence[IntentCase], gateway: ModelGateway, settings: Sett
             )
         )
     return Report(
-        model=settings.intent_check_model,
+        model=model,
         prompt_version=PROMPT_VERSION,
         total=len(cases),
         correct=len(cases) - len(misses),
@@ -173,6 +190,9 @@ def run_cases(cases: Sequence[IntentCase], gateway: ModelGateway, settings: Sett
         tokens_in=tokens_in,
         tokens_out=tokens_out,
         cost_usd_micros=cost,
+        p95_latency_ms=timed.p95_latency_ms,
+        timed_calls=len(timed.latencies_ms),
+        timeouts=timed.timeouts,
     )
 
 
@@ -183,6 +203,7 @@ def _rate(n: int, of: int) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m evals.run_intent_evals")
     parser.add_argument("--cases", type=Path, default=CASES)
+    parser.add_argument("--model", help="the model to score (default: the configured one)")
     args = parser.parse_args(argv)
 
     settings = get_settings()
@@ -195,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     cases = load_cases(args.cases)
     gateway = ClaudeGateway(settings.anthropic_api_key, InMemoryTelemetry())
-    report = run_cases(cases, gateway, settings)
+    report = run_cases(cases, gateway, settings, args.model)
 
     could_match = sum("match" not in c.acceptable for c in cases)
     only_match = sum(c.acceptable == ("match",) for c in cases)
@@ -208,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
         f"usage: {report.tokens_in} tokens in, {report.tokens_out} out, "
         f"{report.cost_usd_micros} micro-USD"
     )
+    print(latency_line(report.p95_latency_ms, report.timed_calls, report.timeouts))
     if report.by_technique:
         print(
             "\n| injection technique | cases | held | false-match | no answer |"

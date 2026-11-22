@@ -7,8 +7,10 @@ Each case in evals/dispute_narratives/cases.jsonl describes a disputed Payment (
 scenario fields as the golden sets, built into a real Evidence bundle). The runner uses
 the production writer (`agents.dispute_narrative.NarrativeWriter`: same prompt, model and
 timeout as the worker) and reports how many narratives the citation checker accepted,
-how many needed the retry, how many fell back to the narrative written by code, and the
-tokens and cost.
+how many needed the retry, how many fell back to the narrative written by code, the
+tokens and cost, and p95 latency over every call (timeouts included at the timeout) with
+the number of timeouts. `--model` scores another model with the same prompt, effort and
+timeout; the default is the configured one.
 
 The checker already stops an uncited or wrongly cited claim from reaching a pack. What
 it can't see is a model that followed an injection in words: injection cases put
@@ -35,6 +37,7 @@ from core.narrative_check import check_narrative
 from core.ports import ModelGateway, TenantId
 from core.settings import Settings, get_settings
 from evals.disputes import Scenario, bundle_for
+from evals.model_calls import TimedGateway, latency_line
 
 CASES = Path(__file__).resolve().parent / "dispute_narratives" / "cases.jsonl"
 TENANT = TenantId("ten_dispute_eval")
@@ -65,6 +68,10 @@ class Report(BaseModel):
     tokens_in: int
     tokens_out: int
     cost_usd_micros: int
+    # Over every call with a reply or a timeout (a timeout counts at the timeout).
+    p95_latency_ms: int | None
+    timed_calls: int
+    timeouts: int
 
     @property
     def failed(self) -> bool:
@@ -78,10 +85,16 @@ def load_cases(path: Path) -> list[NarrativeCase]:
     return [NarrativeCase.model_validate(base | json.loads(line)) for line in lines if line.strip()]
 
 
-def run_cases(cases: Sequence[NarrativeCase], gateway: ModelGateway, settings: Settings) -> Report:
-    writer = NarrativeWriter(
-        gateway, settings.dispute_narrative_model, settings.dispute_narrative_timeout_ms
-    )
+def run_cases(
+    cases: Sequence[NarrativeCase],
+    gateway: ModelGateway,
+    settings: Settings,
+    model: str | None = None,
+) -> Report:
+    """Run every case once on `model` (default: the configured dispute narrative model)."""
+    model = model or settings.dispute_narrative_model
+    timed = TimedGateway(gateway)
+    writer = NarrativeWriter(timed, model, settings.dispute_narrative_timeout_ms)
     outcomes: list[Outcome] = []
     tokens_in = tokens_out = cost = 0
     for case in cases:
@@ -117,12 +130,15 @@ def run_cases(cases: Sequence[NarrativeCase], gateway: ModelGateway, settings: S
             )
         )
     return Report(
-        model=settings.dispute_narrative_model,
+        model=model,
         prompt_version=PROMPT_VERSION,
         outcomes=outcomes,
         tokens_in=tokens_in,
         tokens_out=tokens_out,
         cost_usd_micros=cost,
+        p95_latency_ms=timed.p95_latency_ms,
+        timed_calls=len(timed.latencies_ms),
+        timeouts=timed.timeouts,
     )
 
 
@@ -144,6 +160,7 @@ def _rate(n: int, of: int) -> str:
 def main(argv: list[str] | None = None, gateway: ModelGateway | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m evals.run_dispute_evals")
     parser.add_argument("--cases", type=Path, default=CASES)
+    parser.add_argument("--model", help="the model to score (default: the configured one)")
     args = parser.parse_args(argv)
 
     settings = get_settings()
@@ -156,7 +173,7 @@ def main(argv: list[str] | None = None, gateway: ModelGateway | None = None) -> 
             )
             return 2
         gateway = ClaudeGateway(settings.anthropic_api_key, InMemoryTelemetry())
-    report = run_cases(load_cases(args.cases), gateway, settings)
+    report = run_cases(load_cases(args.cases), gateway, settings, args.model)
 
     total = len(report.outcomes)
     accepted = [o for o in report.outcomes if o.accepted]
@@ -170,6 +187,7 @@ def main(argv: list[str] | None = None, gateway: ModelGateway | None = None) -> 
         f"usage: {report.tokens_in} tokens in, {report.tokens_out} out, "
         f"{report.cost_usd_micros} micro-USD"
     )
+    print(latency_line(report.p95_latency_ms, report.timed_calls, report.timeouts))
     print("\n| case | kind | accepted | attempts | refused for | followed |")
     print("| --- | --- | --- | --- | --- | --- |")
     for o in report.outcomes:
