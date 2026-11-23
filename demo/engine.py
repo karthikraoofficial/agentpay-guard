@@ -60,6 +60,8 @@ _CHECKED = {
     "payment_failure_code",
     "consent_status",
     "refusal_code",
+    "replay_status",
+    "chain_clean",
 }
 _FAST_FORWARDS = set(get_args(FastForward))
 # Each fast-forward's Demo control route (ADR-0032) and the run's id it ends.
@@ -99,6 +101,12 @@ class Call(BaseModel):
     response: Json
 
 
+class RuleView(BaseModel):
+    rule_id: str
+    result: str
+    reason_code: str | None = None
+
+
 class DecisionView(BaseModel):
     decision_id: str
     outcome: str
@@ -106,6 +114,31 @@ class DecisionView(BaseModel):
     policy_pack: str  # e.g. default@1.5.0
     pack_hash: str
     audit_record_id: str
+    # Every rule that ran, from the Audit record. Empty if that read failed: the Decision
+    # stands either way, and the inspector says the rules aren't available.
+    rule_results: list[RuleView] = []
+
+
+class ReplayView(BaseModel):
+    audit_record_id: str
+    seq: int
+    status: str
+    identical: bool
+    difference: str | None = None
+    detail: str | None = None
+
+
+class ChainView(BaseModel):
+    clean: bool
+    record_count: int
+    first_broken_seq: int | None = None
+
+
+class Verification(BaseModel):
+    """The inspector's Verify / Replay button: both answers (#275)."""
+
+    replay: ReplayView
+    chain: ChainView
 
 
 class ConsentView(BaseModel):
@@ -206,6 +239,9 @@ class Run:
         self.payment: Json | None = None
         self.consent: Json | None = None
         self.refusal: str | None = None
+        self.replayed: Json | None = None
+        self.chain: Json | None = None
+        self._rules: dict[str, list[RuleView]] = {}
         self._problems: list[str] = []
 
     @property
@@ -279,6 +315,7 @@ class Run:
             "mandate_id": self.mandate_id,
             "agent_id": self.agent_id,
             "decision_id": (self.decision or {}).get("decision_id"),
+            "audit_record_id": (self.decision or {}).get("audit_record_id"),
             "payment_id": (self.payment or {}).get("payment_id"),
             "consent_request_id": self._consent_request_id(),
         }
@@ -302,11 +339,52 @@ class Run:
         if "outcome" in body:
             self.decision = body
             return _decision_view(body)
-        if "payment_id" in body:
+        if "identical" in body:
+            self.replayed = body
+        elif "clean" in body:
+            self.chain = body
+        elif "payment_id" in body:
             self.payment = body
         elif "consent_request_id" in body and "status" in body:
             self.consent = body
         return None
+
+    async def _with_rules(self, view: DecisionView | None) -> DecisionView | None:
+        """The Decision's view with its Rule results, read once from its Audit record."""
+        if view is None:
+            return None
+        audit_record_id = view.audit_record_id
+        if audit_record_id not in self._rules:
+            path = f"/v1/audit-records/{audit_record_id}"
+            try:
+                response = await self._tenant.get(path)
+            except httpx.HTTPError:
+                return view
+            if not response.is_success:
+                return view
+            rules = _body(response).get("rule_results", [])
+            self._rules[audit_record_id] = [RuleView.model_validate(rule) for rule in rules]
+        return view.model_copy(update={"rule_results": self._rules[audit_record_id]})
+
+    async def verify(self) -> Verification | None:
+        """Replay this run's Decision and walk the Tenant's Audit chain, or None before
+        the run has a Decision. Reads only, so it can't change the run."""
+        if self.decision is None:
+            return None
+        step = "Verify / Replay"
+        audit_record_id = self.decision["audit_record_id"]
+        replayed = await self._send(
+            self._tenant, step, "GET", f"/v1/audit-records/{audit_record_id}/replay"
+        )
+        if not replayed.is_success:
+            raise StepFailed(step, _problem(replayed))
+        chain = await self._send(self._tenant, step, "GET", "/v1/audit-chain/verify")
+        if not chain.is_success:
+            raise StepFailed(step, _problem(chain))
+        return Verification(
+            replay=ReplayView.model_validate(_body(replayed)),
+            chain=ChainView.model_validate(_body(chain)),
+        )
 
     # --- Setup ----------------------------------------------------------------------------
 
@@ -406,7 +484,7 @@ class Run:
             refused = self.refusal = code
         elif step.expect_refusal:
             raise StepFailed(tool, f"expected {step.expect_refusal}, but it was allowed")
-        decision = self._remember(body) if refused is None else None
+        decision = await self._with_rules(self._remember(body) if refused is None else None)
         waiting = step.until_status is not None and body.get("status") not in step.until_status
         request = {k: v for k, v in arguments.items() if k != "idempotency_key"}
         return Card(
@@ -440,7 +518,7 @@ class Run:
             refused = self.refusal = code
         elif step.expect_refusal:
             raise StepFailed(route, f"expected {step.expect_refusal}, but it was allowed")
-        decision = self._remember(answer) if refused is None else None
+        decision = await self._with_rules(self._remember(answer) if refused is None else None)
         return Card(
             step=index,
             actor=step.actor,
@@ -593,6 +671,8 @@ class Run:
         )
         check("consent status", expected.consent_status, (self.consent or {}).get("status"))
         check("refusal", expected.refusal_code, self.refusal)
+        check("replay", expected.replay_status, (self.replayed or {}).get("status"))
+        check("chain clean", expected.chain_clean, (self.chain or {}).get("clean"))
         return found
 
 

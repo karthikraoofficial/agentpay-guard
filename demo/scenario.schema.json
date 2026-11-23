@@ -124,6 +124,18 @@
       "additionalProperties": false,
       "description": "What the run must end with; CI checks each field that is set.",
       "properties": {
+        "chain_clean": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chain Clean"
+        },
         "consent_status": {
           "anyOf": [
             {
@@ -261,6 +273,22 @@
           ],
           "default": null,
           "title": "Refusal Code"
+        },
+        "replay_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "identical",
+                "different"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Replay Status"
         }
       },
       "title": "Expected",

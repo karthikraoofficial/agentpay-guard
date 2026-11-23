@@ -20,6 +20,7 @@ from api import errors
 from api.deps import Store
 from api.routes import (
     api_keys,
+    audit,
     consent_links,
     consent_requests,
     decisions,
@@ -110,6 +111,7 @@ def create_app(
     app.include_router(review_links.router)
     app.include_router(rail_webhooks.router)
     app.include_router(webhook_endpoint.router)
+    app.include_router(audit.router)
     if settings.demo_controls_tenant_id is not None:
         # Demo controls exist only for the configured Demo Tenant on the mock rail (ADR-0032).
         app.include_router(demo_controls.router)

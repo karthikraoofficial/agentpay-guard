@@ -194,6 +194,10 @@ class Expected(_Model):
     payment_failure_code: str | None = None
     # The last Consent request's status at the end of the run.
     consent_status: Literal["pending", "approved", "declined", "expired", "blocked"] | None = None
+    # What a Replay step answered for the Decision (H4).
+    replay_status: Literal["identical", "different"] | None = None
+    # Whether a Verify step found the Tenant's Audit chain clean (H5).
+    chain_clean: bool | None = None
 
 
 class ModelReply(_Model):
