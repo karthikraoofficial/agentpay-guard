@@ -429,12 +429,12 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 **Guard's answer:** The refund is marked failed. Only refunds that actually went through count back towards the monthly limit, because Asha doesn't have this money yet.
 **Why it matters:** The books always match reality. *Demo control:* a "bank declining" switch. A deployment has no other way to make a refund fail: the hooks that do it are for tests only.
 
-### H4. "Why did you decide that?" Replaying a decision 🟢
+### H4. "Why did you decide that?" Replaying a decision ✅
 **Story:** Weeks later, an auditor asks why a particular payment was allowed.
 **Guard's answer:** Re-runs the exact same rules, with the exact same rulebook version and facts, and reproduces the decision byte for byte.
 **Why it matters:** Every decision is explainable and provable. This is what regulators and partner banks ask for.
 
-### H5. Checking the diary hasn't been tampered with 🟢
+### H5. Checking the diary hasn't been tampered with ✅
 **Story:** An auditor wants proof that no one has quietly edited the records.
 **Guard's answer:** Verifies the whole chain of records. Each one is linked to the one before, so any change would show.
 **Why it matters:** Trust in the evidence depends on the evidence being untouchable.
@@ -467,13 +467,13 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 | E. Asking Asha | 6 | 6 | 0 | 0 |
 | F. Paying | 9 | 4 | 3 | 2 |
 | G. Disputes | 12 | 1 | 9 | 2 |
-| H. Refunds and proof | 8 | 1 | 5 | 2 |
-| **Total** | **60** | **16** | **36** | **8** |
+| H. Refunds and proof | 8 | 3 | 3 | 2 |
+| **Total** | **60** | **18** | **34** | **8** |
 
-*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), and B10, E3, F4, F5 and F7 (#280).*
+*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), and H4 and H5 (#275).*
 
 **What this means for the build:**
-- **36 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
+- **34 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
 - **8 journeys still need a demo-only control:**
   1. **Fast-forward** (built for Consent requests, Payment windows and notice periods, ADR-0032): still to come for a stale cart check (D7) and a Dispute deadline (G11).
   2. **Failure switches**: AI off (D5, G8); bank down or declining (F9, H3); lose a payment at the bank (F8); tamper with a copy of the records (H6).

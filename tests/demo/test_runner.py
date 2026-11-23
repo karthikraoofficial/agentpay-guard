@@ -110,6 +110,55 @@ async def test_a_run_plays_a1_one_card_at_a_time(api: Api, keys: tuple[str, str]
     assert cards[-1]["finished"] and cards[-1]["mismatches"] == []
 
 
+async def test_a_decision_card_carries_its_rule_results(api: Api, keys: tuple[str, str]) -> None:
+    async with runner(api, keys) as client:
+        run_id = (await start(client)).json()["run_id"]
+        cards = await play_through(client, run_id, Operator(api, []))
+
+    rules = cards[1]["decision"]["rule_results"]
+    assert rules, "the inspector shows every rule that ran"
+    assert all(rule["rule_id"] and rule["result"] for rule in rules)
+
+
+async def test_verify_replays_the_runs_decision_and_walks_the_chain(
+    api: Api, keys: tuple[str, str]
+) -> None:
+    async with runner(api, keys) as client:
+        run_id = (await start(client)).json()["run_id"]
+        cards = await play_through(client, run_id, Operator(api, []))
+
+        checked = await client.post(f"/runs/{run_id}/verify")
+
+    assert checked.status_code == 200, checked.text
+    body = checked.json()
+    assert body["replay"]["audit_record_id"] == cards[1]["decision"]["audit_record_id"]
+    assert (body["replay"]["status"], body["replay"]["identical"]) == ("identical", True)
+    assert body["chain"]["clean"] is True
+    assert body["chain"]["record_count"] >= 1
+    assert body["chain"]["first_broken_seq"] is None
+
+
+async def test_verify_needs_a_decision_and_a_live_run(api: Api, keys: tuple[str, str]) -> None:
+    async with runner(api, keys) as client:
+        run_id = (await start(client)).json()["run_id"]
+
+        early = await client.post(f"/runs/{run_id}/verify")
+        gone = await client.post("/runs/no-such-run/verify")
+
+    assert (early.status_code, early.json()["code"]) == (409, "NO_DECISION_YET")
+    assert (gone.status_code, gone.json()["code"]) == (404, "RUN_NOT_FOUND")
+
+
+async def test_verify_is_limited_per_run(api: Api, keys: tuple[str, str]) -> None:
+    async with runner(api, keys) as client:
+        run_id = (await start(client)).json()["run_id"]
+        await play_through(client, run_id, Operator(api, []))
+
+        answers = [(await client.post(f"/runs/{run_id}/verify")).status_code for _ in range(11)]
+
+    assert answers == [200] * 10 + [429]
+
+
 async def test_a_retried_next_returns_the_same_card_and_makes_one_decision(
     api: Api, keys: tuple[str, str]
 ) -> None:

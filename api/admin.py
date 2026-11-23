@@ -22,8 +22,6 @@
 """
 
 import argparse
-import difflib
-import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -31,7 +29,8 @@ from sqlalchemy import create_engine
 
 from adapters.postgres.store import PostgresStore
 from adapters.system_clock import SystemClock
-from core.domain.audit import first_broken_seq
+from core.audit_inspection import replay_record as inspect_replay
+from core.audit_inspection import verify_tenant_chain
 from core.domain.decisions import AuditRecordId
 from core.domain.disputes import DisputeId
 from core.domain.parties import (
@@ -43,8 +42,6 @@ from core.domain.parties import (
     new_id,
 )
 from core.pack_verify import verify_pack
-from core.policy.packs import PackError, load_pack
-from core.policy.replay import PackMismatch, replay
 from core.ports import Clock, TenantDirectory, TenantId, UnitOfWork
 from core.settings import get_settings
 
@@ -109,53 +106,34 @@ def replay_record(
     if sealed is None:
         out(f"No Audit record {audit_record_id} for Tenant {tenant_id}.")
         return NOT_FOUND
-    recorded = sealed.record.pack
-    if recorded is None:
-        record = sealed.record
-        if record.payment is not None:
-            what = f"{record.payment.status} Payment record"
-        elif record.void is not None:
-            what = "Void record"
-        elif record.dispute is not None:
-            what = "Dispute record"
-        elif record.sign_off is not None:
-            what = "Sign-off record"
-        else:
-            status = record.resolution.status if record.resolution else record.kind
-            what = f"{status} Consent resolution"
+    report = inspect_replay(sealed, packs_dir)
+    if report.status == "nothing_to_replay":
         out(
-            f"Nothing to re-run: {audit_record_id} (seq {sealed.seq}) is a {what} with no "
-            "engine run. It parses; `verify` checks its place in the chain."
+            f"Nothing to re-run: {audit_record_id} (seq {report.seq}) is a {report.detail} with "
+            "no engine run. It parses; `verify` checks its place in the chain."
         )
         return IDENTICAL
-    try:
-        loaded = load_pack(packs_dir, recorded.id, recorded.version)
-        result = replay(sealed.body, loaded.pack, loaded.hash)
-    except (PackError, PackMismatch) as exc:
-        out(f"Cannot replay with the recorded Policy pack: {exc}")
+    if report.status == "pack_problem":
+        out(f"Cannot replay with the recorded Policy pack: {report.detail}")
         return PACK_PROBLEM
-    if result.identical:
-        out(f"Identical: {audit_record_id} (seq {sealed.seq}) replays byte for byte.")
+    if report.identical:
+        out(f"Identical: {audit_record_id} (seq {report.seq}) replays byte for byte.")
         return IDENTICAL
-    out(f"Different: {audit_record_id} (seq {sealed.seq}) does not replay identically.")
-    out(
-        "".join(
-            difflib.unified_diff(
-                _lines(result.recorded), _lines(result.replayed), "recorded", "replayed"
-            )
-        )
-    )
+    out(f"Different: {audit_record_id} (seq {report.seq}) does not replay identically.")
+    out(report.difference or "")
     return DIFFERENT
 
 
 def verify_chain(store: UnitOfWork, tenant_id: TenantId, out: Out) -> int:
     with store.transaction(tenant_id) as tx:
-        rows, head = tx.read_audit_chain()
-    broken = first_broken_seq(rows, head)
-    if broken is None:
-        out(f"Clean: {len(rows)} Audit records for Tenant {tenant_id} chain correctly.")
+        report = verify_tenant_chain(tx)
+    if report.clean:
+        out(f"Clean: {report.record_count} Audit records for Tenant {tenant_id} chain correctly.")
         return IDENTICAL
-    out(f"Broken: the Audit chain for Tenant {tenant_id} first fails at seq {broken}.")
+    out(
+        f"Broken: the Audit chain for Tenant {tenant_id} first fails at seq "
+        f"{report.first_broken_seq}."
+    )
     return DIFFERENT
 
 
@@ -181,10 +159,6 @@ def verify_pack_command(
     if not report.clean or chain != IDENTICAL:
         return DIFFERENT
     return PACK_PROBLEM if report.pack_problems else IDENTICAL
-
-
-def _lines(canonical: bytes) -> list[str]:
-    return (json.dumps(json.loads(canonical), indent=2, sort_keys=True) + "\n").splitlines(True)
 
 
 def main(argv: list[str] | None = None) -> int:

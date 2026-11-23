@@ -7,6 +7,8 @@
   for the step just run returns its Card without running it twice; a step that failed
   runs again with the same idempotency key. A waiting Card means: ask for the same step
   again later.
+- `POST /runs/{run_id}/verify`: the inspector's Verify / Replay button (#275). Replays this
+  run's Decision and walks the Demo Tenant's Audit chain, at most 10 times a run.
 - `GET /healthz`.
 
 Rate limits: runs started per client IP per minute, and runs in progress overall. Past
@@ -34,7 +36,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from core.settings import DemoRunnerSettings
-from demo.engine import Card, Run, StepFailed, WrongStep
+from demo.engine import Card, Run, StepFailed, Verification, WrongStep
 from demo.scenario import Scenario, catalogue
 
 log = logging.getLogger(__name__)
@@ -42,6 +44,8 @@ log = logging.getLogger(__name__)
 _WINDOW_SECONDS = 60
 # What a busy runner tells the browser: runs end within minutes as visitors finish.
 _BUSY_RETRY_SECONDS = 30
+# Verify walks the Demo Tenant's whole Audit chain, so a public page can't ask without end.
+_VERIFIES_PER_RUN = 10
 
 
 class StartBody(BaseModel):
@@ -65,6 +69,7 @@ class _Live:
     run: Run
     started: float
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    verifies: int = 0
 
 
 def _problem(status: int, code: str, detail: str, retry_after: int | None = None) -> JSONResponse:
@@ -173,5 +178,28 @@ def create_app(
             card.waiting,
         )
         return card
+
+    @app.post("/runs/{run_id}/verify", response_model=Verification)
+    async def verify(run_id: str) -> Verification | JSONResponse:
+        at = seconds()
+        forget_old(at)
+        live = runs.get(run_id)
+        if live is None:
+            return _problem(404, "RUN_NOT_FOUND", "No such run: it may have expired.")
+        async with live.lock:
+            if live.run.decision is None:
+                return _problem(409, "NO_DECISION_YET", "This run has no Decision to check yet.")
+            if live.verifies >= _VERIFIES_PER_RUN:
+                wait = max(1, math.ceil(ttl - (at - live.started)))
+                return _problem(429, "TOO_MANY_VERIFIES", "This run has checked enough.", wait)
+            live.verifies += 1
+            try:
+                checked = await live.run.verify()
+            except StepFailed as failed:
+                log.info("run=%s verify failed: %s", run_id[:8], failed.detail)
+                return _problem(502, "STEP_FAILED", f"{failed.step}: {failed.detail}")
+        if checked is None:  # pragma: no cover - the run's Decision was checked above
+            return _problem(409, "NO_DECISION_YET", "This run has no Decision to check yet.")
+        return checked
 
     return app

@@ -1,0 +1,70 @@
+{
+  "id": "H5",
+  "title": "Checking the diary hasn't been tampered with",
+  "group": "H",
+  "playlists": [],
+  "story": "Every Decision is written to an append-only Audit chain, where each record carries a hash of the one before it. After ShopBot's INR 1,250 payment is allowed, the wallet app walks the demo account's whole chain and checks that nothing is missing, edited or out of place.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Reorder my usual milk and bread, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/audit-chain/verify",
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "How do I know nobody changed the records?"
+        },
+        {
+          "speaker": "shopbot",
+          "text": "The wallet app can check the whole Audit chain, link by link."
+        }
+      ]
+    }
+  ],
+  "demo_controls": [],
+  "expected": {
+    "outcome": "allow",
+    "reason_codes": [],
+    "chain_clean": true
+  },
+  "what_to_notice": "Each record's hash covers the record before it, so changing or removing any one breaks the chain from that point. The check names the first broken record, and here there is none."
+}

@@ -18,6 +18,8 @@ export type Card = {
     policy_pack: string;
     pack_hash: string;
     audit_record_id: string;
+    // Every rule that ran. Empty if the Audit record couldn't be read.
+    rule_results: { rule_id: string; result: string; reason_code: string | null }[];
   } | null;
   // A Payer step: the Consent link Asha answers on (the consent screen, ADR-0008).
   link: string | null;
@@ -35,6 +37,19 @@ export type Card = {
 export type ConsentStatus = "pending" | "approved" | "declined" | "expired" | "blocked";
 
 export type Started = { run_id: string; scenario: string; steps: number };
+
+// The inspector's Verify / Replay button: both answers.
+export type Verification = {
+  replay: {
+    audit_record_id: string;
+    seq: number;
+    status: "identical" | "different" | "nothing_to_replay" | "pack_problem";
+    identical: boolean;
+    difference: string | null;
+    detail: string | null;
+  };
+  chain: { clean: boolean; record_count: number; first_broken_seq: number | null };
+};
 
 export type Failure =
   // Too many runs: from this visitor, or overall. Try again after `seconds`.
@@ -85,4 +100,8 @@ export function startRun(scenario: string): Promise<Result<Started>> {
 // `press` is the visitor pressing the fast-forward this step is waiting on.
 export function nextStep(runId: string, step: number, press = false): Promise<Result<Card>> {
   return post(`/runs/${encodeURIComponent(runId)}/next`, { step, press });
+}
+
+export function verifyRun(runId: string): Promise<Result<Verification>> {
+  return post(`/runs/${encodeURIComponent(runId)}/verify`, {});
 }

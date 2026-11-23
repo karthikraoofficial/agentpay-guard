@@ -1,0 +1,70 @@
+{
+  "id": "H4",
+  "title": "\"Why did you decide that?\" Replaying a decision",
+  "group": "H",
+  "playlists": [],
+  "story": "ShopBot's INR 1,250 payment is allowed. Later, someone asks why. The Guard re-runs the Decision from its Audit record, on the exact Policy pack it was made with, and checks the answer matches byte for byte.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Reorder my usual milk and bread, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/audit-records/{audit_record_id}/replay",
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Why was that allowed?"
+        },
+        {
+          "speaker": "shopbot",
+          "text": "The wallet app can replay the Decision from its Audit record and compare the answer."
+        }
+      ]
+    }
+  ],
+  "demo_controls": [],
+  "expected": {
+    "outcome": "allow",
+    "reason_codes": [],
+    "replay_status": "identical"
+  },
+  "what_to_notice": "Replay uses the recorded inputs and the recorded Policy pack, so today's limits and clock can't change the answer. The Guard inspector shows every rule that ran, and its Verify / Replay button runs this check again."
+}

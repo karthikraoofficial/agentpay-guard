@@ -4,7 +4,15 @@ import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { OUTCOME_TEXT, reasonText } from "@/lib/reason-codes";
-import { nextStep, startRun, type Card, type ConsentStatus, type Failure } from "@/lib/runner-api";
+import {
+  nextStep,
+  startRun,
+  verifyRun,
+  type Card,
+  type ConsentStatus,
+  type Failure,
+  type Verification,
+} from "@/lib/runner-api";
 import { GROUPS, SCENARIOS, type Scenario } from "@/lib/scenarios";
 
 const STEP_PAUSE_MS = 1200; // between turns while playing
@@ -239,7 +247,7 @@ export function DemoStudio() {
         </section>
         <section className={`${pane === "inspector" ? "" : "hidden"} min-w-0 md:block`} aria-label="Guard inspector">
           <h2 className="mb-2 text-sm font-semibold text-neutral-500">Guard inspector</h2>
-          <Inspector decision={decision} />
+          <Inspector key={decision?.audit_record_id ?? "none"} decision={decision} runId={run.runId} />
           {finished && (
             <p className="mt-3 rounded-md border border-sky-300 bg-sky-50 p-3 text-sm dark:border-sky-800 dark:bg-sky-950">
               <span className="font-semibold">What to notice: </span>
@@ -502,7 +510,74 @@ function Phone({ card }: { card: Card | null }) {
   );
 }
 
-function Inspector({ decision }: { decision: Card["decision"] }) {
+const REPLAY_TEXT: Record<Verification["replay"]["status"], string> = {
+  identical: "Identical: the Decision replays byte for byte.",
+  different: "Different: the Decision does not replay identically.",
+  nothing_to_replay: "This record has no engine run to replay.",
+  pack_problem: "The recorded Policy pack couldn't be used for Replay.",
+};
+
+function VerifyPanel({ runId }: { runId: string | null }) {
+  const [busy, setBusy] = useState(false);
+  const [answer, setAnswer] = useState<Verification | null>(null);
+  const [failure, setFailure] = useState<Failure | null>(null);
+
+  async function check() {
+    if (runId === null) return;
+    setBusy(true);
+    setFailure(null);
+    const result = await verifyRun(runId);
+    setBusy(false);
+    if (result.ok) setAnswer(result.data);
+    else setFailure(result.failure);
+  }
+
+  const good = answer?.replay.identical && answer.chain.clean;
+  return (
+    <div className="mt-3 flex flex-col gap-2">
+      <button
+        type="button"
+        disabled={busy || runId === null}
+        onClick={() => void check()}
+        className="self-start rounded-md border border-neutral-300 px-3 py-1.5 text-sm disabled:opacity-40 dark:border-neutral-700"
+      >
+        {busy ? "Checking…" : "Verify / Replay"}
+      </button>
+      {failure && (
+        <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-2 text-sm dark:border-amber-800 dark:bg-amber-950">
+          {failureText(failure)}
+        </p>
+      )}
+      {answer && (
+        <div
+          aria-live="polite"
+          className={`flex flex-col gap-1 rounded-md border p-3 text-sm ${
+            good
+              ? "border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950"
+              : "border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950"
+          }`}
+        >
+          <p>
+            <span className="font-semibold">Replay: </span>
+            {REPLAY_TEXT[answer.replay.status]}
+          </p>
+          {answer.replay.detail && <p className="text-xs break-words">{answer.replay.detail}</p>}
+          {answer.replay.difference && (
+            <pre className="max-h-40 overflow-auto font-mono text-xs">{answer.replay.difference}</pre>
+          )}
+          <p>
+            <span className="font-semibold">Audit chain: </span>
+            {answer.chain.clean
+              ? `Clean: ${answer.chain.record_count} records chain correctly.`
+              : `Broken: first fails at record ${answer.chain.first_broken_seq}.`}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Inspector({ decision, runId }: { decision: Card["decision"]; runId: string | null }) {
   if (!decision) return <p className="text-sm text-neutral-500">No Decision yet.</p>;
   const rows: [string, ReactNode][] = [
     ["Outcome", <code key="o" className="font-mono">{decision.outcome}</code>],
@@ -525,14 +600,35 @@ function Inspector({ decision }: { decision: Card["decision"] }) {
     ["Audit record", <code key="a" className="font-mono break-all">{decision.audit_record_id}</code>],
   ];
   return (
-    <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-md border border-neutral-300 p-3 text-sm dark:border-neutral-700">
-      {rows.map(([name, value]) => (
-        <div key={name} className="contents">
-          <dt className="text-neutral-500">{name}</dt>
-          <dd className="min-w-0">{value}</dd>
-        </div>
-      ))}
-    </dl>
+    <div>
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-md border border-neutral-300 p-3 text-sm dark:border-neutral-700">
+        {rows.map(([name, value]) => (
+          <div key={name} className="contents">
+            <dt className="text-neutral-500">{name}</dt>
+            <dd className="min-w-0">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <details className="mt-3 rounded-md border border-neutral-300 p-3 text-sm dark:border-neutral-700">
+        <summary className="cursor-pointer">Rule results ({decision.rule_results.length})</summary>
+        {decision.rule_results.length === 0 ? (
+          <p className="mt-2 text-neutral-500">The rules aren&apos;t available right now.</p>
+        ) : (
+          <ul className="mt-2 flex flex-col gap-1">
+            {decision.rule_results.map((rule) => (
+              <li key={rule.rule_id} className="flex flex-wrap justify-between gap-x-2">
+                <code className="font-mono text-xs break-all">{rule.rule_id}</code>
+                <span className="text-xs text-neutral-600 dark:text-neutral-400">
+                  {rule.result}
+                  {rule.reason_code ? ` · ${rule.reason_code}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </details>
+      <VerifyPanel runId={runId} />
+    </div>
   );
 }
 
