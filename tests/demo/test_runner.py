@@ -159,6 +159,35 @@ async def test_verify_is_limited_per_run(api: Api, keys: tuple[str, str]) -> Non
     assert answers == [200] * 10 + [429]
 
 
+async def test_status_reports_a_rail_outage_and_is_briefly_cached(
+    api: Api, keys: tuple[str, str]
+) -> None:
+    clock = Seconds()
+    async with runner(api, keys, seconds=clock) as client:
+        before = (await client.get("/status")).json()
+        started = api.post("/v1/demo/rail-down", {"Authorization": f"Bearer {keys[1]}"})
+        assert started.status_code == 200, started.text
+        cached = (await client.get("/status")).json()
+        clock.at += 6
+        during = (await client.get("/status")).json()
+
+    assert before == {"rail_outage": False, "outage_ends_at": None}
+    assert cached["rail_outage"] is False
+    assert during["rail_outage"] is True
+    assert during["outage_ends_at"] is not None
+
+
+async def test_status_says_no_outage_when_the_api_cant_answer(
+    api: Api, keys: tuple[str, str]
+) -> None:
+    broken = httpx.MockTransport(lambda _request: httpx.Response(500))
+    async with runner(api, keys, api_transport=broken) as client:
+        answer = await client.get("/status")
+
+    assert answer.status_code == 200
+    assert answer.json() == {"rail_outage": False, "outage_ends_at": None}
+
+
 async def test_a_retried_next_returns_the_same_card_and_makes_one_decision(
     api: Api, keys: tuple[str, str]
 ) -> None:

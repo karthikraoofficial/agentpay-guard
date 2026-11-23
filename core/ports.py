@@ -364,6 +364,11 @@ class TenantTransaction(Protocol):
         for the configured Demo Tenant (core.demo_controls.control_for)."""
         ...
 
+    def latest_demo_control(self, kind: DemoControlKind, target_id: str) -> DemoControl | None:
+        """The newest Demo control of `kind` on `target_id`, if any: a rail outage can run
+        again after its cooldown (ADR-0032)."""
+        ...
+
     def update_payment(self, payment: Payment) -> None:
         """Store a Payment's new status (see Payment.charged)."""
         ...

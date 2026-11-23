@@ -108,6 +108,10 @@ class Settings(BaseSettings):
     # `api.admin create-tenant` printed it. Unset, the control endpoints don't exist and
     # no deadline check reads a Demo control. Refused with any real rail.
     demo_controls_tenant_id: str | None = Field(default=None, min_length=1)
+    # The Demo control's simulated rail outage (#281, ADR-0032): how long it lasts, and how
+    # long from its start before another can begin, because it affects every visitor.
+    demo_rail_outage_seconds: int = Field(default=60, gt=0, le=600)
+    demo_rail_cooldown_seconds: int = Field(default=300, gt=0, le=3600)
     # The one Razorpay test-mode account every Tenant charges through (ADR-0012). All three
     # are required with AGENTPAY_RAIL=razorpay, and only a test key is ever accepted.
     razorpay_key_id: str | None = None
@@ -147,6 +151,11 @@ class Settings(BaseSettings):
             raise ValueError(
                 "AGENTPAY_DEMO_CONTROLS_TENANT_ID is for the mock rail only; "
                 f"unset it with AGENTPAY_RAIL={self.rail}"
+            )
+        if self.demo_rail_cooldown_seconds < self.demo_rail_outage_seconds:
+            raise ValueError(
+                "AGENTPAY_DEMO_RAIL_COOLDOWN_SECONDS must be at least "
+                "AGENTPAY_DEMO_RAIL_OUTAGE_SECONDS"
             )
         if self.mock_notice_seconds is not None and (
             self.rail != "mock" or self.mock_settle_after_seconds is None

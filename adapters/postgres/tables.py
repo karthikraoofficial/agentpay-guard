@@ -141,7 +141,8 @@ audit_records = Table(
     Column("seq", BigInteger, primary_key=True),
     Column("audit_record_id", String, nullable=False, unique=True),
     Column("kind", String, nullable=False),
-    Column("decision_id", String, nullable=False),
+    # Only a demo_control record may have none (ADR-0032).
+    Column("decision_id", String, nullable=True),
     Column("body", LargeBinary, nullable=False),
     Column("prev_hash", String, nullable=False),
     Column("record_hash", String, nullable=False),
@@ -312,14 +313,16 @@ demo_controls = Table(
     Column("control_id", String, primary_key=True),
     Column("kind", String, nullable=False),
     Column("target_id", String, nullable=False),
-    Column("decision_id", String, nullable=False),
+    # A switch runs before any Decision, so it has none (#281).
+    Column("decision_id", String, nullable=True),
     Column("at", DateTime(timezone=True), nullable=False),
     Column("audit_record_id", String, nullable=False),
     ForeignKeyConstraint(
         ["tenant_id", "decision_id"], ["decisions.tenant_id", "decisions.decision_id"]
     ),
     CheckConstraint(
-        "kind IN ('expire_consent', 'expire_payment_window', 'expire_notice')",
+        "kind IN ('expire_consent', 'expire_payment_window', 'expire_notice', 'ai_off', "
+        "'rail_declining', 'lose_payment', 'rail_down')",
         name="demo_controls_kind",
     ),
     Index("ix_demo_controls_target", "tenant_id", "kind", "target_id"),

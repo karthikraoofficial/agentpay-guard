@@ -1,0 +1,89 @@
+{
+  "id": "F8",
+  "title": "The bank never heard of the payment",
+  "group": "F",
+  "playlists": [],
+  "story": "ShopBot pays, but the payment never reaches the bank. It sits as scheduled until the Guard's regular check asks the bank, finds no record, and fails it rather than charging Asha late.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Reorder my usual milk and bread, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "visitor",
+      "control": "lose_payment",
+      "label": "Lose this payment at the bank",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Allowed. Paying FreshMart now."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": []
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": [
+        "captured",
+        "failed"
+      ],
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Checking whether the payment went through."
+        }
+      ]
+    }
+  ],
+  "demo_controls": [
+    "lose_payment"
+  ],
+  "expected": {
+    "outcome": "allow",
+    "reason_codes": [],
+    "payment_status": "failed",
+    "payment_failure_code": "RAIL_CHARGE_MISSING"
+  },
+  "what_to_notice": "The Guard doesn't leave a payment in limbo or charge it days later. Reconciliation found no charge at the bank and failed it with RAIL_CHARGE_MISSING, so no money moved."
+}

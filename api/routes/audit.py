@@ -26,7 +26,8 @@ class AuditRecordOut(BaseModel):
     audit_record_id: str
     seq: int
     kind: str
-    decision_id: str
+    # Only a Demo control switch has none (ADR-0032).
+    decision_id: str | None
     recorded_at: datetime
     record_hash: str
     # Only on a record with an engine run.

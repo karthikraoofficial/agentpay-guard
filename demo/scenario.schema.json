@@ -40,6 +40,34 @@
           "default": null,
           "title": "Expect Refusal"
         },
+        "instruction": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Instruction"
+        },
+        "item": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Item"
+        },
         "route": {
           "anyOf": [
             {
@@ -585,7 +613,7 @@
     },
     "VisitorStep": {
       "additionalProperties": false,
-      "description": "The visitor presses fast-forward: a Demo control ends a timer now (ADR-0032). On the\ndemo page the run waits for the press; the CLI and CI press it at once.",
+      "description": "The visitor presses a Demo control: a fast-forward ends a timer now, a switch forces\na failure (ADR-0032). On the demo page the run waits for the press; the CLI and CI\npress it at once.",
       "properties": {
         "actor": {
           "const": "visitor",
@@ -604,7 +632,12 @@
           "enum": [
             "expire_consent",
             "expire_payment_window",
-            "expire_notice"
+            "expire_notice",
+            "ai_off",
+            "rail_declining",
+            "lose_payment",
+            "rail_down",
+            "tamper_copy"
           ],
           "title": "Control",
           "type": "string"

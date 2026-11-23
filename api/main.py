@@ -34,6 +34,8 @@ from api.routes import (
     review_links,
     webhook_endpoint,
 )
+from core.demo_switches import SwitchedRail
+from core.domain.parties import TenantId
 from core.model_spend import CappedGateway, daily_caps
 from core.policy.packs import load_active_pack
 from core.ports import Clock, ModelGateway, PaymentRail, SecretBox, Telemetry, Workflow
@@ -93,6 +95,15 @@ def create_app(
     app.state.workflow = workflow or TemporalWorkflow.from_settings(settings)
     app.state.secret_box = secret_box or build_secret_box(settings)
     app.state.rail = rail or build_rail(settings, app.state.store)
+    if settings.demo_controls_tenant_id is not None:
+        # Demo control switches (ADR-0032): every other Tenant's calls pass straight through.
+        app.state.rail = SwitchedRail(
+            app.state.rail,
+            app.state.store,
+            TenantId(settings.demo_controls_tenant_id),
+            app.state.clock,
+            timedelta(seconds=settings.demo_rail_outage_seconds),
+        )
     app.state.rail_breaker = RailBreaker(
         settings.rail_breaker_failures,
         timedelta(seconds=settings.rail_breaker_open_seconds),

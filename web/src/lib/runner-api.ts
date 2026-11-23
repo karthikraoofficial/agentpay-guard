@@ -29,6 +29,8 @@ export type Card = {
   refused: string | null;
   // A fast-forward waiting for the visitor's press: the button's words (ADR-0032).
   fast_forward: string | null;
+  // That control forces a failure (a switch) rather than ending a timer.
+  switch: boolean;
   waiting: boolean;
   finished: boolean;
   mismatches: string[];
@@ -104,4 +106,17 @@ export function nextStep(runId: string, step: number, press = false): Promise<Re
 
 export function verifyRun(runId: string): Promise<Result<Verification>> {
   return post(`/runs/${encodeURIComponent(runId)}/verify`, {});
+}
+
+export type DemoStatus = { rail_outage: boolean; outage_ends_at: string | null };
+
+// For the banner. Any failure reads as no outage: the page itself still works.
+export async function demoStatus(): Promise<DemoStatus> {
+  try {
+    const response = await fetch(`${RUNNER_URL}/status`, { cache: "no-store" });
+    if (response.ok) return (await response.json()) as DemoStatus;
+  } catch {
+    // no banner
+  }
+  return { rail_outage: false, outage_ends_at: null };
 }

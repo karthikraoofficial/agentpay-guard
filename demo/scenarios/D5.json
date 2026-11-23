@@ -1,0 +1,83 @@
+{
+  "id": "D5",
+  "title": "The AI service is down",
+  "group": "D",
+  "playlists": [],
+  "story": "The AI that compares ShopBot's cart with Asha's request is switched off for this run. The check comes back unsure, so the Guard asks Asha instead of guessing. Nothing stops working, and nothing gets less safe.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "visitor",
+      "control": "ai_off",
+      "label": "Switch the AI off",
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Order snacks for the party, up to INR 3,000."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "check_intent",
+      "amount": {
+        "minor": 300000,
+        "currency": "INR"
+      },
+      "instruction": "Order snacks for the party, up to INR 3,000.",
+      "item": "Party snacks",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "I've found party snacks at FreshMart for INR 3,000. Getting the cart checked."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 300000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Asking AgentPay Guard before I pay."
+        }
+      ]
+    }
+  ],
+  "demo_controls": [
+    "ai_off"
+  ],
+  "expected": {
+    "outcome": "step_up",
+    "reason_codes": [
+      "INTENT_UNKNOWN",
+      "MERCHANT_NEW"
+    ]
+  },
+  "what_to_notice": "INTENT_UNKNOWN is the AI outage: no model was called, and an unsure check never counts as a yes. MERCHANT_NEW is here because this run's Asha hasn't paid FreshMart before. The Decision was still made at once."
+}

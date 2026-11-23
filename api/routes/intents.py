@@ -27,6 +27,8 @@ from api.deps import (
 )
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
+from api.payability import demo_tenant
+from core.demo_controls import control_for
 from core.domain.decisions import LineItem, Merchant
 from core.domain.intents import (
     FailureCause,
@@ -107,7 +109,9 @@ def create_intent(
             gateway,
             tenant,
             content,
-            enabled=settings.intent_check_enabled,
+            # A Demo control can switch the model off for one Mandate (ADR-0032).
+            enabled=settings.intent_check_enabled
+            and control_for(tx, demo_tenant(settings), "ai_off", mandate.mandate_id) is None,
             model=settings.intent_check_model,
             timeout_ms=settings.intent_check_timeout_ms,
         )

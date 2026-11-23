@@ -159,7 +159,9 @@ class AuditRecord(_Frozen):
     seq: int = Field(ge=1)
     prev_hash: str
     kind: AuditKind
-    decision_id: DecisionId
+    # Only a demo_control record may have none: a switch runs before any Decision, and
+    # names its Mandate as its target instead (ADR-0032).
+    decision_id: DecisionId | None = None
     recorded_at: AwareDatetime
     # The engine run: always on a decision record, and on a consent_resolution record
     # only when approval re-ran the engine (approved or blocked, ADR-0010).
@@ -198,6 +200,8 @@ class AuditRecord(_Frozen):
             raise ValueError("a dispute_signed_off record, and only that, has a sign_off")
         if (self.kind == "demo_control") != (self.demo_control is not None):
             raise ValueError("a demo_control record, and only that, has a demo_control")
+        if self.decision_id is None and self.kind != "demo_control":
+            raise ValueError("only a demo_control record may have no decision_id")
         if self.kind == "decision":
             if None in ran or self.resolution is not None:
                 raise ValueError("a decision record has inputs, pack and output, no resolution")
@@ -234,6 +238,7 @@ class AuditRecord(_Frozen):
 
 _OPTIONAL = frozenset(
     {
+        "decision_id",
         "inputs",
         "pack",
         "output",
@@ -290,7 +295,7 @@ class StoredAuditRow(_Frozen):
     seq: int
     audit_record_id: str
     kind: str
-    decision_id: str
+    decision_id: str | None
     body: bytes
     prev_hash: str
     record_hash: str

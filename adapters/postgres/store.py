@@ -487,6 +487,20 @@ class PostgresTransaction:
         )
         return None if row is None else DemoControl.model_validate(dict(row))
 
+    def latest_demo_control(self, kind: DemoControlKind, target_id: str) -> DemoControl | None:
+        c = demo_controls.c
+        row = (
+            self._conn.execute(
+                select(demo_controls)
+                .where(c.tenant_id == self._tenant_id, c.kind == kind, c.target_id == target_id)
+                .order_by(c.at.desc(), c.control_id.desc())
+                .limit(1)
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return None if row is None else DemoControl.model_validate(dict(row))
+
     def update_payment(self, payment: Payment) -> None:
         self._own(payment.tenant_id)
         row = _payment_row(payment)

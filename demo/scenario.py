@@ -122,8 +122,11 @@ class AgentStep(_Model):
     tool: AgentTool | None = None
     route: Route | None = None
     chat: list[ChatLine] = []
-    # request_decision: the amount to ask for.
+    # request_decision: the amount to ask for. check_intent: the cart's Quoted total.
     amount: Money | None = None
+    # check_intent: the Payer instruction, and the cart's one line item.
+    instruction: Text | None = None
+    item: Text | None = None
     # A read the run repeats until the answer's `status` is one of these (the worker or a
     # person has to act first). The step waits while it isn't.
     until_status: list[str] | None = None
@@ -161,13 +164,23 @@ class HumanStep(_Model):
     taps: int = Field(default=1, ge=1, le=3)
 
 
-# The Demo controls a visitor can press as fast-forward (#280; the rest come later).
-FastForward = Literal["expire_consent", "expire_payment_window", "expire_notice"]
+# The Demo controls a visitor can press: fast-forwards (#280) and switches (#281).
+FastForward = Literal[
+    "expire_consent",
+    "expire_payment_window",
+    "expire_notice",
+    "ai_off",
+    "rail_declining",
+    "lose_payment",
+    "rail_down",
+    "tamper_copy",
+]
 
 
 class VisitorStep(_Model):
-    """The visitor presses fast-forward: a Demo control ends a timer now (ADR-0032). On the
-    demo page the run waits for the press; the CLI and CI press it at once."""
+    """The visitor presses a Demo control: a fast-forward ends a timer now, a switch forces
+    a failure (ADR-0032). On the demo page the run waits for the press; the CLI and CI
+    press it at once."""
 
     actor: Literal["visitor"]
     control: FastForward

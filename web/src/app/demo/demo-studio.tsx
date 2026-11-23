@@ -5,12 +5,14 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { OUTCOME_TEXT, reasonText } from "@/lib/reason-codes";
 import {
+  demoStatus,
   nextStep,
   startRun,
   verifyRun,
   type Card,
   type ConsentStatus,
   type Failure,
+  type Json,
   type Verification,
 } from "@/lib/runner-api";
 import { GROUPS, SCENARIOS, type Scenario } from "@/lib/scenarios";
@@ -19,6 +21,7 @@ const STEP_PAUSE_MS = 1200; // between turns while playing
 const POLL_MS = 2000; // while a step waits on the worker or a person
 const MAX_POLLS = 120; // about four minutes, for the worker
 const HUMAN_POLLS = 330; // about eleven minutes: past a Consent request's 10-minute TTL
+const STATUS_POLL_MS = 10000; // how often the page checks for a simulated rail outage
 
 type Pane = "chat" | "phone" | "inspector";
 
@@ -39,7 +42,7 @@ const ACTOR = {
   tenant: "Wallet app",
   payer: "Asha",
   reviewer: "Reviewer",
-  visitor: "Fast-forward",
+  visitor: "Demo control",
 } as const;
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -58,6 +61,42 @@ function failureText(failure: Failure): string {
 }
 
 export function DemoStudio() {
+  return (
+    <>
+      <OutageBanner />
+      <Studio />
+    </>
+  );
+}
+
+// A simulated rail outage affects every visitor, so every open page says so (ADR-0032).
+function OutageBanner() {
+  const [outage, setOutage] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    const check = async () => {
+      const status = await demoStatus();
+      if (live) setOutage(status.rail_outage);
+    };
+    void check();
+    const timer = window.setInterval(() => void check(), STATUS_POLL_MS);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  if (!outage) return null;
+  return (
+    <p role="status" className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-center text-sm dark:border-amber-800 dark:bg-amber-950">
+      A visitor is running a simulated bank outage. Payments are refused for up to a minute, and
+      Decisions still work.
+    </p>
+  );
+}
+
+function Studio() {
   const [run, setRun] = useState<Run | null>(null);
   const [pane, setPane] = useState<Pane>("chat");
   // Bumped when the visitor leaves a run, so its loops stop.
@@ -347,6 +386,7 @@ function Chat({
             </p>
           ))}
           {card.call && <CallCard card={card} />}
+          {typeof card.call?.response.tampered_seq === "number" && <TamperResult response={card.call.response} />}
           {card.refused && <Refused code={card.refused} />}
           {card.decision && <Verdict decision={card.decision} />}
           {card.actor === "payer" && card.consent && <Answer consent={card.consent} />}
@@ -366,10 +406,12 @@ function Chat({
             onClick={onPress}
             className="self-center rounded-full bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:opacity-50"
           >
-            ⏩ {waiting.fast_forward}
+            {waiting.switch ? "⚡" : "⏩"} {waiting.fast_forward}
           </button>
           <p className="text-center text-xs text-neutral-500">
-            A Demo control ends this timer now. No clock moves and no record is edited.
+            {waiting.switch
+              ? "A Demo control forces this failure, on pretend money. No record is edited."
+              : "A Demo control ends this timer now. No clock moves and no record is edited."}
           </p>
         </li>
       )}
@@ -383,6 +425,31 @@ function Chat({
         </li>
       )}
     </ol>
+  );
+}
+
+// H6: what Verify said about the altered copy of the Audit chain.
+function TamperResult({ response }: { response: Json }) {
+  const altered = Number(response.tampered_seq);
+  const broken = response.first_broken_seq;
+  const caught = response.clean === false && broken === altered;
+  return (
+    <div
+      className={`rounded-md border p-2 text-sm ${
+        caught
+          ? "border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950"
+          : "border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950"
+      }`}
+    >
+      <p className="font-semibold">
+        {caught ? `Tampering caught at record ${altered}.` : `Verify did not point at record ${altered}.`}
+      </p>
+      <p className="text-xs">
+        Record {altered} was altered in a copy of the Audit chain. Verify on the copy reports{" "}
+        {broken === null ? "no break" : `the first break at record ${String(broken)}`}. The real records were
+        not changed.
+      </p>
+    </div>
   );
 }
 

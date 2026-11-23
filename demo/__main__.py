@@ -169,7 +169,7 @@ async def run_scenario(
                 say(f"  - Consent link (open it and answer as Asha): {card.link}")
         if card.fast_forward:
             # No button in a terminal: press fast-forward at once (a Demo control).
-            say(f"  - Fast-forward: {card.fast_forward}")
+            say(f"  - {'Demo control' if card.switch else 'Fast-forward'}: {card.fast_forward}")
             try:
                 card = await run.next(press=True)
             except engine.StepFailed as failed:
