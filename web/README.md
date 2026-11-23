@@ -81,6 +81,8 @@ The visitor can step one turn at a time or press Play. A step that waits on the 
   `POST /runs/{id}/next` for each step. The runner holds the Demo Tenant's keys, so the
   browser never sees one, and only this app's origin (`AGENTPAY_WEB_ORIGIN`) may call it.
   A 429 from the runner shows as "The demo is busy. Try again in N seconds."
+- **Fast-forward.** A step that waits on a timer can show a ⏩ button. Pressing it asks
+  the runner to use a Demo control (ADR-0032), which ends that one timer for real.
 - **The catalogue is fixed at build time.** Before `dev`, `lint`, `typecheck` and
   `build`, `scripts/sync-scenarios.mjs` checks every `../demo/scenarios/*.json` against
   `../demo/scenario.schema.json` (with Ajv) and copies them into `src/data/scenarios.json`
@@ -89,8 +91,9 @@ The visitor can step one turn at a time or press Play. A step that waits on the 
 - **Reason code text** is in `src/lib/reason-codes.ts`; a Python test
   (`tests/test_web_reason_codes.py`) fails if a Reason code is missing from it.
 
-Locally: run the API with mock settle (`AGENTPAY_MOCK_SETTLE_AFTER_SECONDS`), the
-worker, and the Demo runner (`uv run python -m demo_runner`, port 8100) with the Demo
+Locally: run the API with mock settle (`AGENTPAY_MOCK_SETTLE_AFTER_SECONDS`), plus
+`AGENTPAY_DEMO_CONTROLS_TENANT_ID` and `AGENTPAY_MOCK_NOTICE_SECONDS` for the fast-forward
+journeys, the worker, and the Demo runner (`uv run python -m demo_runner`, port 8100) with the Demo
 Tenant's keys, then `npm run dev` and open http://localhost:3000/demo.
 
 ## The Ops console (`/ops`)
