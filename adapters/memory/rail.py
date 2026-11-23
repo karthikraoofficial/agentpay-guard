@@ -7,9 +7,14 @@ By default the debit is made when the charge is scheduled. Given a `notice` peri
 clock, it behaves like a card debit after a Pre-debit notice (ADR-0017): scheduling only
 books the charge with `debit_after`, and `debit` makes it once the period is over. A
 notice can fail (`token_whose_notice_fails`): the charge is then failed with no debit.
+
+On the hosted demo the worker, not this process, makes the debit after the notice period
+(SettlingMockRail, #280). Given `debits`, a lookup of the charge as the stored Payment
+shows it, a refund also accepts a debit made there.
 """
 
 import threading
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Literal
 
@@ -39,11 +44,18 @@ _FAILURE_CODE = "BAD_REQUEST_ERROR"  # Razorpay's code for a declined debit
 class MockRail:
     lookup_lag = timedelta(0)  # its charges are in a dict, seen at once
 
-    def __init__(self, *, notice: timedelta | None = None, clock: Clock | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        notice: timedelta | None = None,
+        clock: Clock | None = None,
+        debits: Callable[[TenantId, PaymentId], RailCharge | None] | None = None,
+    ) -> None:
         if (notice is None) != (clock is None):
             raise ValueError("a notice period needs a clock, and a clock a notice period")
         self._notice = notice
         self._clock = clock
+        self._debits = debits
         self._charges: dict[tuple[TenantId, PaymentId], RailCharge] = {}
         self._tokens: dict[tuple[TenantId, PaymentId], RailToken] = {}
         self.charges_made = 0
@@ -189,6 +201,8 @@ class MockRail:
             if done is not None:
                 return done[1]
             charge = self._charges.get((tenant_id, payment_id))
+            if (charge is None or charge.rail_payment_id is None) and self._debits is not None:
+                charge = self._debits(tenant_id, payment_id)  # debited by the worker
             refunded = sum(
                 r.amount.minor
                 for (t, _), (p, r) in self._refunds.items()

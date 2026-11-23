@@ -14,6 +14,7 @@ from core.domain.consent import (
     ConsentStatus,
 )
 from core.domain.decisions import AuditRecordId, Decision, DecisionId
+from core.domain.demo_controls import DemoControl, DemoControlKind
 from core.domain.disputes import Dispute, DisputeId, ReviewLink
 from core.domain.evidence import EvidencePack
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
@@ -66,6 +67,7 @@ class _TenantData:
     packs: dict[DisputeId, tuple[EvidencePack, ...]] = field(default_factory=dict)
     review_links: dict[str, ReviewLink] = field(default_factory=dict)
     refunds: dict[RefundId, Refund] = field(default_factory=dict)
+    demo_controls: list[DemoControl] = field(default_factory=list)
 
     def copy(self) -> "_TenantData":
         return _TenantData(
@@ -88,6 +90,7 @@ class _TenantData:
             dict(self.packs),
             dict(self.review_links),
             dict(self.refunds),
+            list(self.demo_controls),
         )
 
 
@@ -348,6 +351,14 @@ class InMemoryTransaction:
     def get_void(self, decision_id: DecisionId) -> Void | None:
         return self._data.voids.get(decision_id)
 
+    def add_demo_control(self, control: DemoControl) -> None:
+        self._own(control.tenant_id)
+        self._data.demo_controls.append(control)
+
+    def get_demo_control(self, kind: DemoControlKind, target_id: str) -> DemoControl | None:
+        found = [c for c in self._data.demo_controls if (c.kind, c.target_id) == (kind, target_id)]
+        return min(found, key=lambda c: c.at) if found else None
+
     def update_payment(self, payment: Payment) -> None:
         self._own(payment.tenant_id)
         if payment.payment_id not in self._data.payments:
@@ -586,6 +597,17 @@ class InMemoryUnitOfWork:
             if p.debit_due(now)
         ]
         return [(tenant_id, payment_id) for _, tenant_id, payment_id in sorted(due)]
+
+    def notice_ended_by_control(self, tenant_id: TenantId) -> list[PaymentId]:
+        data = self._tenants.get(tenant_id)
+        if data is None:
+            return []
+        ended = {c.target_id for c in data.demo_controls if c.kind == "expire_notice"}
+        return [
+            p.payment_id
+            for p in data.payments.values()
+            if p.payment_id in ended and p.status == "scheduled" and p.rail_payment_id is None
+        ]
 
     def expired_unresolved_consents(self, expired_before: datetime) -> int:
         return sum(

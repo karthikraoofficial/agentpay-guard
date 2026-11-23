@@ -99,6 +99,15 @@ class Settings(BaseSettings):
     # captures every debited mock Payment older than this many seconds, so a demo Payment can be
     # disputed. Unset, mock Payments stay scheduled. Refused with any real rail.
     mock_settle_after_seconds: int | None = Field(default=None, gt=0)
+    # The mock rail's Pre-debit notice period, for the hosted demo only (#280): when set,
+    # the API's mock rail books each charge with `debit_after` this far ahead, and the
+    # worker's debit step debits it once the period is over, as a card debit after a
+    # Pre-debit notice (ADR-0017). Needs mock settle; refused with any real rail.
+    mock_notice_seconds: int | None = Field(default=None, gt=0, le=86400)
+    # The one Tenant whose timers Demo controls may end early (ADR-0032): its id, as
+    # `api.admin create-tenant` printed it. Unset, the control endpoints don't exist and
+    # no deadline check reads a Demo control. Refused with any real rail.
+    demo_controls_tenant_id: str | None = Field(default=None, min_length=1)
     # The one Razorpay test-mode account every Tenant charges through (ADR-0012). All three
     # are required with AGENTPAY_RAIL=razorpay, and only a test key is ever accepted.
     razorpay_key_id: str | None = None
@@ -133,6 +142,18 @@ class Settings(BaseSettings):
             raise ValueError(
                 "AGENTPAY_MOCK_SETTLE_AFTER_SECONDS is for the mock rail only; "
                 f"unset it with AGENTPAY_RAIL={self.rail}"
+            )
+        if self.rail != "mock" and self.demo_controls_tenant_id is not None:
+            raise ValueError(
+                "AGENTPAY_DEMO_CONTROLS_TENANT_ID is for the mock rail only; "
+                f"unset it with AGENTPAY_RAIL={self.rail}"
+            )
+        if self.mock_notice_seconds is not None and (
+            self.rail != "mock" or self.mock_settle_after_seconds is None
+        ):
+            raise ValueError(
+                "AGENTPAY_MOCK_NOTICE_SECONDS is for the mock rail with mock settle on: "
+                "set AGENTPAY_MOCK_SETTLE_AFTER_SECONDS, and AGENTPAY_RAIL=mock"
             )
         if self.rail == "razorpay":
             missing = [

@@ -177,10 +177,10 @@ These are the lines Asha drew herself, or that nobody should cross. Even if Asha
 **Guard's answer:** Block, reason `MANDATE_NOT_YET_VALID`.
 **Why it matters:** Permissions respect their start date as well as their end date.
 
-### B10. Permission expired 🟡
+### B10. Permission expired ✅
 **Story:** Asha's permission was valid for 30 days. On day 31, ShopBot tries to pay.
 **Guard's answer:** Block, reason `MANDATE_EXPIRED`.
-**Why it matters:** Permissions shouldn't last forever by accident. *Demo control:* fast-forward past the end date, or create a Mandate that expires in one minute.
+**Why it matters:** Permissions shouldn't last forever by accident. (Demo: the Mandate is granted already expired, so no Demo control is needed.)
 
 ---
 
@@ -273,7 +273,7 @@ From ₹2,000 upwards, ShopBot must show the Guard what Asha asked for and what 
 **Guard's answer:** No payment can be made on that request.
 **Why it matters:** The human has the final say on anything unusual.
 
-### E3. Asha doesn't answer 🟡
+### E3. Asha doesn't answer ✅
 **Story:** Asha is in a meeting and ignores the link for 10 minutes.
 **Guard's answer:** The request expires and counts as a no. ShopBot must ask again.
 **Why it matters:** Silence never means yes. *Demo control:* fast-forward 10 minutes.
@@ -312,12 +312,12 @@ From ₹2,000 upwards, ShopBot must show the Guard what Asha asked for and what 
 **Guard's answer:** Recognises the retry (it carries the same request ID) and returns the original result. Asha is charged once.
 **Why it matters:** Double charges from retries are one of the most common real payment bugs.
 
-### F4. Paying too late after a yes 🟡
+### F4. Paying too late after a yes ✅
 **Story:** ShopBot got an Allow but only tries to pay 20 minutes later.
 **Guard's answer:** Refused. A yes is only good for 15 minutes, so it must ask again.
 **Why it matters:** Permission is for this purchase now, not a voucher for later. *Demo control:* fast-forward 15 minutes.
 
-### F5. Asha cancels during the notice period 🟡
+### F5. Asha cancels during the notice period ✅
 **Story:** A payment is allowed and Asha is sent the legally required advance notice of the charge. Before the money is taken, she cancels ShopBot's permission.
 **Guard's answer:** Just before charging, the Guard checks again, sees the permission is gone, and cancels the payment (`MANDATE_REVOKED`). No money moves.
 **Why it matters:** The notice period exists so people can change their minds, and this proves the system honours it. *Demo control:* fast-forward to the end of the notice period.
@@ -327,10 +327,10 @@ From ₹2,000 upwards, ShopBot must show the Guard what Asha asked for and what 
 **Guard's answer:** The payment is marked *failed* with the reason. Nothing is retried behind her back.
 **Why it matters:** Clear, honest status, so ShopBot can tell Asha. (Demo: the pretend bank has a "declines" card.)
 
-### F7. The advance notice couldn't be sent 🟡
+### F7. The advance notice couldn't be sent ✅
 **Story:** The bank couldn't deliver the required advance notice to Asha.
 **Guard's answer:** The payment is never charged (`RAIL_NOTICE_FAILED`), because charging without notice would break the rules.
-**Why it matters:** Compliance is built in, not left to chance. *Demo control:* the pretend bank has a "notice fails" card, but it only fails when a notice period is set, and the deployed pretend bank has none. Showing this needs a demo-only notice period on the pretend bank.
+**Why it matters:** Compliance is built in, not left to chance. *Demo control:* the pretend bank's "notice fails" card, with the demo-only notice period (`AGENTPAY_MOCK_NOTICE_SECONDS`).
 
 ### F8. The bank never heard of the payment 🟡
 **Story:** A payment is stuck as *scheduled*. When the Guard's regular check asks the bank, the bank has no record of it.
@@ -461,22 +461,22 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 | Group | Journeys | ✅ In today's demo | 🟢 Ready in the code | 🟡 Needs a demo control |
 |---|---|---|---|---|
 | A. Everyday yes | 2 | 1 | 1 | 0 |
-| B. Hard limits | 10 | 1 | 8 | 1 |
+| B. Hard limits | 10 | 2 | 8 | 0 |
 | C. Warning signs | 6 | 1 | 5 | 0 |
 | D. Cart check | 7 | 0 | 5 | 2 |
-| E. Asking Asha | 6 | 5 | 0 | 1 |
-| F. Paying | 9 | 1 | 3 | 5 |
+| E. Asking Asha | 6 | 6 | 0 | 0 |
+| F. Paying | 9 | 4 | 3 | 2 |
 | G. Disputes | 12 | 1 | 9 | 2 |
 | H. Refunds and proof | 8 | 1 | 5 | 2 |
-| **Total** | **60** | **11** | **36** | **13** |
+| **Total** | **60** | **16** | **36** | **8** |
 
-*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276).*
+*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), and B10, E3, F4, F5 and F7 (#280).*
 
 **What this means for the build:**
-- **40 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
-- **13 journeys need two small, demo-only controls:**
-  1. **Fast-forward**: skip ahead 10 minutes, 30 minutes, to the end of a notice period, or to a deadline (and give the pretend bank a notice period, for F7).
-  2. **Failure switches**: AI off; bank down or declining; lose a payment at the bank; tamper with a copy of the records.
+- **36 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
+- **8 journeys still need a demo-only control:**
+  1. **Fast-forward** (built for Consent requests, Payment windows and notice periods, ADR-0032): still to come for a stale cart check (D7) and a Dispute deadline (G11).
+  2. **Failure switches**: AI off (D5, G8); bank down or declining (F9, H3); lose a payment at the bank (F8); tamper with a copy of the records (H6).
 
   Both work only for the demo account on pretend money. The pretend bank already has "declines", "refused" and "times out" cards, so several bank failures need no new switch at all.
 

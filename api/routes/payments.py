@@ -41,7 +41,7 @@ from api.deps import (
 )
 from api.errors import ApiError
 from api.idempotency import REPLAYED, request_hash, run_idempotent
-from api.payability import payable_until
+from api.payability import demo_tenant, payable_until
 from core.charges import apply_charge, record_payment
 from core.domain.decisions import DecisionId, PackRef, decision_time
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
@@ -164,7 +164,14 @@ def create_payment(
         agent = tx.get_agent(decision.agent_id)
         consent = tx.get_consent_request(decision.decision_id)
         refusal = payment_refusal(
-            payable_until=payable_until(tx, decision, consent, pack, settings.policy_packs_dir),
+            payable_until=payable_until(
+                tx,
+                decision,
+                consent,
+                pack,
+                settings.policy_packs_dir,
+                demo_tenant=demo_tenant(settings),
+            ),
             already_paid=tx.get_payment_for_decision(decision.decision_id) is not None,
             mandate_status=mandate.status(now),
             agent_disabled=agent is None or agent.status == "disabled",

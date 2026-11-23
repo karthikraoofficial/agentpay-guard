@@ -472,9 +472,16 @@ tenant_key=$(ENV_FILE=.env _existing AGENTPAY_DEMO_TENANT_KEY || true)
 if [[ -n "$agent_key" && -n "$tenant_key" ]]; then
   prod_write AGENTPAY_DEMO_AGENT_KEY "$agent_key"
   prod_write AGENTPAY_DEMO_TENANT_KEY "$tenant_key"
+  # Demo controls (ADR-0032) work only for this Tenant; the API and worker read its id.
+  demo_tenant_id=$(ENV_FILE=$NOTES _existing DEMO_TENANT_ID || true)
+  if [[ -n "$demo_tenant_id" ]]; then
+    prod_write AGENTPAY_DEMO_CONTROLS_TENANT_ID "$demo_tenant_id"
+  else
+    SKIPPED+=("AGENTPAY_DEMO_CONTROLS_TENANT_ID in $PROD: set it to the Demo Tenant's id")
+  fi
   scp -i "$SSH_KEY" -q "$PROD" "$VM_USER@$VM_IP:agentpay-guard/.env"
   vm 'chmod 600 agentpay-guard/.env'
-  if vm "cd agentpay-guard && $COMPOSE up -d demo-runner" &&      curl -fsS --max-time 10 "https://$API_HOST/demo-runner/healthz" >/dev/null 2>&1; then
+  if vm "cd agentpay-guard && $COMPOSE up -d api worker demo-runner" &&      curl -fsS --max-time 10 "https://$API_HOST/demo-runner/healthz" >/dev/null 2>&1; then
     printf '  %s✓ the Demo runner answers at https://%s/demo-runner/healthz%s
 ' "$GREEN" "$API_HOST" "$RESET"
   else

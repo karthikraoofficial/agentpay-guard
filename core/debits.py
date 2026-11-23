@@ -9,13 +9,18 @@ exception is a debit the rail already made whose answer was lost: the rail is as
 and a Payment whose money moved is never failed. The rail call is outside any
 transaction; its answer goes through `apply_charge`, the same transition a rail webhook
 uses. A rail error is logged and the Payment tried again next time.
+
+For the configured Demo Tenant only, a Demo control can end a Payment's notice period
+early (ADR-0032): the Payment is then due now, and goes through the same step.
 """
 
 import logging
 from dataclasses import dataclass
 
 from core.charges import apply_charge
+from core.demo_controls import control_for
 from core.domain.decisions import decision_time
+from core.domain.demo_controls import ends
 from core.domain.payments import Payment, PaymentId, PaymentRefusal, debit_refusal
 from core.domain.rails import RailToken
 from core.ports import Clock, IdempotencyKey, PaymentRail, RailCharge, TenantId
@@ -37,12 +42,20 @@ class _Due:
     stop: PaymentRefusal | None  # why the debit may no longer be made, if it may not
 
 
-def run_debit_step(store: SweepStore, rail: PaymentRail, clock: Clock) -> DebitResult:
+def run_debit_step(
+    store: SweepStore, rail: PaymentRail, clock: Clock, demo_tenant: TenantId | None = None
+) -> DebitResult:
+    """`demo_tenant` is `AGENTPAY_DEMO_CONTROLS_TENANT_ID`: only its Payments' notice
+    periods can be ended by a Demo control."""
     due = store.due_debits(decision_time(clock.now()))
+    if demo_tenant is not None:
+        listed = set(due)
+        ended = store.notice_ended_by_control(demo_tenant)
+        due += [(demo_tenant, p) for p in ended if (demo_tenant, p) not in listed]
     errors = 0
     for tenant_id, payment_id in due:
         try:
-            _debit_one(store, rail, clock, tenant_id, payment_id)
+            _debit_one(store, rail, clock, tenant_id, payment_id, demo_tenant)
         except Exception as exc:  # one Payment's trouble never stops the step
             errors += 1
             log.error("debit of Payment %s failed: %r", payment_id, exc, exc_info=exc)
@@ -50,9 +63,14 @@ def run_debit_step(store: SweepStore, rail: PaymentRail, clock: Clock) -> DebitR
 
 
 def _debit_one(
-    store: SweepStore, rail: PaymentRail, clock: Clock, tenant_id: TenantId, payment_id: PaymentId
+    store: SweepStore,
+    rail: PaymentRail,
+    clock: Clock,
+    tenant_id: TenantId,
+    payment_id: PaymentId,
+    demo_tenant: TenantId | None,
 ) -> None:
-    due = _still_due(store, clock, tenant_id, payment_id)
+    due = _still_due(store, clock, tenant_id, payment_id, demo_tenant)
     if due is None:
         return
     if due.stop is None:
@@ -83,14 +101,25 @@ def _debit_one(
 
 
 def _still_due(
-    store: SweepStore, clock: Clock, tenant_id: TenantId, payment_id: PaymentId
+    store: SweepStore,
+    clock: Clock,
+    tenant_id: TenantId,
+    payment_id: PaymentId,
+    demo_tenant: TenantId | None,
 ) -> _Due | None:
     """The Payment to debit and whether the Mandate and Agent still allow it, or None if
     it was settled or debited since it was listed."""
     now = decision_time(clock.now())
     with store.transaction(tenant_id) as tx:
         payment = tx.get_payment(payment_id)
-        if payment is None or not payment.debit_due(now):
+        if payment is None or payment.debit_after is None:
+            return None
+        # The notice period's end: the real one, or a Demo control's if that came first.
+        notice_ends = ends(
+            payment.debit_after, control_for(tx, demo_tenant, "expire_notice", payment_id)
+        )
+        undebited = payment.status == "scheduled" and payment.rail_payment_id is None
+        if not undebited or notice_ends > now:
             return None
         mandate = tx.lock_mandate(payment.mandate_id)
         decision = tx.get_decision(payment.decision_id)

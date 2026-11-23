@@ -26,7 +26,13 @@ type Run = {
   failure: Failure | null;
 };
 
-const ACTOR = { agent: "ShopBot", tenant: "Wallet app", payer: "Asha", reviewer: "Reviewer" } as const;
+const ACTOR = {
+  agent: "ShopBot",
+  tenant: "Wallet app",
+  payer: "Asha",
+  reviewer: "Reviewer",
+  visitor: "Fast-forward",
+} as const;
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -80,7 +86,7 @@ export function DemoStudio() {
 
   // One turn: start the run if needed, then run the next step, polling while it waits.
   // Returns false when the run can't go on (finished, failed or left).
-  async function turn(gen: number): Promise<boolean> {
+  async function turn(gen: number, press = false): Promise<boolean> {
     const r = current.current;
     if (!r || r.busy || gen !== generation.current) return false;
     if (r.cards.at(-1)?.finished) return false;
@@ -96,7 +102,8 @@ export function DemoStudio() {
       update(gen, { runId, steps: started.data.steps });
     }
     for (let polls = 0; ; polls += 1) {
-      const answer = await nextStep(runId, r.next);
+      // Only the first ask carries the press; a retry of this loop just reads.
+      const answer = await nextStep(runId, r.next, press && polls === 0);
       if (gen !== generation.current) return false;
       if (!answer.ok) {
         update(gen, { busy: false, waiting: null, failure: answer.failure, playing: false });
@@ -110,6 +117,11 @@ export function DemoStudio() {
         update(gen, { cards, next: r.next + 1, busy: false, waiting: null });
         if (card.finished) update(gen, { playing: false });
         return !card.finished;
+      }
+      if (card.fast_forward) {
+        // The visitor's turn: Play stops here until they press the button.
+        update(gen, { busy: false, waiting: card, playing: false });
+        return false;
       }
       update(gen, { waiting: card });
       // Asha answers on her phone: at phone width, show it.
@@ -213,7 +225,12 @@ export function DemoStudio() {
       <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(0,1.5fr)_minmax(0,0.8fr)_minmax(0,1fr)]">
         <section className={`${pane === "chat" ? "" : "hidden"} min-w-0 md:block`} aria-label="Chat">
           <h2 className="mb-2 text-sm font-semibold text-neutral-500">Chat: Asha and ShopBot</h2>
-          <Chat cards={run.cards} waiting={run.waiting} />
+          <Chat
+            cards={run.cards}
+            waiting={run.waiting}
+            busy={run.busy}
+            onPress={() => void turn(generation.current, true)}
+          />
           {finished && <Ending scenario={run.scenario} card={run.cards.at(-1)!} />}
         </section>
         <section className={`${pane === "phone" ? "" : "hidden"} min-w-0 md:block`} aria-label="Phone">
@@ -290,7 +307,17 @@ function Picker({ onChoose }: { onChoose: (s: Scenario) => void }) {
   );
 }
 
-function Chat({ cards, waiting }: { cards: Card[]; waiting: Card | null }) {
+function Chat({
+  cards,
+  waiting,
+  busy,
+  onPress,
+}: {
+  cards: Card[];
+  waiting: Card | null;
+  busy: boolean;
+  onPress: () => void;
+}) {
   if (cards.length === 0 && !waiting) {
     return <p className="text-sm text-neutral-500">Press Play, or take it one turn at a time.</p>;
   }
@@ -317,7 +344,28 @@ function Chat({ cards, waiting }: { cards: Card[]; waiting: Card | null }) {
           {card.actor === "payer" && card.consent && <Answer consent={card.consent} />}
         </li>
       ))}
-      {waiting && (
+      {waiting?.fast_forward && (
+        <li className="flex flex-col gap-2">
+          {waiting.chat.map((line, i) => (
+            <p key={i} className="max-w-[85%] self-start rounded-2xl bg-neutral-100 px-3 py-2 text-sm dark:bg-neutral-800">
+              <span className="block text-xs font-semibold">{line.speaker === "asha" ? "Asha" : "ShopBot"}</span>
+              {line.text}
+            </p>
+          ))}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onPress}
+            className="self-center rounded-full bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:opacity-50"
+          >
+            ⏩ {waiting.fast_forward}
+          </button>
+          <p className="text-center text-xs text-neutral-500">
+            A Demo control ends this timer now. No clock moves and no record is edited.
+          </p>
+        </li>
+      )}
+      {waiting && !waiting.fast_forward && (
         <li className="text-sm text-neutral-500" aria-live="polite">
           {waiting.actor === "payer"
             ? "Waiting for Asha to approve or decline on her phone…"

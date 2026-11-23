@@ -6,9 +6,12 @@ demo CLI tests and the Scenario tests."""
 import re
 from datetime import timedelta
 
+from adapters.memory.rail import MockRail
 from adapters.memory.settling_rail import SettlingMockRail
 from api.admin import create_tenant
+from core.debits import run_debit_step
 from core.domain.disputes import DisputeId
+from core.domain.parties import TenantId
 from core.evidence import build_evidence_pack
 from core.reconcile import sweep
 from core.relay import relay_once
@@ -16,6 +19,8 @@ from tests.api.conftest import Api, tenant_webhooks
 from tests.conftest import make_settings
 
 SETTLE_AFTER = timedelta(seconds=60)
+# The hosted demo's card-like debit (#280): booked now, debited after this notice period.
+NOTICE = timedelta(seconds=120)
 LINK = re.compile(r"https?://\S+#(\S+)")
 
 
@@ -55,8 +60,12 @@ class Operator:
                 json={"pack_version": 1},
             )
             assert signed.status_code == 200, signed.text
-        # The worker: mock settle, the outbox relay, and each new Dispute's pack.
+        # The worker: the debit step, mock settle, the outbox relay, and each new
+        # Dispute's pack.
         api.clock.advance(timedelta(seconds=30))
+        demo = api.client.app.state.settings.demo_controls_tenant_id  # type: ignore[attr-defined]
+        demo_tenant = None if demo is None else TenantId(demo)
+        run_debit_step(api.store, SettlingMockRail(api.store), api.clock, demo_tenant)
         sweep(api.store, SettlingMockRail(api.store), api.clock, SETTLE_AFTER)
         relay_once(api.store, api.workflow, api.clock, tenant_webhooks(api.store, api.clock))
         # Only this test's Tenants: on Postgres the relay also sees other tests' events.
@@ -72,8 +81,18 @@ class Operator:
 
 
 def demo_keys(api: Api) -> tuple[str, str]:
-    """Serve with mock settle on, and make a Demo Tenant: its agent key and tenant key."""
-    api.use_settings(make_settings(mock_settle_after_seconds=60))
+    """Serve as the hosted demo does (mock settle, the mock notice period, Demo controls
+    for this Tenant), and make the Demo Tenant: its agent key and tenant key."""
     tenant_id, agent_key, tenant_key = create_tenant(api.store, "Demo", live=False, clock=api.clock)
     api.tenants.append(tenant_id)
+    api.rail = MockRail(
+        notice=NOTICE, clock=api.clock, debits=SettlingMockRail(api.store).get_charge
+    )
+    api.use_settings(
+        make_settings(
+            mock_settle_after_seconds=int(SETTLE_AFTER.total_seconds()),
+            mock_notice_seconds=int(NOTICE.total_seconds()),
+            demo_controls_tenant_id=tenant_id,
+        )
+    )
     return agent_key, tenant_key

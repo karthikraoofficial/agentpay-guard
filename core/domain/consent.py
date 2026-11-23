@@ -20,7 +20,7 @@ ConsentRequestId = NewType("ConsentRequestId", str)
 ResolutionStatus = Literal["approved", "declined", "expired", "blocked"]
 ConsentStatus = Literal["pending", "approved", "declined", "expired", "blocked"]
 # How a resolution arrived: the Tenant's API, a Consent link, or the expiry timer.
-ResolvedVia = Literal["tenant_api", "consent_link", "timer"]
+ResolvedVia = Literal["tenant_api", "consent_link", "timer", "demo_control"]
 
 
 def approval_result(output: EngineOutput) -> ResolutionStatus:

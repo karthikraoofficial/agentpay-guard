@@ -30,6 +30,7 @@ from core.domain.consent import (
     ConsentStatus,
 )
 from core.domain.decisions import AuditRecordId, Decision, DecisionId
+from core.domain.demo_controls import DemoControl, DemoControlKind
 from core.domain.disputes import Dispute, DisputeId, ReviewLink
 from core.domain.evidence import EvidencePack
 from core.domain.idempotency import IdempotencyKey as IdempotencyKey  # re-exported
@@ -354,6 +355,15 @@ class TenantTransaction(Protocol):
 
     def get_void(self, decision_id: DecisionId) -> Void | None: ...
 
+    def add_demo_control(self, control: DemoControl) -> None:
+        """Store a Demo control for lookup beside its Audit record (ADR-0032)."""
+        ...
+
+    def get_demo_control(self, kind: DemoControlKind, target_id: str) -> DemoControl | None:
+        """The earliest Demo control of `kind` on `target_id`, if any. Callers read it only
+        for the configured Demo Tenant (core.demo_controls.control_for)."""
+        ...
+
     def update_payment(self, payment: Payment) -> None:
         """Store a Payment's new status (see Payment.charged)."""
         ...
@@ -580,6 +590,11 @@ class TenantDirectory(Protocol):
     def due_debits(self, now: datetime) -> list[tuple[TenantId, PaymentId]]:
         """Payments whose notice period ended by `now` and whose card has not been
         debited yet, in every Tenant, earliest first: what the debit step debits."""
+        ...
+
+    def notice_ended_by_control(self, tenant_id: TenantId) -> list[PaymentId]:
+        """This Tenant's Payments not debited yet whose notice period a Demo control ended
+        (ADR-0032). The debit step asks only for the configured Demo Tenant."""
         ...
 
     def payment_tenant(self, payment_id: PaymentId) -> TenantId | None:

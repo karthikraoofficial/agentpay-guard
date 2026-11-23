@@ -304,6 +304,27 @@ payments = Table(
 )
 
 # Voids (#80): looked up by Decision; the Audit record of kind `void` is the evidence.
+# Demo controls (ADR-0032): append-only, one row per control, each with its Audit record.
+demo_controls = Table(
+    "demo_controls",
+    metadata,
+    Column("tenant_id", String, ForeignKey("tenants.tenant_id"), primary_key=True),
+    Column("control_id", String, primary_key=True),
+    Column("kind", String, nullable=False),
+    Column("target_id", String, nullable=False),
+    Column("decision_id", String, nullable=False),
+    Column("at", DateTime(timezone=True), nullable=False),
+    Column("audit_record_id", String, nullable=False),
+    ForeignKeyConstraint(
+        ["tenant_id", "decision_id"], ["decisions.tenant_id", "decisions.decision_id"]
+    ),
+    CheckConstraint(
+        "kind IN ('expire_consent', 'expire_payment_window', 'expire_notice')",
+        name="demo_controls_kind",
+    ),
+    Index("ix_demo_controls_target", "tenant_id", "kind", "target_id"),
+)
+
 voids = Table(
     "voids",
     metadata,

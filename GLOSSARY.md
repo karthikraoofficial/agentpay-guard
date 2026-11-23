@@ -29,7 +29,7 @@ An Agent its Tenant has switched off. Its requests are blocked under every Manda
 _Avoid_: Revoked agent, suspended agent
 
 **Demo Tenant**:
-The Tenant the owner creates on the hosted demo with `api.admin create-tenant Demo --test`, so visitors can run the demo journeys. It is an ordinary Tenant on the mock rail with mock settle on, held to the Model spend cap like any other. Its two keys are named in config (`AGENTPAY_DEMO_AGENT_KEY`, `AGENTPAY_DEMO_TENANT_KEY`), test keys only, and held by the Demo runner and `python -m demo`, never by a browser (ADR-0031). The API itself still treats it like any other Tenant.
+The Tenant the owner creates on the hosted demo with `api.admin create-tenant Demo --test`, so visitors can run the demo journeys. It is an ordinary Tenant on the mock rail with mock settle on, held to the Model spend cap like any other. Its two keys are named in config (`AGENTPAY_DEMO_AGENT_KEY`, `AGENTPAY_DEMO_TENANT_KEY`), test keys only, and held by the Demo runner and `python -m demo`, never by a browser (ADR-0031). The API treats it like any other Tenant, with one exception: when `AGENTPAY_DEMO_CONTROLS_TENANT_ID` names it, Demo controls can end its timers early (ADR-0032).
 _Avoid_: Test tenant, sandbox tenant, public tenant
 
 ## Authority
@@ -349,3 +349,7 @@ _Avoid_: Journey list (that is `docs/demo-journeys.md`), scenario library
 **Demo runner**:
 The small server beside the API (`python -m demo_runner`) that plays Scenarios for the web app's /demo page, one step per browser request, each step answered with a card. It holds the Demo Tenant's keys so the browser never does, talks to the API over HTTP only, makes no model call of its own, grants each run its own Payer, Agent and Mandate, and is rate-limited per client IP and overall (ADR-0031).
 _Avoid_: Demo server, demo backend, demo proxy
+
+**Demo control**:
+An action, for the Demo Tenant on the mock rail only, that ends one timer now: a Consent request, a Payment window or a Pre-debit notice period. It appends its own `demo_controls` row and Audit record, and the deadline becomes the real one or the control's time, whichever is first. It never moves a clock or edits a Mandate, Decision or Audit record (ADR-0032).
+_Avoid_: Time travel, clock override, debug switch

@@ -1,0 +1,109 @@
+{
+  "id": "F5",
+  "title": "Asha cancels during the notice period",
+  "group": "F",
+  "playlists": [
+    "payments-pm"
+  ],
+  "story": "ShopBot pays INR 1,250 and the bank sends Asha the advance notice before the card is charged. During the notice period she cancels ShopBot's permission. When the notice period ends, the Guard checks again and stops the charge: MANDATE_REVOKED, no money taken.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Reorder my usual milk and bread, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Allowed. Paying FreshMart now; your bank will send the advance notice first."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/mandates/{mandate_id}/revoke",
+      "body": {
+        "revoked_by": "payer"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Actually, cancel ShopBot's permission to pay for me."
+        }
+      ]
+    },
+    {
+      "actor": "visitor",
+      "control": "expire_notice",
+      "label": "Skip to the end of the notice period",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The payment is waiting out the notice period."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": [
+        "captured",
+        "failed"
+      ],
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Checking whether the payment went through."
+        }
+      ]
+    }
+  ],
+  "demo_controls": [
+    "expire_notice"
+  ],
+  "expected": {
+    "outcome": "allow",
+    "reason_codes": [],
+    "payment_status": "failed",
+    "payment_failure_code": "MANDATE_REVOKED"
+  },
+  "what_to_notice": "The card is charged only after the notice period, and just before charging the Guard checks the permission again. Asha withdrew it, so the payment failed with MANDATE_REVOKED and no money moved."
+}

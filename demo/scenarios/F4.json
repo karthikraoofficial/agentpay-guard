@@ -1,0 +1,80 @@
+{
+  "id": "F4",
+  "title": "Paying too late after a yes",
+  "group": "F",
+  "playlists": [],
+  "story": "The Guard allows a INR 1,250 payment, but ShopBot gets distracted and only tries to pay after the 15-minute Payment window has closed. The payment is refused with PAYMENT_WINDOW_CLOSED: ShopBot must ask again, against Asha's limits as they are now.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Reorder my usual milk and bread, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "visitor",
+      "control": "expire_payment_window",
+      "label": "Skip 15 minutes",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Allowed. I'll pay in a moment..."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "expect_refusal": "PAYMENT_WINDOW_CLOSED",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Paying FreshMart now."
+        }
+      ]
+    }
+  ],
+  "demo_controls": [
+    "expire_payment_window"
+  ],
+  "expected": {
+    "outcome": "allow",
+    "reason_codes": [],
+    "refusal_code": "PAYMENT_WINDOW_CLOSED"
+  },
+  "what_to_notice": "An allow is a yes for a short while only. The Decision itself never changes; the window it opened ended, so the payment is refused and a new request would be decided afresh."
+}
