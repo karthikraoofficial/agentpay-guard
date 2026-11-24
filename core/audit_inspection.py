@@ -70,6 +70,21 @@ def verify_tenant_chain(tx: TenantTransaction) -> ChainReport:
     return ChainReport(len(rows), first_broken_seq(rows, head))
 
 
+def verify_tampered_copy(
+    tx: TenantTransaction, audit_record_id: str
+) -> tuple[ChainReport, int] | None:
+    """Alter one record in an in-memory copy of the chain and run the real check on the
+    copy (ADR-0032): its report and the altered seq, or None if there's no such record.
+    Reads only, so the stored chain is never touched."""
+    rows, head = tx.read_audit_chain()
+    target = next((r for r in rows if r.audit_record_id == audit_record_id), None)
+    if target is None:
+        return None
+    altered = target.model_copy(update={"body": target.body + b" "})
+    copy = [altered if r.seq == target.seq else r for r in rows]
+    return ChainReport(len(copy), first_broken_seq(copy, head)), target.seq
+
+
 def _no_engine_run(record: AuditRecord) -> str:
     if record.payment is not None:
         return f"{record.payment.status} Payment record"

@@ -28,6 +28,7 @@ from adapters.webhooks.secret_box import secret_box
 from adapters.webhooks.sender import HttpWebhookSender
 from agents.dispute_narrative import NarrativeWriter as DisputeNarrativeWriter
 from core.debits import run_debit_step
+from core.demo_switches import SwitchedRail, switchable_writer
 from core.evidence import NarrativeWriter
 from core.model_spend import CappedGateway, daily_caps
 from core.ops_metrics import BacklogStore, report_backlog_once, report_sweep
@@ -96,6 +97,15 @@ def narrative_writer(
     )
 
 
+def demo_writer(
+    writer: NarrativeWriter | None, settings: Settings, store: UnitOfWork
+) -> NarrativeWriter | None:
+    """The writer, honouring the AI-off Demo control for the Demo Tenant (ADR-0032)."""
+    if writer is None or settings.demo_controls_tenant_id is None:
+        return writer
+    return switchable_writer(writer, store, TenantId(settings.demo_controls_tenant_id))
+
+
 async def relay_forever(
     bus: EventBus,
     client: Client,
@@ -131,7 +141,19 @@ def sweep_rail(settings: Settings, store: UnitOfWork) -> PaymentRail | None:
     and the sweep would wrongly fail every Payment. With mock settle on (ADR-0019), the
     sweep asks a rail that captures from the stored Payment instead."""
     if settings.rail == "mock":
-        return None if settings.mock_settle_after_seconds is None else SettlingMockRail(store)
+        if settings.mock_settle_after_seconds is None:
+            return None
+        settling = SettlingMockRail(store)
+        if settings.demo_controls_tenant_id is None:
+            return settling
+        # Demo control switches reach the debit step and the sweep too (ADR-0032).
+        return SwitchedRail(
+            settling,
+            store,
+            TenantId(settings.demo_controls_tenant_id),
+            SystemClock(),
+            timedelta(seconds=settings.demo_rail_outage_seconds),
+        )
     return build_rail(settings)
 
 
@@ -181,7 +203,7 @@ async def main() -> None:
             clock,
             pool,
             settings.policy_packs_dir,
-            narrative_writer(settings, store, clock, telemetry),
+            demo_writer(narrative_writer(settings, store, clock, telemetry), settings, store),
             telemetry,
         )
         async with worker:

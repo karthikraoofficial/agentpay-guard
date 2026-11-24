@@ -47,6 +47,7 @@ _TOOLS = {tool.name: tool for tool in TOOLS}
 # What this engine can run so far; a Scenario that needs more is refused up front.
 _AGENT_TOOLS = {
     "request_decision",
+    "check_intent",
     "get_decision",
     "get_consent_request",
     "create_payment",
@@ -69,6 +70,11 @@ _CONTROL_ROUTES = {
     "expire_consent": "POST /v1/demo/consent-requests/{consent_request_id}/expire",
     "expire_payment_window": "POST /v1/demo/decisions/{decision_id}/expire-payment-window",
     "expire_notice": "POST /v1/demo/payments/{payment_id}/expire-notice",
+    "ai_off": "POST /v1/demo/mandates/{mandate_id}/ai-off",
+    "rail_declining": "POST /v1/demo/mandates/{mandate_id}/rail-declining",
+    "lose_payment": "POST /v1/demo/mandates/{mandate_id}/lose-payment",
+    "rail_down": "POST /v1/demo/rail-down",
+    "tamper_copy": "GET /v1/demo/audit-records/{audit_record_id}/tampered-copy",
 }
 # The mock rail's test customer (adapters/memory/rail.py).
 _MOCK_CUSTOMER = "cust_mock"
@@ -162,8 +168,10 @@ class Card(BaseModel):
     consent: ConsentView | None = None
     # The error code of a refusal the journey expects, e.g. INSUFFICIENT_SCOPE.
     refused: str | None = None
-    # A fast-forward waiting for the visitor's press: the button's words.
+    # A Demo control waiting for the visitor's press: the button's words.
     fast_forward: str | None = None
+    # That control forces a failure (a switch) rather than ending a timer.
+    switch: bool = False
     # The step is waiting on the worker or a person: ask for the same step again.
     waiting: bool = False
     finished: bool = False
@@ -239,6 +247,7 @@ class Run:
         self.payment: Json | None = None
         self.consent: Json | None = None
         self.refusal: str | None = None
+        self.intent_id: str | None = None
         self.replayed: Json | None = None
         self.chain: Json | None = None
         self._rules: dict[str, list[RuleView]] = {}
@@ -339,7 +348,9 @@ class Run:
         if "outcome" in body:
             self.decision = body
             return _decision_view(body)
-        if "identical" in body:
+        if "intent_id" in body:
+            self.intent_id = str(body["intent_id"])
+        elif "identical" in body:
             self.replayed = body
         elif "clean" in body:
             self.chain = body
@@ -447,11 +458,27 @@ class Run:
         if tool == "request_decision":
             if step.amount is None:
                 raise StepFailed(tool, "the step names no amount")
-            return {
+            asked: Json = {
                 "mandate_id": self.mandate_id,
                 "agent_id": self.agent_id,
                 "amount": step.amount.model_dump(),
                 "merchant": self.scenario.setup.merchant.model_dump(),
+                "idempotency_key": self._key(index),
+            }
+            if self.intent_id is not None:
+                asked["intent_id"] = self.intent_id
+            return asked
+        if tool == "check_intent":
+            if step.amount is None or step.instruction is None or step.item is None:
+                raise StepFailed(tool, "the step needs an amount, an instruction and an item")
+            total = step.amount.model_dump()
+            return {
+                "mandate_id": self.mandate_id,
+                "agent_id": self.agent_id,
+                "payer_instruction": step.instruction,
+                "merchant": self.scenario.setup.merchant.model_dump(),
+                "line_items": [{"description": step.item, "quantity": 1, "unit_amount": total}],
+                "quoted_total": total,
                 "idempotency_key": self._key(index),
             }
         if tool in ("create_payment", "get_decision"):
@@ -627,15 +654,18 @@ class Run:
                 chat=step.chat,
                 call=None,
                 fast_forward=step.label,
+                switch=not step.control.startswith("expire_"),
                 waiting=True,
             )
         route = _CONTROL_ROUTES[step.control]
         method, path = self._fill(route)
-        headers = {"Idempotency-Key": self._key(index)}
+        headers = {"Idempotency-Key": self._key(index)} if method == "POST" else None
         response = await self._send(self._tenant, step.label, method, path, None, headers)
         if not response.is_success:
             raise StepFailed(step.label, _problem(response))
         answer = _body(response)
+        if step.control == "tamper_copy":
+            self.chain = answer
         consent = None
         if step.control == "expire_consent":
             _, read = await self._read_consent(step.label)
@@ -644,7 +674,7 @@ class Run:
             step=index,
             actor="visitor",
             chat=step.chat,
-            call=Call(kind="route", name=f"POST {path}", request=None, response=answer),
+            call=Call(kind="route", name=f"{method} {path}", request=None, response=answer),
             consent=consent,
         )
 

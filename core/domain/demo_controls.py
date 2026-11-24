@@ -9,6 +9,13 @@ the one configured Demo Tenant on the mock rail.
 - `expire_payment_window`: the Decision's Payment window ends now.
 - `expire_notice`: the Payment's Pre-debit notice period ends now; the worker's debit step
   then debits it, or fails it if the Mandate no longer allows it.
+
+The switches force a failure, and run before any Decision, so they have no `decision_id`:
+
+- `ai_off`: model calls for this Mandate fail closed.
+- `rail_declining`: charges and refunds under this Mandate answer failed.
+- `lose_payment`: charges under this Mandate never reach the rail.
+- `rail_down`: the mock rail stops answering for the Demo Tenant, for a limited time.
 """
 
 from datetime import datetime
@@ -19,7 +26,17 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict
 from core.domain.decisions import AuditRecordId, DecisionId
 from core.domain.parties import TenantId
 
-DemoControlKind = Literal["expire_consent", "expire_payment_window", "expire_notice"]
+DemoControlKind = Literal[
+    "expire_consent",
+    "expire_payment_window",
+    "expire_notice",
+    "ai_off",
+    "rail_declining",
+    "lose_payment",
+    "rail_down",
+]
+# The target of `rail_down`, which is about the rail rather than one Mandate.
+RAIL_TARGET = "rail"
 
 
 class DemoControl(BaseModel):
@@ -30,10 +47,11 @@ class DemoControl(BaseModel):
     control_id: str
     tenant_id: TenantId
     kind: DemoControlKind
-    # What it ended: a Consent request, Decision or Payment id, per `kind`.
+    # What it acts on: a Consent request, Decision, Payment or Mandate id, or RAIL_TARGET.
     target_id: str
-    # The Decision it concerns, so its Audit record sits in that Decision's trail.
-    decision_id: DecisionId
+    # The Decision it concerns, so its Audit record sits in that Decision's trail. A
+    # switch has none.
+    decision_id: DecisionId | None
     at: AwareDatetime
     audit_record_id: AuditRecordId
 

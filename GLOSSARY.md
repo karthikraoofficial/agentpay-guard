@@ -351,5 +351,5 @@ The small server beside the API (`python -m demo_runner`) that plays Scenarios f
 _Avoid_: Demo server, demo backend, demo proxy
 
 **Demo control**:
-An action, for the Demo Tenant on the mock rail only, that ends one timer now: a Consent request, a Payment window or a Pre-debit notice period. It appends its own `demo_controls` row and Audit record, and the deadline becomes the real one or the control's time, whichever is first. It never moves a clock or edits a Mandate, Decision or Audit record (ADR-0032).
+An action, for the Demo Tenant on the mock rail only, that either ends one timer now (a Consent request, a Payment window or a Pre-debit notice period) or forces a failure (a **switch**: AI off, rail declining, lose a payment, rail down, tamper with a copy). A timer's deadline becomes the real one or the control's time, whichever is first. Each control appends its own `demo_controls` row and Audit record, except tamper with a copy, which only reads. None moves a clock or edits a Mandate, Decision or Audit record (ADR-0032).
 _Avoid_: Time travel, clock override, debug switch

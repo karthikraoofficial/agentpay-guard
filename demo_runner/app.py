@@ -9,6 +9,8 @@
   again later.
 - `POST /runs/{run_id}/verify`: the inspector's Verify / Replay button (#275). Replays this
   run's Decision and walks the Demo Tenant's Audit chain, at most 10 times a run.
+- `GET /status`: whether a simulated rail outage is running, for the banner on /demo
+  (ADR-0032). Read from the API at most every 5 seconds.
 - `GET /healthz`.
 
 Rate limits: runs started per client IP per minute, and runs in progress overall. Past
@@ -46,6 +48,8 @@ _WINDOW_SECONDS = 60
 _BUSY_RETRY_SECONDS = 30
 # Verify walks the Demo Tenant's whole Audit chain, so a public page can't ask without end.
 _VERIFIES_PER_RUN = 10
+# Every open /demo page polls the status, so the API is asked at most this often.
+_STATUS_CACHE_SECONDS = 5.0
 
 
 class StartBody(BaseModel):
@@ -62,6 +66,13 @@ class Started(BaseModel):
     run_id: str
     scenario: str
     steps: int
+
+
+class DemoStatus(BaseModel):
+    """For the banner on /demo: whether a simulated rail outage is running (ADR-0032)."""
+
+    rail_outage: bool = False
+    outage_ends_at: datetime | None = None
 
 
 @dataclass
@@ -104,6 +115,7 @@ def create_app(
     runs: dict[str, _Live] = {}
     starts: dict[str, deque[float]] = {}
     ttl = settings.demo_runner_run_ttl_seconds
+    status_read: tuple[float, DemoStatus] | None = None
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -132,6 +144,23 @@ def create_app(
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/status", response_model=DemoStatus)
+    async def status() -> DemoStatus:
+        """No answer from the API means no banner: the page itself still works."""
+        nonlocal status_read
+        at = seconds()
+        if status_read is not None and at - status_read[0] < _STATUS_CACHE_SECONDS:
+            return status_read[1]
+        current = DemoStatus()
+        try:
+            response = await tenant.get("/v1/demo/status")
+            if response.is_success:
+                current = DemoStatus.model_validate(response.json())
+        except (httpx.HTTPError, ValueError):
+            log.info("the API's demo status couldn't be read")
+        status_read = (at, current)
+        return current
 
     @app.post("/runs", status_code=201, response_model=Started)
     async def start(body: StartBody, request: Request) -> Started | JSONResponse:

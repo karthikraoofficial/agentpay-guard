@@ -36,7 +36,7 @@ def record_control(
     tx: TenantTransaction,
     kind: DemoControlKind,
     target_id: str,
-    decision_id: DecisionId,
+    decision_id: DecisionId | None,
     now: datetime,
 ) -> DemoControl:
     """Append the control's Audit record and store it for lookup."""

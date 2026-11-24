@@ -244,7 +244,7 @@ From ₹2,000 upwards, ShopBot must show the Guard what Asha asked for and what 
 **Guard's answer:** The cart check says *unsure*. Step up, reason `INTENT_UNKNOWN`.
 **Why it matters:** When in doubt, ask the human.
 
-### D5. The AI service is down 🟡
+### D5. The AI service is down ✅
 **Story:** The AI model provider has an outage, or the demo's AI budget for the day is used up.
 **Guard's answer:** The cart check comes back *unsure*, so the Guard steps up. Payments keep flowing; they just ask Asha first.
 **Why it matters:** An AI outage makes the system more careful, never less safe, and never stops it working. *Demo control:* a "switch the AI off" toggle.
@@ -332,15 +332,15 @@ From ₹2,000 upwards, ShopBot must show the Guard what Asha asked for and what 
 **Guard's answer:** The payment is never charged (`RAIL_NOTICE_FAILED`), because charging without notice would break the rules.
 **Why it matters:** Compliance is built in, not left to chance. *Demo control:* the pretend bank's "notice fails" card, with the demo-only notice period (`AGENTPAY_MOCK_NOTICE_SECONDS`).
 
-### F8. The bank never heard of the payment 🟡
+### F8. The bank never heard of the payment ✅
 **Story:** A payment is stuck as *scheduled*. When the Guard's regular check asks the bank, the bank has no record of it.
 **Guard's answer:** The payment is marked failed (`RAIL_CHARGE_MISSING`) and never charged late.
-**Why it matters:** A surprise charge days later is worse than a clear failure now. *Demo control:* "lose this payment at the bank" plus fast-forward to the next check.
+**Why it matters:** A surprise charge days later is worse than a clear failure now. *Demo control:* "lose this payment at the bank", then the next regular check finds it.
 
-### F9. The bank is down 🟡
+### F9. The bank is down ✅
 **Story:** The bank's systems go down. Payments start timing out.
 **Guard's answer:** After a few failures a safety switch (circuit breaker) trips: new payments are refused immediately with "try again in a minute" instead of hanging. **Decisions keep working throughout**, because they never depend on the bank.
-**Why it matters:** One failing partner doesn't freeze everything, and nothing is left half-done. (Demo: the pretend bank has a "times out" card; a switch would make it easier to show.)
+**Why it matters:** One failing partner doesn't freeze everything, and nothing is left half-done. *Demo control:* "take the bank down" for 60 seconds, with a 5-minute cooldown, and a banner for every visitor.
 
 ---
 
@@ -439,7 +439,7 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 **Guard's answer:** Verifies the whole chain of records. Each one is linked to the one before, so any change would show.
 **Why it matters:** Trust in the evidence depends on the evidence being untouchable.
 
-### H6. Catching a tampered record 🟡
+### H6. Catching a tampered record ✅
 **Story:** Someone alters one old decision record (in a demo copy).
 **Guard's answer:** Verification fails and points to exactly where the chain breaks.
 **Why it matters:** It shows the tamper-evidence actually works, rather than just claiming it. *Demo control:* a "tamper with a copy" button. The real database refuses edits outright.
@@ -463,20 +463,20 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 | A. Everyday yes | 2 | 1 | 1 | 0 |
 | B. Hard limits | 10 | 2 | 8 | 0 |
 | C. Warning signs | 6 | 1 | 5 | 0 |
-| D. Cart check | 7 | 0 | 5 | 2 |
+| D. Cart check | 7 | 1 | 5 | 1 |
 | E. Asking Asha | 6 | 6 | 0 | 0 |
-| F. Paying | 9 | 4 | 3 | 2 |
+| F. Paying | 9 | 6 | 3 | 0 |
 | G. Disputes | 12 | 1 | 9 | 2 |
-| H. Refunds and proof | 8 | 3 | 3 | 2 |
-| **Total** | **60** | **18** | **34** | **8** |
+| H. Refunds and proof | 8 | 4 | 3 | 1 |
+| **Total** | **60** | **22** | **34** | **4** |
 
-*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), and H4 and H5 (#275).*
+*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), and D5, F8, F9 and H6 (#281).*
 
 **What this means for the build:**
 - **34 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
-- **8 journeys still need a demo-only control:**
+- **4 journeys still need a Scenario on a demo-only control:**
   1. **Fast-forward** (built for Consent requests, Payment windows and notice periods, ADR-0032): still to come for a stale cart check (D7) and a Dispute deadline (G11).
-  2. **Failure switches**: AI off (D5, G8); bank down or declining (F9, H3); lose a payment at the bank (F8); tamper with a copy of the records (H6).
+  2. **Failure switches** (built, ADR-0032): AI off is still to be shown in a Dispute (G8), and bank declining in a refund (H3).
 
   Both work only for the demo account on pretend money. The pretend bank already has "declines", "refused" and "times out" cards, so several bank failures need no new switch at all.
 

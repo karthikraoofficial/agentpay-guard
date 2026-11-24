@@ -359,6 +359,10 @@ class InMemoryTransaction:
         found = [c for c in self._data.demo_controls if (c.kind, c.target_id) == (kind, target_id)]
         return min(found, key=lambda c: c.at) if found else None
 
+    def latest_demo_control(self, kind: DemoControlKind, target_id: str) -> DemoControl | None:
+        found = [c for c in self._data.demo_controls if (c.kind, c.target_id) == (kind, target_id)]
+        return max(found, key=lambda c: (c.at, c.control_id)) if found else None
+
     def update_payment(self, payment: Payment) -> None:
         self._own(payment.tenant_id)
         if payment.payment_id not in self._data.payments:

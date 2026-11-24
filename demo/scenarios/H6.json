@@ -1,0 +1,69 @@
+{
+  "id": "H6",
+  "title": "Catching a tampered record",
+  "group": "H",
+  "playlists": [],
+  "story": "Someone alters one Decision record in a copy of the Audit chain. Verify runs on the copy and points to exactly the record that was changed. The real records are never touched.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Reorder my usual milk and bread, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "visitor",
+      "control": "tamper_copy",
+      "label": "Tamper with a copy",
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "What if someone edited that record later?"
+        }
+      ]
+    }
+  ],
+  "demo_controls": [
+    "tamper_copy"
+  ],
+  "expected": {
+    "outcome": "allow",
+    "reason_codes": [],
+    "chain_clean": false
+  },
+  "what_to_notice": "Changing a single byte breaks that record's hash, so Verify names it as the first broken record. This ran on an in-memory copy: the real chain still verifies clean, and the database refuses edits outright."
+}

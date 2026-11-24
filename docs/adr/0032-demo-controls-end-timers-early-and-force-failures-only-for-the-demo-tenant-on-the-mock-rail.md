@@ -17,6 +17,18 @@ The gate has three parts:
 - **Pre-debit notice period.** The worker's debit step treats the Payment as due, then runs its usual re-check. It debits the Payment, or fails it if the Mandate no longer allows it (`MANDATE_REVOKED`). `AGENTPAY_MOCK_NOTICE_SECONDS` gives the mock rail a notice period, so the deployed demo behaves like a card debit.
 - **Mandate expiry has no control.** Journey B10 grants a Mandate whose validity has already ended, so the real rule answers `MANDATE_EXPIRED` with no control and no engine change.
 
+## The switches
+
+The switches (#281) force a failure rather than end a timer. They use the same gate, and each writes its own `demo_controls` row and Audit record. `SwitchedRail` wraps the mock rail in the API and the worker and reads the same table, and every other Tenant's rail calls pass straight through.
+
+- **AI off** (one Mandate). The Intent check answers `unknown` without calling the model, and a Dispute narrative falls back to the template.
+- **Rail declining** (one Mandate). New charges and refunds answer failed.
+- **Lose a payment** (one Mandate). New charges never reach the rail. The outcome is unknown, so the Payment stays scheduled until Reconciliation fails it with `RAIL_CHARGE_MISSING`. Forgetting a charge the rail had already answered for wouldn't work: Reconciliation rightly treats that as a lookup fault and retries (ADR-0016).
+- **Rail down** (the Demo Tenant's rail calls). Rail calls raise `RailUnavailable` for 60 seconds, and the process-wide breaker opens at once (ADR-0025), so a payment from any Tenant on this API is refused while it is open. Because every visitor feels it, another outage can't start until 5 minutes after this one started, and a press during an outage joins it. Both lengths are in settings. A public `GET /v1/demo/status` reports the outage, and `/demo` shows every visitor a banner.
+- **Tamper with a copy.** Read-only, so it writes no record. The caller names an Audit record, the API alters it in an in-memory copy of the chain, and the real Verify names the first broken record. We didn't have the caller supply the copy, because that would export other visitors' run inputs.
+
+A switch runs before any Decision exists, so **a `demo_control` Audit record is the one kind that may have no `decision_id`**. It names its Mandate, or the rail, as its target. A database check enforces this for every other kind. Records written before this change keep their exact bytes and hashes. Once a switch record exists, migration 0026 can't be downgraded, because an append-only record can't be given a Decision.
+
 ## Consequences
 
 - **Replay is unaffected.** The engine never sees a control. Decisions before and after one replay byte-identically, and a test proves it per control.

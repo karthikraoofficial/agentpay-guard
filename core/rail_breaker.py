@@ -60,6 +60,17 @@ class RailBreaker:
             report_breaker(self._telemetry, is_open=False)
         return was_open
 
+    def trip(self, now: datetime) -> None:
+        """Open now, as `failures` unknown outcomes in a row would: a simulated rail outage
+        (ADR-0032) shouldn't need a visitor to fail five payments first."""
+        with self._lock:
+            was_closed = self._open_until is None
+            self._in_a_row = max(self._in_a_row, self._failures)
+            self._open_until = now + self._open_for
+            self._trial_since = None
+        if was_closed:
+            report_breaker(self._telemetry, is_open=True)
+
     def unavailable(self, now: datetime) -> bool:
         """The rail call's outcome is unknown. Returns whether this opened the breaker."""
         with self._lock:

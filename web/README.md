@@ -83,6 +83,9 @@ The visitor can step one turn at a time or press Play. A step that waits on the 
   A 429 from the runner shows as "The demo is busy. Try again in N seconds."
 - **Fast-forward.** A step that waits on a timer can show a ⏩ button. Pressing it asks
   the runner to use a Demo control (ADR-0032), which ends that one timer for real.
+- **Switches.** A step can show a ⚡ button that forces a failure through a Demo control
+  (ADR-0032). While a simulated bank outage runs, every open page shows a banner, from
+  the runner's `GET /status`, checked every 10 seconds.
 - **The inspector** shows the Decision's Rule results and Pack hash. Its Verify / Replay
   button asks the runner to replay this run's Decision and walk the Demo Tenant's Audit
   chain, and shows both answers.
