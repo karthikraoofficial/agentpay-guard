@@ -22,7 +22,7 @@ from core.demo_controls import control_for
 from core.domain.decisions import decision_time
 from core.domain.demo_controls import ends
 from core.domain.payments import Payment, PaymentId, PaymentRefusal, debit_refusal
-from core.domain.rails import RailToken
+from core.domain.rails import RailName, RailToken
 from core.ports import Clock, IdempotencyKey, PaymentRail, RailCharge, TenantId
 from core.reconcile import SweepStore
 
@@ -43,12 +43,17 @@ class _Due:
 
 
 def run_debit_step(
-    store: SweepStore, rail: PaymentRail, clock: Clock, demo_tenant: TenantId | None = None
+    store: SweepStore,
+    rail: PaymentRail,
+    clock: Clock,
+    demo_tenant: TenantId | None = None,
+    on_rail: RailName | None = None,
 ) -> DebitResult:
     """`demo_tenant` is `AGENTPAY_DEMO_CONTROLS_TENANT_ID`: only its Payments' notice
-    periods can be ended by a Demo control."""
-    due = store.due_debits(decision_time(clock.now()))
-    if demo_tenant is not None:
+    periods can be ended by a Demo control, and only on the mock rail (ADR-0033).
+    `on_rail` limits the step to Payments on that rail, which `rail` must be."""
+    due = store.due_debits(decision_time(clock.now()), on_rail)
+    if demo_tenant is not None and on_rail in (None, "mock"):
         listed = set(due)
         ended = store.notice_ended_by_control(demo_tenant)
         due += [(demo_tenant, p) for p in ended if (demo_tenant, p) not in listed]

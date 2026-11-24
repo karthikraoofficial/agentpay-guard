@@ -9,10 +9,10 @@ malformed one fails at startup rather than at the first request.
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import AnyHttpUrl, AnyUrl, Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from core.domain.rails import RailName
 
@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     # The PaymentRail that Payments go through. "mock" settles in-process and needs no
     # account, so tests, evals and a fresh clone run without Razorpay (ADR-0012, ADR-0013).
     rail: RailName = "mock"
+    # Every rail this deployment reaches, comma-separated (`AGENTPAY_RAILS=mock,razorpay`);
+    # unset, only AGENTPAY_RAIL. Each Payment goes to the rail its Mandate's Rail token
+    # names, so one deployment can run mock and real Payments side by side (ADR-0033).
+    rails: Annotated[tuple[RailName, ...], NoDecode] = ()
     # The reconciliation sweep (#82): every `interval`, ask the rail about Payments still
     # scheduled `after` seconds after they were made.
     reconcile_interval_seconds: int = Field(default=300, gt=0)
@@ -138,19 +142,35 @@ class Settings(BaseSettings):
     grafana_datasource_uid: str = "grafanacloud-prom"
     alert_email: str | None = None
 
+    @field_validator("rails", mode="before")
+    @classmethod
+    def _split_rails(cls, value: object) -> object:
+        if isinstance(value, str):
+            return tuple(name.strip() for name in value.split(",") if name.strip())
+        return value
+
+    @property
+    def reachable_rails(self) -> frozenset[RailName]:
+        """The rails this deployment can send a Payment to."""
+        return frozenset(self.rails or (self.rail,))
+
     @model_validator(mode="after")
     def _razorpay_test_mode_only(self) -> "Settings":
         if self.razorpay_key_id is not None and not self.razorpay_key_id.startswith("rzp_test_"):
             raise ValueError("AGENTPAY_RAZORPAY_KEY_ID must be a test key (rzp_test_...)")
-        if self.rail != "mock" and self.mock_settle_after_seconds is not None:
+        if self.rails and self.rail not in self.rails:
+            raise ValueError(f"AGENTPAY_RAILS must include AGENTPAY_RAIL ({self.rail})")
+        no_mock = "mock" not in self.reachable_rails
+        # These act on mock-rail Payments only (ADR-0033), so the mock rail must be reachable.
+        if no_mock and self.mock_settle_after_seconds is not None:
             raise ValueError(
                 "AGENTPAY_MOCK_SETTLE_AFTER_SECONDS is for the mock rail only; "
-                f"unset it with AGENTPAY_RAIL={self.rail}"
+                "add mock to AGENTPAY_RAILS or unset it"
             )
-        if self.rail != "mock" and self.demo_controls_tenant_id is not None:
+        if no_mock and self.demo_controls_tenant_id is not None:
             raise ValueError(
                 "AGENTPAY_DEMO_CONTROLS_TENANT_ID is for the mock rail only; "
-                f"unset it with AGENTPAY_RAIL={self.rail}"
+                "add mock to AGENTPAY_RAILS or unset it"
             )
         if self.demo_rail_cooldown_seconds < self.demo_rail_outage_seconds:
             raise ValueError(
@@ -158,20 +178,20 @@ class Settings(BaseSettings):
                 "AGENTPAY_DEMO_RAIL_OUTAGE_SECONDS"
             )
         if self.mock_notice_seconds is not None and (
-            self.rail != "mock" or self.mock_settle_after_seconds is None
+            no_mock or self.mock_settle_after_seconds is None
         ):
             raise ValueError(
                 "AGENTPAY_MOCK_NOTICE_SECONDS is for the mock rail with mock settle on: "
-                "set AGENTPAY_MOCK_SETTLE_AFTER_SECONDS, and AGENTPAY_RAIL=mock"
+                "set AGENTPAY_MOCK_SETTLE_AFTER_SECONDS, with mock in AGENTPAY_RAILS"
             )
-        if self.rail == "razorpay":
+        if "razorpay" in self.reachable_rails:
             missing = [
                 f"AGENTPAY_{name.upper()}"
                 for name in ("razorpay_key_id", "razorpay_key_secret", "razorpay_webhook_secret")
                 if getattr(self, name) is None
             ]
             if missing:
-                raise ValueError(f"AGENTPAY_RAIL=razorpay needs {', '.join(missing)}")
+                raise ValueError(f"reaching Razorpay needs {', '.join(missing)}")
         return self
 
     @model_validator(mode="after")

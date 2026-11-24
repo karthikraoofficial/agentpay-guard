@@ -50,7 +50,7 @@ from core.domain.parties import (
 )
 from core.domain.parties import TenantId as TenantId  # re-exported for adapters
 from core.domain.payments import Payment, PaymentId, RailEvent
-from core.domain.rails import RailToken
+from core.domain.rails import RailName, RailToken
 from core.domain.refunds import Refund, RefundId, RefundStatus
 from core.domain.voids import Void
 from core.domain.webhooks import TenantEventType, WebhookEndpoint
@@ -578,23 +578,27 @@ class TenantDirectory(Protocol):
         ...
 
     def scheduled_payments(
-        self, created_before: datetime, now: datetime
+        self, created_before: datetime, now: datetime, rail: RailName | None = None
     ) -> list[tuple[TenantId, PaymentId]]:
         """Payments still scheduled that were made before `created_before` and are not in
         a Pre-debit notice period at `now`, in every Tenant, oldest first: what the
-        reconciliation sweep asks the rail about."""
+        reconciliation sweep asks the rail about. Only those on `rail`, if given."""
         ...
 
     def pending_refunds(
-        self, created_before: datetime
+        self, created_before: datetime, rail: RailName | None = None
     ) -> list[tuple[TenantId, PaymentId, RefundId]]:
         """Refunds still pending that were asked for before `created_before`, in every
-        Tenant, oldest first: what the reconciliation sweep asks the rail about (#209)."""
+        Tenant, oldest first: what the reconciliation sweep asks the rail about (#209).
+        Only those of Payments on `rail`, if given."""
         ...
 
-    def due_debits(self, now: datetime) -> list[tuple[TenantId, PaymentId]]:
+    def due_debits(
+        self, now: datetime, rail: RailName | None = None
+    ) -> list[tuple[TenantId, PaymentId]]:
         """Payments whose notice period ended by `now` and whose card has not been
-        debited yet, in every Tenant, earliest first: what the debit step debits."""
+        debited yet, in every Tenant, earliest first: what the debit step debits. Only
+        those on `rail`, if given."""
         ...
 
     def notice_ended_by_control(self, tenant_id: TenantId) -> list[PaymentId]:

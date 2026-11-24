@@ -176,7 +176,7 @@ def create_payment(
             mandate_status=mandate.status(now),
             agent_disabled=agent is None or agent.status == "disabled",
             rail_token=mandate.rail_token,
-            rail=settings.rail,
+            rails=settings.reachable_rails,
             now=now,
         )
         if refusal is not None:
@@ -194,7 +194,7 @@ def create_payment(
             decision_id=decision.decision_id,
             mandate_id=mandate.mandate_id,
             amount=decision.amount,
-            rail=settings.rail,
+            rail=mandate.rail_token.rail,
             status="scheduled",
             created_at=now,
             updated_at=now,

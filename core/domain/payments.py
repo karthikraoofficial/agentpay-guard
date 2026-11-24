@@ -117,11 +117,12 @@ def payment_refusal(
     mandate_status: MandateStatus,
     agent_disabled: bool,
     rail_token: RailToken | None,
-    rail: RailName,
+    rails: frozenset[RailName],
     now: datetime,
 ) -> PaymentRefusal | None:
     """Why the Decision can't be paid at `now`, or None if it can. `payable_until` is None
-    unless the Decision was allowed or its step-up approved."""
+    unless the Decision was allowed or its step-up approved. `rails` are the rails this
+    deployment reaches; the Payment goes to its Rail token's rail (ADR-0033)."""
     if payable_until is None:
         return "DECISION_NOT_PAYABLE"
     if already_paid:
@@ -130,7 +131,7 @@ def payment_refusal(
         return "PAYMENT_WINDOW_CLOSED"
     if stop := debit_refusal(mandate_status=mandate_status, agent_disabled=agent_disabled):
         return stop
-    if rail_token is None or rail_token.rail != rail:
+    if rail_token is None or rail_token.rail not in rails:
         return "MANDATE_NOT_PAYABLE"
     return None
 

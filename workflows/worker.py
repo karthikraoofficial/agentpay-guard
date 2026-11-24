@@ -10,6 +10,7 @@ next worker from its history.
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
@@ -29,6 +30,7 @@ from adapters.webhooks.sender import HttpWebhookSender
 from agents.dispute_narrative import NarrativeWriter as DisputeNarrativeWriter
 from core.debits import run_debit_step
 from core.demo_switches import SwitchedRail, switchable_writer
+from core.domain.rails import RailName
 from core.evidence import NarrativeWriter
 from core.model_spend import CappedGateway, daily_caps
 from core.ops_metrics import BacklogStore, report_backlog_once, report_sweep
@@ -41,7 +43,7 @@ from core.ports import (
     TenantId,
     UnitOfWork,
 )
-from core.reconcile import SweepStore, sweep
+from core.reconcile import SweepResult, SweepStore, sweep
 from core.relay import relay_once
 from core.settings import Settings, get_settings
 from core.tenant_webhooks import TenantWebhooks
@@ -135,49 +137,63 @@ async def backlog_forever(
         await asyncio.sleep(interval_seconds)
 
 
-def sweep_rail(settings: Settings, store: UnitOfWork) -> PaymentRail | None:
-    """The rail the sweep asks, or None when there is nothing to ask: MockRail keeps its
-    charges inside the API process, so a worker's own MockRail would know none of them
-    and the sweep would wrongly fail every Payment. With mock settle on (ADR-0019), the
-    sweep asks a rail that captures from the stored Payment instead."""
-    if settings.rail == "mock":
-        if settings.mock_settle_after_seconds is None:
-            return None
-        settling = SettlingMockRail(store)
-        if settings.demo_controls_tenant_id is None:
-            return settling
-        # Demo control switches reach the debit step and the sweep too (ADR-0032).
-        return SwitchedRail(
-            settling,
-            store,
-            TenantId(settings.demo_controls_tenant_id),
-            SystemClock(),
-            timedelta(seconds=settings.demo_rail_outage_seconds),
-        )
-    return build_rail(settings)
+def sweep_rails(settings: Settings, store: UnitOfWork) -> dict[RailName, PaymentRail]:
+    """Each rail the debit step and the sweep ask, by name (ADR-0033). The mock rail is
+    left out without mock settle: MockRail keeps its charges inside the API process, so a
+    worker's own MockRail would know none of them and the sweep would wrongly fail every
+    mock Payment. With mock settle on (ADR-0019), it asks a rail that captures from the
+    stored Payment instead."""
+    rails: dict[RailName, PaymentRail] = {}
+    for name in sorted(settings.reachable_rails):
+        if name != "mock":
+            rails[name] = build_rail(name, settings)
+        elif settings.mock_settle_after_seconds is not None:
+            settling: PaymentRail = SettlingMockRail(store)
+            if settings.demo_controls_tenant_id is not None:
+                # Demo control switches reach the debit step and the sweep too (ADR-0032).
+                settling = SwitchedRail(
+                    settling,
+                    store,
+                    TenantId(settings.demo_controls_tenant_id),
+                    SystemClock(),
+                    timedelta(seconds=settings.demo_rail_outage_seconds),
+                )
+            rails[name] = settling
+    return rails
 
 
-def sweep_age(settings: Settings) -> timedelta:
-    """How old a scheduled Payment is before the sweep asks about it."""
-    if settings.mock_settle_after_seconds is not None:
+def sweep_age(settings: Settings, rail: RailName) -> timedelta:
+    """How old a scheduled Payment on `rail` is before the sweep asks about it."""
+    if rail == "mock" and settings.mock_settle_after_seconds is not None:
         return timedelta(seconds=settings.mock_settle_after_seconds)
     return timedelta(seconds=settings.reconcile_after_seconds)
 
 
 async def sweep_forever(
-    store: SweepStore, rail: PaymentRail, clock: Clock, settings: Settings, telemetry: Telemetry
+    store: SweepStore,
+    rails: Mapping[RailName, PaymentRail],
+    clock: Clock,
+    settings: Settings,
+    telemetry: Telemetry,
 ) -> None:
-    """Until cancelled, each interval: debit the Payments whose Pre-debit notice period
-    has ended, then reconcile the scheduled ones, and report the sweep's metrics. Both are
-    synchronous, so each pass runs in a thread."""
-    older_than = sweep_age(settings)
+    """Until cancelled, each interval and for each rail: debit the Payments whose Pre-debit
+    notice period has ended, then reconcile the scheduled ones; then report the sweep's
+    metrics, added up over the rails. Every pass is synchronous, so each runs in a thread."""
+    demo = settings.demo_controls_tenant_id
+    demo_tenant = None if demo is None else TenantId(demo)  # Demo controls, ADR-0032
     while True:
-        demo = settings.demo_controls_tenant_id
-        demo_tenant = None if demo is None else TenantId(demo)  # Demo controls, ADR-0032
-        debits = await asyncio.to_thread(run_debit_step, store, rail, clock, demo_tenant)
-        if debits.checked:
-            log.info("debit step checked %d Payment(s), %d error(s)", debits.checked, debits.errors)
-        result = await asyncio.to_thread(sweep, store, rail, clock, older_than)
+        result = SweepResult(checked=0, errors=0)
+        for name, rail in rails.items():
+            debits = await asyncio.to_thread(run_debit_step, store, rail, clock, demo_tenant, name)
+            if debits.checked:
+                log.info(
+                    "%s debit step checked %d Payment(s), %d error(s)",
+                    name,
+                    debits.checked,
+                    debits.errors,
+                )
+            older_than = sweep_age(settings, name)
+            result += await asyncio.to_thread(sweep, store, rail, clock, older_than, name)
         report_sweep(telemetry, result)
         if result.checked:
             log.info(
@@ -219,11 +235,11 @@ async def main() -> None:
                 ),
                 backlog_forever(store, telemetry, clock, BACKLOG_INTERVAL_SECONDS),
             ]
-            rail = sweep_rail(settings, store)
-            if rail is None:
-                log.info("reconciliation sweep off: mock Payments stay scheduled (no mock settle)")
-            else:
-                loops.append(sweep_forever(store, rail, clock, settings, telemetry))
+            rails = sweep_rails(settings, store)
+            if "mock" in settings.reachable_rails and "mock" not in rails:
+                log.info("mock rail not swept: mock Payments stay scheduled (no mock settle)")
+            if rails:
+                loops.append(sweep_forever(store, rails, clock, settings, telemetry))
             try:
                 await asyncio.gather(*loops)
             finally:

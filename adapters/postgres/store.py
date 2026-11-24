@@ -73,7 +73,7 @@ from core.domain.parties import (
     PayerId,
 )
 from core.domain.payments import Payment, PaymentId, RailEvent
-from core.domain.rails import RailToken
+from core.domain.rails import RailName, RailToken
 from core.domain.refunds import Refund, RefundId
 from core.domain.voids import Void
 from core.domain.webhooks import WebhookEndpoint
@@ -991,7 +991,7 @@ class PostgresStore:
             return conn.execute(statement).first() is not None
 
     def scheduled_payments(
-        self, created_before: datetime, now: datetime
+        self, created_before: datetime, now: datetime, rail: RailName | None = None
     ) -> list[tuple[TenantId, PaymentId]]:
         p = payments.c
         query = (
@@ -1003,24 +1003,32 @@ class PostgresStore:
             )
             .order_by(p.created_at, p.payment_id)
         )
+        if rail is not None:
+            query = query.where(p.rail == rail)
         with self._engine.connect() as conn:
             rows = conn.execute(query).all()
         return [(TenantId(t), PaymentId(i)) for t, i in rows]
 
     def pending_refunds(
-        self, created_before: datetime
+        self, created_before: datetime, rail: RailName | None = None
     ) -> list[tuple[TenantId, PaymentId, RefundId]]:
-        r = refunds.c
+        r, p = refunds.c, payments.c
         query = (
             select(r.tenant_id, r.payment_id, r.refund_id)
             .where(r.status == "pending", r.created_at < created_before)
             .order_by(r.created_at, r.refund_id)
         )
+        if rail is not None:
+            query = query.join(
+                payments, (p.tenant_id == r.tenant_id) & (p.payment_id == r.payment_id)
+            ).where(p.rail == rail)
         with self._engine.connect() as conn:
             rows = conn.execute(query).all()
         return [(TenantId(t), PaymentId(p), RefundId(i)) for t, p, i in rows]
 
-    def due_debits(self, now: datetime) -> list[tuple[TenantId, PaymentId]]:
+    def due_debits(
+        self, now: datetime, rail: RailName | None = None
+    ) -> list[tuple[TenantId, PaymentId]]:
         p = payments.c
         query = (
             select(p.tenant_id, p.payment_id)
@@ -1031,6 +1039,8 @@ class PostgresStore:
             )
             .order_by(p.debit_after, p.payment_id)
         )
+        if rail is not None:
+            query = query.where(p.rail == rail)
         with self._engine.connect() as conn:
             rows = conn.execute(query).all()
         return [(TenantId(t), PaymentId(i)) for t, i in rows]

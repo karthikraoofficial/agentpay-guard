@@ -298,7 +298,7 @@ def test_the_worker_sweeps_on_its_interval(
         asyncio.run(
             worker.sweep_forever(
                 payments.api.store,
-                payments.api.rail,
+                {"mock": payments.api.rail},
                 payments.api.clock,
                 settings,
                 payments.api.telemetry,
@@ -328,7 +328,9 @@ def test_each_worker_sweep_reports_its_metrics(
     monkeypatch.setattr(worker.asyncio, "sleep", stop)
     with pytest.raises(_Stop):
         asyncio.run(
-            worker.sweep_forever(api.store, api.rail, api.clock, make_settings(), api.telemetry)
+            worker.sweep_forever(
+                api.store, {"mock": api.rail}, api.clock, make_settings(), api.telemetry
+            )
         )
 
     telemetry = api.telemetry
@@ -348,7 +350,7 @@ def test_each_worker_sweep_reports_its_metrics(
 def test_the_worker_does_not_sweep_the_mock_rail(api: Api) -> None:
     from workflows import worker
 
-    assert worker.sweep_rail(make_settings(rail="mock"), api.store) is None
+    assert worker.sweep_rails(make_settings(rail="mock"), api.store) == {}
 
 
 def test_the_worker_sweeps_razorpay(api: Api) -> None:
@@ -362,4 +364,4 @@ def test_the_worker_sweeps_razorpay(api: Api) -> None:
         razorpay_webhook_secret="whsec",  # noqa: S106
     )
 
-    assert isinstance(worker.sweep_rail(settings, api.store), RazorpayRail)
+    assert isinstance(worker.sweep_rails(settings, api.store)["razorpay"], RazorpayRail)

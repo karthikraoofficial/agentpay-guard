@@ -31,6 +31,7 @@ from core.domain.parties import (
     PayerId,
 )
 from core.domain.payments import Payment, PaymentId, RailEvent
+from core.domain.rails import RailName
 from core.domain.refunds import Refund, RefundId
 from core.domain.voids import Void
 from core.domain.webhooks import WebhookEndpoint
@@ -570,7 +571,7 @@ class InMemoryUnitOfWork:
             return True
 
     def scheduled_payments(
-        self, created_before: datetime, now: datetime
+        self, created_before: datetime, now: datetime, rail: RailName | None = None
     ) -> list[tuple[TenantId, PaymentId]]:
         due = [
             (p.created_at, tenant_id, p.payment_id)
@@ -579,26 +580,31 @@ class InMemoryUnitOfWork:
             if p.status == "scheduled"
             and p.created_at < created_before
             and (p.debit_after is None or p.debit_after <= now)
+            and rail in (None, p.rail)
         ]
         return [(tenant_id, payment_id) for _, tenant_id, payment_id in sorted(due)]
 
     def pending_refunds(
-        self, created_before: datetime
+        self, created_before: datetime, rail: RailName | None = None
     ) -> list[tuple[TenantId, PaymentId, RefundId]]:
         due = [
             (r.created_at, tenant_id, r.payment_id, r.refund_id)
             for tenant_id, data in list(self._tenants.items())
             for r in data.refunds.values()
-            if r.status == "pending" and r.created_at < created_before
+            if r.status == "pending"
+            and r.created_at < created_before
+            and rail in (None, data.payments[r.payment_id].rail)
         ]
         return [(t, p, r) for _, t, p, r in sorted(due)]
 
-    def due_debits(self, now: datetime) -> list[tuple[TenantId, PaymentId]]:
+    def due_debits(
+        self, now: datetime, rail: RailName | None = None
+    ) -> list[tuple[TenantId, PaymentId]]:
         due = [
             (p.debit_after, tenant_id, p.payment_id)
             for tenant_id, data in list(self._tenants.items())
             for p in data.payments.values()
-            if p.debit_due(now)
+            if p.debit_due(now) and rail in (None, p.rail)
         ]
         return [(tenant_id, payment_id) for _, tenant_id, payment_id in sorted(due)]
 
