@@ -23,7 +23,8 @@ from adapters.webhooks.secret_box import secret_box
 from api.admin import create_key, create_tenant, replay_record, verify_chain
 from api.main import create_app
 from core.domain.parties import ALL_SCOPES, ApiKeyScope, hash_api_key
-from core.ports import Clock, TenantId, UnitOfWork, WebhookUnreachable
+from core.domain.rails import RailName
+from core.ports import Clock, PaymentRail, TenantId, UnitOfWork, WebhookUnreachable
 from core.settings import Settings
 from core.tenant_webhooks import TenantWebhooks
 from tests.conftest import make_settings
@@ -84,6 +85,19 @@ class Api:
             gateway=self.gateway,
             workflow=self.workflow,
             rail=self.rail,
+        )
+        self.client = TestClient(app)
+
+    def use_rails(self, settings: Settings, rails: Mapping[RailName, PaymentRail]) -> None:
+        """Serve with `settings`, reaching each of `rails` (ADR-0033)."""
+        app = create_app(
+            settings.model_copy(update={"policy_packs_dir": self.packs}),
+            store=self.store,
+            clock=self.clock,
+            telemetry=self.telemetry,
+            gateway=self.gateway,
+            workflow=self.workflow,
+            rails=rails,
         )
         self.client = TestClient(app)
 

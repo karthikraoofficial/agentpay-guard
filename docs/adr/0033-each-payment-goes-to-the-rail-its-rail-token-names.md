@@ -1,0 +1,16 @@
+# Each Payment goes to the rail its Rail token names
+
+Until now a deployment had one rail. `AGENTPAY_RAIL` chose it, a Mandate whose Rail token was on another rail couldn't be paid, and everything that pretends on the mock rail (Mock settle, the mock Pre-debit notice period, Demo controls) was refused unless that one rail was mock. The hosted demo is moving to simulated and real journeys side by side (PRD #298): a visitor picks a mock run or a real Razorpay test-mode run on the same deployment. So a deployment now reaches a **set** of rails (`AGENTPAY_RAILS`, defaulting to just `AGENTPAY_RAIL`), and **each Payment goes to the rail its Mandate's Rail token names** (#300). The Payment records that rail, and its later calls follow it.
+
+- **API.** `RoutedRail` is the one `PaymentRail` the routes see. A new charge or a debit goes by the Rail token's rail. A lookup or a refund goes by the rail recorded on the stored Payment. A Rail token on a rail the deployment doesn't reach is still refused with `MANDATE_NOT_PAYABLE`, so no rail call is made.
+- **Worker.** The debit step and the reconciliation sweep run once per rail, and each pass lists only that rail's Payments and Refunds. Each rail has its own sweep age and lookup lag. The mock rail's sweep runs only with Mock settle on, as before, because a worker can't see the API's in-process mock charges. Without Mock settle, mock Payments stay scheduled while Razorpay's are still swept. The sweep's metrics add up every rail's pass.
+- **Mock-only behaviour is per Payment, not per deployment.** This amends ADR-0032's "only on the mock rail" and ADR-0019's "refused with any real rail". Settings now ask only that the mock rail be **reachable**. `SwitchedRail` wraps only the mock rail, so a switch or the simulated outage never reaches a Razorpay call. The rail switches (rail declining, lose a payment) refuse a Mandate whose Rail token is on a real rail, and ending a notice period refuses a Payment on a real rail, both with 409 `NOT_MOCK_RAIL`. AI off, ending a Consent request and ending a Payment window touch no rail, so they still work on any Mandate.
+
+We considered two other shapes. **Two deployments** (one mock, one real) would keep the old rule, but the demo page would then talk to two APIs and two Demo Tenants, and a visitor's runs would land in two Audit chains. **Passing the rail into every port method** would make each caller look the Payment up first. Routing behind the port keeps callers as they were, as ADR-0012 expected for the later swap to per-Tenant accounts.
+
+## Consequences
+
+- **A deployment with one rail behaves as before.** `AGENTPAY_RAILS` is optional, and existing settings mean the same.
+- **Reaching Razorpay needs its three settings whichever rail is first,** and only test keys are accepted (ADR-0012).
+- **A lookup or refund on a deployment with several rails reads the Payment first** to find its rail. That is one extra read per rail call, outside the caller's transaction.
+- **A Payment's rail never changes,** so a Payment made before a deployment drops a rail can't be refunded or reconciled until it reaches that rail again. Its calls answer `RailUnavailable`, which leaves the Refund pending and the Payment scheduled rather than guessing.

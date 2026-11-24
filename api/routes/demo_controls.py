@@ -1,11 +1,14 @@
 """Demo controls (#280, ADR-0032): end one of the Demo Tenant's timers now, so a visitor
 sees an expiry journey in seconds.
 
-Mounted only when `AGENTPAY_DEMO_CONTROLS_TENANT_ID` is set, which settings allow only on
-the mock rail. Each endpoint needs the `manage` scope and an idempotency key, and answers
-404 for any Tenant but the Demo Tenant. A control never moves a clock or edits a Mandate,
-Decision or Audit record: it writes its own `demo_controls` row and Audit record, and the
-deadline it ends is read as "the real one, or the control's time if that came first".
+Mounted only when `AGENTPAY_DEMO_CONTROLS_TENANT_ID` is set, which settings allow only
+when the mock rail is reachable. A control that touches the rail acts on mock-rail Payments
+only: on a Mandate or Payment on a real rail it answers 409 `NOT_MOCK_RAIL` (ADR-0033), and
+the rail outage reaches only the mock rail. Each endpoint needs the `manage` scope and an
+idempotency key, and answers 404 for any Tenant but the Demo Tenant. A control never
+moves a clock or edits a Mandate, Decision or Audit record: it writes its own
+`demo_controls` row and Audit record, and the deadline it ends is read as "the real one,
+or the control's time if that came first".
 
 - `POST /v1/demo/consent-requests/{id}/expire`: the request resolves `expired`, through the
   same transition the timer runs, with `resolved_via = demo_control`.
@@ -67,6 +70,11 @@ def _out(control: DemoControl) -> DemoControlOut:
         at=control.at,
         audit_record_id=control.audit_record_id,
     )
+
+
+# The switches that change what the rail answers, so never on a real rail (ADR-0033).
+_RAIL_SWITCHES: frozenset[DemoControlKind] = frozenset({"rail_declining", "lose_payment"})
+_NOT_MOCK_RAIL = "Demo controls act only on the mock rail, never on a real Rail charge."
 
 
 def _demo_only(tenant: TenantId, settings: Settings, what: str) -> None:
@@ -147,6 +155,8 @@ def expire_notice(
         payment = tx.lock_payment(PaymentId(payment_id))
         if payment is None:
             raise ApiError(404, "NOT_FOUND", f"No Payment {payment_id}.")
+        if payment.rail != "mock":
+            raise ApiError(409, "NOT_MOCK_RAIL", _NOT_MOCK_RAIL)
         if payment.status != "scheduled" or payment.rail_payment_id is not None:
             raise ApiError(
                 409, "NOTICE_NOT_RUNNING", "This Payment isn't waiting out a notice period."
@@ -176,6 +186,9 @@ def _mandate_switch(
         mandate = tx.lock_mandate(MandateId(mandate_id))
         if mandate is None:
             raise ApiError(404, "NOT_FOUND", f"No Mandate {mandate_id}.")
+        on_rail = None if mandate.rail_token is None else mandate.rail_token.rail
+        if kind in _RAIL_SWITCHES and on_rail not in (None, "mock"):
+            raise ApiError(409, "NOT_MOCK_RAIL", _NOT_MOCK_RAIL)
         existing = tx.get_demo_control(kind, mandate.mandate_id)
         if existing is not None:
             return 200, _out(existing)

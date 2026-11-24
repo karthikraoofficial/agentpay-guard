@@ -22,6 +22,7 @@ from typing import Protocol
 
 from core.charges import apply_charge
 from core.domain.decisions import decision_time
+from core.domain.rails import RailName
 from core.ports import (
     Clock,
     PaymentRail,
@@ -52,11 +53,28 @@ class SweepResult:
     unsettled_payments: int = 0
     unsettled_refunds: int = 0
 
+    def __add__(self, other: "SweepResult") -> "SweepResult":
+        """Two rails' passes as one (ADR-0033), so the metrics count every rail."""
+        return SweepResult(
+            checked=self.checked + other.checked,
+            errors=self.errors + other.errors,
+            unsettled_payments=self.unsettled_payments + other.unsettled_payments,
+            unsettled_refunds=self.unsettled_refunds + other.unsettled_refunds,
+        )
 
-def sweep(store: SweepStore, rail: PaymentRail, clock: Clock, older_than: timedelta) -> SweepResult:
+
+def sweep(
+    store: SweepStore,
+    rail: PaymentRail,
+    clock: Clock,
+    older_than: timedelta,
+    on_rail: RailName | None = None,
+) -> SweepResult:
+    """Reconcile the Payments and Refunds on `on_rail` (every rail if None) with `rail`,
+    which must be the rail they are on (ADR-0033)."""
     now = decision_time(clock.now())
     # Never sooner than the rail can see a new charge, or it would fail one it just made.
-    due = store.scheduled_payments(now - max(older_than, rail.lookup_lag), now)
+    due = store.scheduled_payments(now - max(older_than, rail.lookup_lag), now, on_rail)
     errors = 0
     for tenant_id, payment_id in due:
         try:
@@ -88,19 +106,23 @@ def sweep(store: SweepStore, rail: PaymentRail, clock: Clock, older_than: timede
                 exc_info=True,
             )
     created_before = now - max(older_than, rail.lookup_lag)
-    refunds = _sweep_refunds(store, rail, created_before, now)
+    refunds = _sweep_refunds(store, rail, created_before, now, on_rail)
     return SweepResult(
         checked=len(due) + refunds.checked,
         errors=errors + refunds.errors,
-        unsettled_payments=len(store.scheduled_payments(created_before, now)),
-        unsettled_refunds=len(store.pending_refunds(created_before)),
+        unsettled_payments=len(store.scheduled_payments(created_before, now, on_rail)),
+        unsettled_refunds=len(store.pending_refunds(created_before, on_rail)),
     )
 
 
 def _sweep_refunds(
-    store: SweepStore, rail: PaymentRail, created_before: datetime, now: datetime
+    store: SweepStore,
+    rail: PaymentRail,
+    created_before: datetime,
+    now: datetime,
+    on_rail: RailName | None,
 ) -> SweepResult:
-    due = store.pending_refunds(created_before)
+    due = store.pending_refunds(created_before, on_rail)
     errors = 0
     for tenant_id, payment_id, refund_id in due:
         try:

@@ -135,7 +135,7 @@ def test_the_worker_sweeps_the_mock_rail_only_with_mock_settle(api: Api) -> None
     off = make_settings(rail="mock")
     on = make_settings(rail="mock", mock_settle_after_seconds=60)
 
-    assert worker.sweep_rail(off, api.store) is None
-    assert isinstance(worker.sweep_rail(on, api.store), SettlingMockRail)
-    assert worker.sweep_age(on) == timedelta(seconds=60)
-    assert worker.sweep_age(off) == timedelta(seconds=off.reconcile_after_seconds)
+    assert worker.sweep_rails(off, api.store) == {}
+    assert isinstance(worker.sweep_rails(on, api.store)["mock"], SettlingMockRail)
+    assert worker.sweep_age(on, "mock") == timedelta(seconds=60)
+    assert worker.sweep_age(off, "mock") == timedelta(seconds=off.reconcile_after_seconds)

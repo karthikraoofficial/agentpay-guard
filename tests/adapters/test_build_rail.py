@@ -31,14 +31,14 @@ def _book(rail: object) -> object:
 def test_the_mock_rail_books_a_notice_period_when_one_is_set() -> None:
     settings = make_settings(mock_notice_seconds=120, mock_settle_after_seconds=60)
 
-    charge = _book(build_rail(settings))
+    charge = _book(build_rail("mock", settings))
 
     assert charge.debit_after is not None  # type: ignore[attr-defined]
     assert charge.rail_payment_id is None  # type: ignore[attr-defined]  # not debited yet
 
 
 def test_without_one_the_mock_rail_debits_at_once() -> None:
-    charge = _book(build_rail(make_settings()))
+    charge = _book(build_rail("mock", make_settings()))
 
     assert charge.debit_after is None  # type: ignore[attr-defined]
     assert charge.rail_payment_id is not None  # type: ignore[attr-defined]

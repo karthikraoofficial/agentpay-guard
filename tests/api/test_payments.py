@@ -468,4 +468,4 @@ def test_the_app_charges_through_razorpay_when_it_is_the_rail() -> None:
         razorpay_webhook_secret="whsec",  # noqa: S106
     )
 
-    assert isinstance(create_app(settings).state.rail, RazorpayRail)
+    assert isinstance(create_app(settings).state.rail.rails["razorpay"], RazorpayRail)

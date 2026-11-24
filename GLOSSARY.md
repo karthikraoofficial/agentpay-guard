@@ -183,11 +183,11 @@ Asking the rail how a Payment or Refund ended when no Rail webhook has said so a
 _Avoid_: Retry, polling
 
 **Mock settle**:
-A demo-only setting under which Reconciliation captures every debited mock Payment once it is old enough, so a hosted demo can dispute a captured Payment. It is refused with any real rail (ADR-0019).
+A demo-only setting under which Reconciliation captures every debited mock Payment once it is old enough, so a hosted demo can dispute a captured Payment. It acts on mock-rail Payments only, and needs the mock rail reachable (ADR-0019, ADR-0033).
 _Avoid_: Fake capture, auto-capture
 
 **Rail token**:
-The rail's reference to the Payer's payment instrument, bound to a Mandate when it is granted, shown only in masked form. Never the card number or UPI PIN.
+The rail's reference to the Payer's payment instrument, bound to a Mandate when it is granted, shown only in masked form. Never the card number or UPI PIN. It names its rail, and each Payment goes to that rail, so one deployment can reach several (ADR-0033).
 _Avoid_: Card, payment method, credentials
 
 ## Signals
@@ -351,5 +351,5 @@ The small server beside the API (`python -m demo_runner`) that plays Scenarios f
 _Avoid_: Demo server, demo backend, demo proxy
 
 **Demo control**:
-An action, for the Demo Tenant on the mock rail only, that either ends one timer now (a Consent request, a Payment window or a Pre-debit notice period) or forces a failure (a **switch**: AI off, rail declining, lose a payment, rail down, tamper with a copy). A timer's deadline becomes the real one or the control's time, whichever is first. Each control appends its own `demo_controls` row and Audit record, except tamper with a copy, which only reads. None moves a clock or edits a Mandate, Decision or Audit record (ADR-0032).
+An action, for the Demo Tenant only, that either ends one timer now (a Consent request, a Payment window or a Pre-debit notice period) or forces a failure (a **switch**: AI off, rail declining, lose a payment, rail down, tamper with a copy). A timer's deadline becomes the real one or the control's time, whichever is first. Each control appends its own `demo_controls` row and Audit record, except tamper with a copy, which only reads. None moves a clock or edits a Mandate, Decision or Audit record (ADR-0032). A control that touches the rail acts on mock-rail Payments only, and refuses a Mandate or Payment on a real rail (ADR-0033).
 _Avoid_: Time travel, clock override, debug switch

@@ -1,6 +1,6 @@
 """FastAPI entry point. OpenAPI docs are served at /docs."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from datetime import timedelta
 
@@ -13,7 +13,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from adapters.gateways import build_gateway
 from adapters.otel.telemetry import OtelTelemetry
 from adapters.postgres.store import PostgresStore
-from adapters.rails import build_rail
+from adapters.rails import build_rails
 from adapters.system_clock import SystemClock
 from adapters.webhooks.secret_box import secret_box as build_secret_box
 from api import errors
@@ -36,10 +36,12 @@ from api.routes import (
 )
 from core.demo_switches import SwitchedRail
 from core.domain.parties import TenantId
+from core.domain.rails import RailName
 from core.model_spend import CappedGateway, daily_caps
 from core.policy.packs import load_active_pack
 from core.ports import Clock, ModelGateway, PaymentRail, SecretBox, Telemetry, Workflow
 from core.rail_breaker import RailBreaker
+from core.rail_routing import RoutedRail
 from core.settings import Settings, get_settings
 from workflows.client import TemporalWorkflow
 
@@ -59,6 +61,7 @@ def create_app(
     gateway: ModelGateway | None = None,
     workflow: Workflow | None = None,
     rail: PaymentRail | None = None,
+    rails: Mapping[RailName, PaymentRail] | None = None,
     secret_box: SecretBox | None = None,
 ) -> FastAPI:
     """Build the app from explicit settings, so tests need no global state. Without a
@@ -94,16 +97,21 @@ def create_app(
     # Only resolutions signal from here (best effort); the worker's relay starts workflows.
     app.state.workflow = workflow or TemporalWorkflow.from_settings(settings)
     app.state.secret_box = secret_box or build_secret_box(settings)
-    app.state.rail = rail or build_rail(settings, app.state.store)
-    if settings.demo_controls_tenant_id is not None:
-        # Demo control switches (ADR-0032): every other Tenant's calls pass straight through.
-        app.state.rail = SwitchedRail(
-            app.state.rail,
+    reached: dict[RailName, PaymentRail] = dict(
+        rails or ({settings.rail: rail} if rail else build_rails(settings, app.state.store))
+    )
+    if settings.demo_controls_tenant_id is not None and "mock" in reached:
+        # Demo control switches (ADR-0032) act on the mock rail only (ADR-0033); every
+        # other Tenant's calls pass straight through.
+        reached["mock"] = SwitchedRail(
+            reached["mock"],
             app.state.store,
             TenantId(settings.demo_controls_tenant_id),
             app.state.clock,
             timedelta(seconds=settings.demo_rail_outage_seconds),
         )
+    # Each call goes to the rail its Payment is on (ADR-0033).
+    app.state.rail = RoutedRail(reached, app.state.store)
     app.state.rail_breaker = RailBreaker(
         settings.rail_breaker_failures,
         timedelta(seconds=settings.rail_breaker_open_seconds),

@@ -6,7 +6,7 @@ A control never moves a clock. Shifting time would touch every deadline at once,
 
 The gate has three parts:
 
-- `AGENTPAY_DEMO_CONTROLS_TENANT_ID` names the one Tenant. Settings refuse it with any rail but mock, so no control can touch real money.
+- `AGENTPAY_DEMO_CONTROLS_TENANT_ID` names the one Tenant. Settings refuse it with any rail but mock, so no control can touch real money. _(Updated: #300. A deployment can now reach several rails, so settings ask only that the mock rail be reachable, and each control that touches the rail refuses a Mandate or Payment on a real rail; see ADR-0033.)_
 - The `/v1/demo/...` endpoints are mounted only when it is set. They need the `manage` scope and an idempotency key, and answer 404 for any other Tenant.
 - Deadline checks read a control only through `core.demo_controls.control_for`, which answers None for any other Tenant, whatever the table holds. A test proves a non-Demo Tenant's deadlines ignore the table.
 

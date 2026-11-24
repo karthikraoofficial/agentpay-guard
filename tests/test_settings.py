@@ -102,3 +102,48 @@ def test_the_mock_notice_period_is_for_the_mock_rail_with_mock_settle() -> None:
         make_settings(mock_notice_seconds=120)
     with pytest.raises(ValidationError, match="AGENTPAY_MOCK_NOTICE_SECONDS"):
         make_settings(mock_notice_seconds=120, **RAZORPAY)
+
+
+def test_a_deployment_reaches_only_its_rail_unless_it_lists_more() -> None:
+    assert make_settings().reachable_rails == frozenset({"mock"})
+    assert make_settings(**RAZORPAY).reachable_rails == frozenset({"razorpay"})
+
+
+def test_one_deployment_can_reach_the_mock_rail_and_razorpay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The hosted demo runs simulated and real journeys side by side (#300)."""
+    monkeypatch.setenv("AGENTPAY_RAILS", "mock, razorpay")
+    keys = {k: v for k, v in RAZORPAY.items() if k != "rail"}
+
+    settings = make_settings(**keys)
+
+    assert settings.rail == "mock"
+    assert settings.reachable_rails == frozenset({"mock", "razorpay"})
+
+
+def test_reaching_razorpay_needs_its_keys_whichever_rail_is_first() -> None:
+    with pytest.raises(ValidationError, match="AGENTPAY_RAZORPAY_KEY_ID"):
+        make_settings(rails=("mock", "razorpay"))
+
+
+def test_the_listed_rails_include_the_main_one() -> None:
+    with pytest.raises(ValidationError, match="AGENTPAY_RAILS"):
+        make_settings(**RAZORPAY, rails=("mock",))
+
+
+def test_mock_only_settings_need_the_mock_rail_reachable_not_first() -> None:
+    """Demo controls, mock settle and the mock notice period act on mock-rail Payments only
+    (ADR-0033), so a deployment that also reaches Razorpay may still use them."""
+    both = {**RAZORPAY, "rails": ("razorpay", "mock")}
+
+    settings = make_settings(
+        **both,
+        demo_controls_tenant_id="ten_demo",
+        mock_settle_after_seconds=60,
+        mock_notice_seconds=120,
+    )
+
+    assert settings.demo_controls_tenant_id == "ten_demo"
+    with pytest.raises(ValidationError, match="AGENTPAY_MOCK_SETTLE_AFTER_SECONDS"):
+        make_settings(**RAZORPAY, mock_settle_after_seconds=60)
