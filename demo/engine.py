@@ -150,6 +150,21 @@ class Verification(BaseModel):
     chain: ChainView
 
 
+class IntentView(BaseModel):
+    """A cart check as the Tenant reads it: the tool tells the Agent only the check's id,
+    never its verdict (api/routes/intents.py), so the engine reads it with the tenant key."""
+
+    intent_id: str
+    verdict: str
+    # Why the check came back unknown without the model's word, e.g. capped (the Model
+    # spend cap), disabled (the AI is off), timeout or error.
+    failure_cause: str | None = None
+    # The verdict the Scenario scripted for this check, which CI plays (#279).
+    scripted: str | None = None
+    # The live verdict isn't the scripted one: the run carries on with the live answer.
+    differs: bool = False
+
+
 class ConsentView(BaseModel):
     consent_request_id: str
     status: str
@@ -165,6 +180,8 @@ class Card(BaseModel):
     chat: list[ChatLine]
     call: Call | None
     decision: DecisionView | None = None
+    # A cart check step: its verdict. None if that read failed.
+    intent: IntentView | None = None
     # A Payer step: the Consent link Asha answers on (the consent screen, ADR-0008).
     link: str | None = None
     # The Consent request as this step left it.
@@ -556,6 +573,9 @@ class Run:
         elif step.expect_refusal:
             raise StepFailed(tool, f"expected {step.expect_refusal}, but it was allowed")
         decision = await self._with_rules(self._remember(body) if refused is None else None)
+        intent = None
+        if tool == "check_intent" and refused is None:
+            intent = await self._intent_view(index, str(body["intent_id"]))
         waiting = step.until_status is not None and body.get("status") not in step.until_status
         request = {k: v for k, v in arguments.items() if k != "idempotency_key"}
         return Card(
@@ -564,9 +584,36 @@ class Run:
             chat=step.chat,
             call=Call(kind="tool", name=tool, request=request, response=body),
             decision=decision,
+            intent=intent,
             consent=_consent_view(body) if "outcome" not in body else None,
             refused=refused,
             waiting=waiting,
+        )
+
+    async def _intent_view(self, index: int, intent_id: str) -> IntentView | None:
+        """The cart check's verdict, beside the one the Scenario scripted. A live verdict
+        that differs is flagged, and the run carries on with it; a failed read leaves the
+        card without a verdict, as the Decision stands either way."""
+        try:
+            response = await self._tenant.get(f"/v1/intents/{intent_id}")
+        except httpx.HTTPError:
+            return None
+        if not response.is_success:
+            return None
+        check = _body(response)
+        verdict = str(check["verdict"])
+        scripted = self.scenario.scripted_verdicts().get(index - 1)
+        differs = scripted is not None and verdict != scripted
+        if differs:
+            self._problems.append(
+                f"cart check: the live model said {verdict}, the script says {scripted}"
+            )
+        return IntentView(
+            intent_id=intent_id,
+            verdict=verdict,
+            failure_cause=check.get("failure_cause"),
+            scripted=scripted,
+            differs=differs,
         )
 
     # --- Route steps: the wallet app, or ShopBot calling a route no tool reaches -----------

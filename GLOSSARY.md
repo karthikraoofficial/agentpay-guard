@@ -346,6 +346,10 @@ _Avoid_: Journey script, demo case, Golden case (that is an engine input with it
 Every Scenario file, one per journey, in `demo/scenarios/`, read by the web app, `python -m demo --scenario` and the Demo runner. Its format is one Pydantic model (`demo/scenario.py`) with a committed JSON Schema that CI checks for staleness.
 _Avoid_: Journey list (that is `docs/demo-journeys.md`), scenario library
 
+**Scripted reply**:
+The model reply a Scenario writes down for each cart check (Intent check) that reaches the model: for an Intent check, its verdict (`match`, `mismatch` or `unknown`). In CI the fake model gateway answers with it, so CI makes no paid call. The demo page and the CLI ask the real model, show the scripted verdict beside the live one, and flag a live verdict that differs; the run then carries on with the live answer, so what is shown is what happened. A check made after the AI is switched off (D5) reaches no model and has none.
+_Avoid_: Mock reply, canned answer, expected verdict (the Scenario's expected result is the Decision's)
+
 **Demo runner**:
 The small server beside the API (`python -m demo_runner`) that plays Scenarios for the web app's /demo page, one step per browser request, each step answered with a card. It holds the Demo Tenant's keys so the browser never does, talks to the API over HTTP only, makes no model call of its own, grants each run its own Payer, Agent and Mandate, and is rate-limited per client IP and overall (ADR-0031).
 _Avoid_: Demo server, demo backend, demo proxy

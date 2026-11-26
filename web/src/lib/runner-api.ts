@@ -21,6 +21,16 @@ export type Card = {
     // Every rule that ran. Empty if the Audit record couldn't be read.
     rule_results: { rule_id: string; result: string; reason_code: string | null }[];
   } | null;
+  // A cart check step: the live verdict, and the one the Scenario scripted for CI.
+  // `differs` when they disagree: the run carries on with the live answer.
+  intent: {
+    intent_id: string;
+    verdict: IntentVerdict;
+    // Why it came back unknown without the model's word, e.g. "capped" (Model spend cap).
+    failure_cause: string | null;
+    scripted: IntentVerdict | null;
+    differs: boolean;
+  } | null;
   // A Payer step: the Consent link Asha answers on (the consent screen, ADR-0008).
   link: string | null;
   // The Consent request as this step left it.
@@ -36,7 +46,9 @@ export type Card = {
   mismatches: string[];
 };
 
-export type ConsentStatus = "pending" | "approved" | "declined" | "expired" | "blocked";
+export type IntentVerdict = "match" | "mismatch" | "unknown";
+
+export type ConsentStatus ="pending" | "approved" | "declined" | "expired" | "blocked";
 
 export type Started = { run_id: string; scenario: string; steps: number };
 

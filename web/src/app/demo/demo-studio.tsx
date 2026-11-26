@@ -12,6 +12,7 @@ import {
   type Card,
   type ConsentStatus,
   type Failure,
+  type IntentVerdict,
   type Json,
   type Verification,
 } from "@/lib/runner-api";
@@ -388,6 +389,7 @@ function Chat({
           {card.call && <CallCard card={card} />}
           {typeof card.call?.response.tampered_seq === "number" && <TamperResult response={card.call.response} />}
           {card.refused && <Refused code={card.refused} />}
+          {card.intent && <CartCheck intent={card.intent} />}
           {card.decision && <Verdict decision={card.decision} />}
           {card.actor === "payer" && card.consent && <Answer consent={card.consent} />}
         </li>
@@ -504,6 +506,45 @@ function Verdict({ decision }: { decision: NonNullable<Card["decision"]> }) {
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+const VERDICT_TEXT: Record<IntentVerdict, string> = {
+  match: "Cart check: match. The cart is what Asha asked for.",
+  mismatch: "Cart check: mismatch. The cart isn't what Asha asked for.",
+  unknown: "Cart check: unsure. It can't confirm the cart, and unsure never counts as yes.",
+};
+
+const VERDICT_TONE: Record<IntentVerdict, string> = {
+  match: OUTCOME_TONE.allow,
+  mismatch: OUTCOME_TONE.step_up,
+  unknown: OUTCOME_TONE.step_up,
+};
+
+// Why a check came back unsure without the model's word (FailureCause).
+const CAUSE_TEXT: Record<string, string> = {
+  capped: "The demo's AI budget for today is used up (the Model spend cap), so no model was asked.",
+  disabled: "The AI is switched off, so no model was asked.",
+  timeout: "The model didn't answer in time.",
+  error: "The model couldn't be reached.",
+  unparseable: "The model's answer wasn't one of match, mismatch or unsure.",
+};
+
+function CartCheck({ intent }: { intent: NonNullable<Card["intent"]> }) {
+  return (
+    <div className={`rounded-md border p-2 text-sm ${VERDICT_TONE[intent.verdict]}`}>
+      <div className="font-semibold">{VERDICT_TEXT[intent.verdict]}</div>
+      {intent.failure_cause && (
+        <p className="text-xs">{CAUSE_TEXT[intent.failure_cause] ?? `Cause: ${intent.failure_cause}.`}</p>
+      )}
+      {intent.differs && intent.scripted && (
+        <p role="status" className="mt-1 rounded border border-red-300 bg-red-50 p-1 text-xs dark:border-red-800 dark:bg-red-950">
+          ⚑ The live model said <code className="font-mono">{intent.verdict}</code>, but this journey was
+          written for <code className="font-mono">{intent.scripted}</code>. The run carries on with the live
+          answer, so what follows is what really happened.
+        </p>
       )}
     </div>
   );

@@ -1,0 +1,111 @@
+{
+  "id": "A2",
+  "title": "A medium-sized order with a matching cart",
+  "group": "A",
+  "playlists": [],
+  "story": "Asha asks ShopBot for this week's groceries for a family of four. The cart is INR 3,200 of groceries at FreshMart, where she has shopped before, and the cart check says it matches. The Guard allows it, and ShopBot pays.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures",
+    "history": [
+      {
+        "amount": {
+          "minor": 50000,
+          "currency": "INR"
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "check_intent",
+      "amount": {
+        "minor": 320000,
+        "currency": "INR"
+      },
+      "instruction": "This week's groceries for a family of four.",
+      "item": "Weekly groceries for four: rice, dal, vegetables, milk, eggs, bread",
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Get this week's groceries for a family of four, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "This week's groceries for four at FreshMart come to INR 3,200. Getting the cart checked."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 320000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Asking AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Allowed. Paying FreshMart now."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": [
+        "captured",
+        "failed"
+      ],
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The payment is scheduled. I'll let you know once the money is taken."
+        }
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "allow",
+    "reason_codes": [],
+    "payment_status": "captured"
+  },
+  "model_replies": [
+    {
+      "job": "intent_check",
+      "reply": {
+        "verdict": "match"
+      }
+    }
+  ],
+  "what_to_notice": "From INR 2,000 a cart check is required, and here it said match, so the Guard still says yes at once. In the cart check's card, the live verdict sits beside the scripted one. The earlier INR 500 payment at FreshMart is why MERCHANT_NEW doesn't fire."
+}

@@ -22,11 +22,12 @@ import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal, Self, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from core.domain.decisions import Merchant
+from core.domain.intents import IntentVerdict
 from core.domain.money import Money
 
 CATALOGUE = Path(__file__).parent / "scenarios"
@@ -231,10 +232,23 @@ class Expected(_Model):
 
 class ModelReply(_Model):
     """A scripted model reply CI plays through the fake model gateway, so CI makes no paid
-    call. The live demo compares the live verdict with it."""
+    call. The live demo compares the live verdict with it.
+
+    An Intent check's reply is `{"verdict": "match" | "mismatch" | "unknown"}`: the one
+    word the model answers (core/signals/intent_check.py)."""
 
     job: Literal["intent_check", "dispute_narrative"]
     reply: dict[str, Any]
+
+    @model_validator(mode="after")
+    def _intent_reply_is_a_verdict(self) -> Self:
+        if self.job == "intent_check" and (
+            set(self.reply) != {"verdict"} or self.reply["verdict"] not in get_args(IntentVerdict)
+        ):
+            raise ValueError(
+                'an intent_check reply is {"verdict": "match" | "mismatch" | "unknown"}'
+            )
+        return self
 
 
 class Scenario(_Model):
@@ -270,6 +284,33 @@ class Scenario(_Model):
                         f"`{REGISTER_AGENT}` step registers an Agent of that name"
                     )
         return self
+
+    def _model_checks(self) -> list[int]:
+        """The `check_intent` steps that reach the model, by index in `steps`: every one
+        not made after the visitor switched the AI off (D5)."""
+        found, ai_off = [], False
+        for i, step in enumerate(self.steps):
+            if isinstance(step, VisitorStep) and step.control == "ai_off":
+                ai_off = True
+            elif isinstance(step, AgentStep) and step.tool == "check_intent" and not ai_off:
+                found.append(i)
+        return found
+
+    @model_validator(mode="after")
+    def _one_reply_per_model_check(self) -> Self:
+        checks = len(self._model_checks())
+        replies = sum(1 for reply in self.model_replies if reply.job == "intent_check")
+        if checks != replies:
+            raise ValueError(
+                f"{checks} Intent check step(s) reach the model, but there are {replies} "
+                "scripted intent_check replies: script one for each, in order"
+            )
+        return self
+
+    def scripted_verdicts(self) -> dict[int, IntentVerdict]:
+        """Each model-reaching `check_intent` step's scripted verdict, by index in `steps`."""
+        verdicts = [r.reply["verdict"] for r in self.model_replies if r.job == "intent_check"]
+        return dict(zip(self._model_checks(), verdicts, strict=True))
 
 
 def load(path: Path) -> Scenario:

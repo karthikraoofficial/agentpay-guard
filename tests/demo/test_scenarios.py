@@ -6,6 +6,7 @@ Each time a run waits, the test plays the worker and the people, as the demo CLI
 
 import pytest
 
+from core.ports import ModelSpendCapReached
 from demo.__main__ import main, run_scenario
 from demo.engine import Run, play
 from demo.scenario import Scenario, catalogue
@@ -19,11 +20,18 @@ pytestmark = pytest.mark.anyio
 SCENARIOS = list(catalogue().values())
 
 
+def script_the_model(api: Api, scenario: Scenario) -> None:
+    """The fake model gateway answers each Intent check with the Scenario's scripted
+    verdict, so CI makes no paid call."""
+    api.gateway.script.extend(v.upper() for v in scenario.scripted_verdicts().values())
+
+
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=[s.id for s in SCENARIOS])
 async def test_each_scenario_ends_with_its_expected_result(
     api: Api, keys: tuple[str, str], scenario: Scenario
 ) -> None:
     operator = Operator(api, [])
+    script_the_model(api, scenario)
     async with clients(api, keys) as (agent, tenant):
         # In CI the engine plays Asha; on the demo page a visitor does.
         run = Run(scenario, agent=agent, tenant=tenant, now=api.clock.now, people="engine")
@@ -143,3 +151,81 @@ async def test_the_cli_prints_the_consent_link_and_waits_for_asha(
     assert code == 0, "\n".join(out)
     assert operator.used, "the CLI never printed a Consent link"
     assert any("approved" in line for line in out)
+
+
+async def test_d2_shows_the_mismatch_on_the_card_and_on_ashas_consent_screen(
+    api: Api, keys: tuple[str, str]
+) -> None:
+    scenario = catalogue()["D2"]
+    script_the_model(api, scenario)
+    async with clients(api, keys) as (agent, tenant):
+        # A visitor plays Asha: stop while she is looking at her screen.
+        run = Run(scenario, agent=agent, tenant=tenant, now=api.clock.now)
+        cards = [await run.next() for _ in range(4)]
+
+        checked = next(card for card in cards if card.intent)
+        asked = cards[-1]
+        assert asked.waiting and asked.link is not None
+        screen = await tenant.get(
+            "/v1/consent-link", headers={"Consent-Link": asked.link.split("#", 1)[1]}
+        )
+
+    assert checked.intent is not None
+    assert (checked.intent.verdict, checked.intent.scripted) == ("mismatch", "mismatch")
+    assert not checked.intent.differs
+    assert screen.json()["intent_verdict"] == "mismatch"
+    assert [r["code"] for r in screen.json()["reasons"]] == ["INTENT_MISMATCH"]
+    assert "doesn't match what you asked" in screen.json()["reasons"][0]["text"]
+
+
+async def test_a_live_verdict_unlike_the_scripted_one_is_flagged_and_the_run_carries_on(
+    api: Api, keys: tuple[str, str]
+) -> None:
+    api.gateway.script.append("MISMATCH")  # D1 scripts a match
+    operator = Operator(api, [])
+    async with clients(api, keys) as (agent, tenant):
+        run = Run(catalogue()["D1"], agent=agent, tenant=tenant, now=api.clock.now)
+
+        cards = await play(run, wait=operator.wait, patience=20)
+
+    checked = cards[1]
+    assert checked.intent is not None
+    assert (checked.intent.verdict, checked.intent.scripted) == ("mismatch", "match")
+    assert checked.intent.differs
+    decided = cards[-1]
+    assert decided.decision is not None
+    assert decided.decision.reason_codes == ["INTENT_MISMATCH"]
+    assert any("live model said mismatch" in m for m in decided.mismatches)
+
+
+async def test_a_capped_check_shows_unknown_with_its_cause(api: Api, keys: tuple[str, str]) -> None:
+    api.gateway.script.append(ModelSpendCapReached("daily cap"))
+    operator = Operator(api, [])
+    async with clients(api, keys) as (agent, tenant):
+        run = Run(catalogue()["D1"], agent=agent, tenant=tenant, now=api.clock.now)
+
+        cards = await play(run, wait=operator.wait, patience=20)
+
+    checked = cards[1]
+    assert checked.intent is not None
+    assert (checked.intent.verdict, checked.intent.failure_cause) == ("unknown", "capped")
+    assert checked.intent.differs
+
+
+async def test_the_cli_prints_the_cart_checks_verdict(api: Api, keys: tuple[str, str]) -> None:
+    scenario = catalogue()["D4"]
+    out: list[str] = []
+    script_the_model(api, scenario)
+    async with clients(api, keys) as (agent, tenant):
+        code = await run_scenario(
+            scenario,
+            agent=agent,
+            tenant=tenant,
+            say=out.append,
+            wait=Operator(api, []).wait,
+            now=api.clock.now,
+            patience=20,
+        )
+
+    assert code == 0, "\n".join(out)
+    assert any("check_intent: unknown (scripted: unknown)" in line for line in out), out
