@@ -1,0 +1,32 @@
+{
+  "id": "B3",
+  "title": "The wrong kind of shop",
+  "group": "B",
+  "playlists": [],
+  "story": "Asha asks ShopBot for a phone charger, and ShopBot finds one for INR 1,499 at VoltKart, an electronics store. Asha only allowed groceries and restaurants. The Guard blocks it with MCC_NOT_ALLOWED: permission is about where money goes, not only how much.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
+      "monthly_cap": {"minor": 5000000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_voltkart", "name": "VoltKart Electronics", "mcc": "5732"},
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 149900, "currency": "INR"},
+      "chat": [
+        {"speaker": "asha", "text": "My phone charger broke. Can you get me a new one?"},
+        {"speaker": "shopbot", "text": "VoltKart has a fast charger for INR 1,499. Checking with AgentPay Guard before I pay."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "block",
+    "reason_codes": ["MCC_NOT_ALLOWED"]
+  },
+  "what_to_notice": "A small amount, well inside both caps, and still a block. VoltKart's merchant category (5732, electronics) isn't in the Mandate's allowed list, and the inspector shows the mcc_allowed rule as the one that blocked."
+}

@@ -15,7 +15,7 @@ import {
   type Json,
   type Verification,
 } from "@/lib/runner-api";
-import { GROUPS, SCENARIOS, type Scenario } from "@/lib/scenarios";
+import { GROUPS, SCENARIOS, SPEAKER_NAMES, type Scenario } from "@/lib/scenarios";
 
 const STEP_PAUSE_MS = 1200; // between turns while playing
 const POLL_MS = 2000; // while a step waits on the worker or a person
@@ -381,7 +381,7 @@ function Chat({
                   : "self-start bg-neutral-100 dark:bg-neutral-800"
               }`}
             >
-              <span className="block text-xs font-semibold">{line.speaker === "asha" ? "Asha" : "ShopBot"}</span>
+              <span className="block text-xs font-semibold">{SPEAKER_NAMES[line.speaker]}</span>
               {line.text}
             </p>
           ))}
@@ -396,7 +396,7 @@ function Chat({
         <li className="flex flex-col gap-2">
           {waiting.chat.map((line, i) => (
             <p key={i} className="max-w-[85%] self-start rounded-2xl bg-neutral-100 px-3 py-2 text-sm dark:bg-neutral-800">
-              <span className="block text-xs font-semibold">{line.speaker === "asha" ? "Asha" : "ShopBot"}</span>
+              <span className="block text-xs font-semibold">{SPEAKER_NAMES[line.speaker]}</span>
               {line.text}
             </p>
           ))}

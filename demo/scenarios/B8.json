@@ -1,0 +1,39 @@
+{
+  "id": "B8",
+  "title": "Permission withdrawn",
+  "group": "B",
+  "playlists": [],
+  "story": "Asha cancels ShopBot's permission in the wallet app. A few minutes later ShopBot, working through an old to-do list, tries to pay for groceries. The Guard blocks it with MANDATE_REVOKED: stop means stop, at once.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
+      "monthly_cap": {"minor": 5000000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"},
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "tenant",
+      "route": "POST /v1/mandates/{mandate_id}/revoke",
+      "body": {"revoked_by": "payer"},
+      "chat": [
+        {"speaker": "asha", "text": "(In the wallet app) I'm cancelling ShopBot's permission to pay."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 125000, "currency": "INR"},
+      "chat": [
+        {"speaker": "shopbot", "text": "Next on my list: the usual basket at FreshMart, INR 1,250. Checking with AgentPay Guard before I pay."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "block",
+    "reason_codes": ["MANDATE_REVOKED"]
+  },
+  "what_to_notice": "The Mandate wasn't deleted or edited: revoking stamps who revoked it and when, and the Mandate snapshot in the Audit record shows both. A revoked Mandate can never be switched back on. To pay again, Asha would have to grant a new one."
+}

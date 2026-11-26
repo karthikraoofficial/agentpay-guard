@@ -1,0 +1,36 @@
+{
+  "id": "B2",
+  "title": "Over the monthly limit",
+  "group": "B",
+  "playlists": [],
+  "story": "Asha keeps ShopBot on a tight INR 5,000 a month for household top-ups, and ShopBot has already spent INR 3,800 of it this month in two orders. The next order, INR 1,500, would take her over. The Guard blocks it with MONTHLY_CAP_EXCEEDED: the limit caps the total over time, not just each payment.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 200000, "currency": "INR"},
+      "monthly_cap": {"minor": 500000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"},
+    "card": "token_mock_captures",
+    "history": [
+      {"amount": {"minor": 190000, "currency": "INR"}},
+      {"amount": {"minor": 190000, "currency": "INR"}}
+    ]
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 150000, "currency": "INR"},
+      "chat": [
+        {"speaker": "asha", "text": "We're out of detergent and atta. Can you order them?"},
+        {"speaker": "shopbot", "text": "That's INR 1,500 at FreshMart. You've spent INR 3,800 of your INR 5,000 this month. Checking with AgentPay Guard before I pay."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "block",
+    "reason_codes": ["MONTHLY_CAP_EXCEEDED", "MONTHLY_CAP_NEAR"]
+  },
+  "what_to_notice": "The payment is under the per-payment limit, so per_txn_cap passes. monthly_cap blocks because INR 3,800 already spent plus INR 1,500 is over INR 5,000. The two earlier orders are real allowed Decisions made when the run started: the Audit record's inputs show Spent this month as INR 3,800."
+}

@@ -96,6 +96,21 @@ async def test_e6_a_double_tap_records_one_approval(api: Api, keys: tuple[str, s
     assert tapped.call.response["distinct_answers"] == 1
 
 
+async def test_b6_asks_as_the_agent_the_run_registered(api: Api, keys: tuple[str, str]) -> None:
+    operator = Operator(api, [])
+    async with clients(api, keys) as (agent, tenant):
+        run = Run(catalogue()["B6"], agent=agent, tenant=tenant, now=api.clock.now, people="engine")
+
+        cards = await play(run, wait=operator.wait, patience=20)
+
+    mandate, registered, decided = (card.call for card in cards)
+    assert mandate is not None and registered is not None and decided is not None
+    dealhunter = registered.response["agent_id"]
+    assert registered.response["name"] == "DealHunter"
+    assert decided.request is not None and decided.request["agent_id"] == dealhunter
+    assert dealhunter not in mandate.response["allowed_agent_ids"]
+
+
 async def test_e5_shows_the_refusal_on_its_card(api: Api, keys: tuple[str, str]) -> None:
     operator = Operator(api, [])
     async with clients(api, keys) as (agent, tenant):
