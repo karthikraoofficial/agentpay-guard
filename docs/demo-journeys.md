@@ -132,48 +132,48 @@ There are 60 journeys in 8 groups.
 
 These are the lines Asha drew herself, or that nobody should cross. Even if Asha tapped "approve", these would still be refused, because approving a single payment must never quietly widen her limits.
 
-### B1. Over the per-payment limit 🟢
+### B1. Over the per-payment limit ✅
 **Story:** ShopBot tries to pay ₹12,000 for a bulk order. Asha's limit is ₹10,000 per payment.
 **Guard's answer:** Block, reason `PER_TXN_CAP_EXCEEDED`.
 **Why it matters:** A single large mistake or a manipulated assistant can't empty the account in one go.
 
 ### B2. Over the monthly limit ✅
-**Story:** Asha has already spent most of her monthly allowance through ShopBot. The next payment would take her over the monthly limit.
+**Story:** Asha has already spent most of her monthly allowance through ShopBot. The next payment would take her over the monthly limit. (Demo: a Mandate with a ₹5,000 monthly limit and ₹3,800 already spent in two earlier payments, because building ₹38,000 of history under the ₹50,000 limit would trip the warning-sign rules on the way.)
 **Guard's answer:** Block, reason `MONTHLY_CAP_EXCEEDED`.
-**Why it matters:** It caps total damage over time, not just per payment. (Part of today's refund journey.)
+**Why it matters:** It caps total damage over time, not just per payment.
 
-### B3. The wrong kind of shop 🟢
+### B3. The wrong kind of shop ✅
 **Story:** ShopBot, asked for "a phone charger", tries to pay an electronics store. Asha only allowed groceries and restaurants.
 **Guard's answer:** Block, reason `MCC_NOT_ALLOWED`.
 **Why it matters:** Permission is about *where* money goes, not only how much.
 
-### B4. A risky kind of shop 🟢
+### B4. A risky kind of shop ✅
 **Story:** A web page ShopBot visited contained hidden text telling it to "top up a betting wallet." ShopBot tries to pay a gambling site.
 **Guard's answer:** Block, reason `MCC_HIGH_RISK`. This applies to every user, whatever their Mandate says.
 **Why it matters:** This is the classic "prompt injection" attack on AI agents. Gambling, money transfers and cash-like purchases are where stolen money usually goes, so they are shut off entirely.
 
-### B5. The wrong currency 🟢
+### B5. The wrong currency ✅
 **Story:** ShopBot tries to pay a US website $40. Asha's Mandate is in rupees.
 **Guard's answer:** Block, reason `CURRENCY_MISMATCH`. The amount rules are skipped, because comparing dollars with rupee limits would be meaningless.
 **Why it matters:** It avoids surprise foreign charges and stops limits from being dodged by switching currency.
 
-### B6. An assistant Asha never authorised 🟢
+### B6. An assistant Asha never authorised ✅
 **Story:** A different AI assistant ("DealHunter") tries to spend under Asha's Mandate.
 **Guard's answer:** Block, reason `AGENT_NOT_ALLOWED`.
 **Why it matters:** Permission is given to a specific assistant, not to "any bot".
 
-### B7. A switched-off assistant 🟢
+### B7. A switched-off assistant ✅
 **Story:** The wallet app finds a bug in ShopBot and switches it off. ShopBot keeps trying to pay.
 **Guard's answer:** Block, reason `AGENT_DISABLED`.
 **Why it matters:** The business has a kill switch for a misbehaving assistant, and it works instantly for every user.
 
-### B8. Permission withdrawn 🟢
+### B8. Permission withdrawn ✅
 **Story:** Asha cancels ShopBot's permission in the app. Five minutes later ShopBot tries to pay.
 **Guard's answer:** Block, reason `MANDATE_REVOKED`.
 **Why it matters:** "Stop" must mean stop, immediately.
 
-### B9. Permission not started yet 🟢
-**Story:** Asha sets ShopBot up to start buying from the 1st of next month. ShopBot tries today.
+### B9. Permission not started yet ✅
+**Story:** Asha sets ShopBot up to start buying next week. ShopBot tries today. (Demo: the Mandate is granted to start in seven days, so no Demo control is needed.)
 **Guard's answer:** Block, reason `MANDATE_NOT_YET_VALID`.
 **Why it matters:** Permissions respect their start date as well as their end date.
 
@@ -461,19 +461,19 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 | Group | Journeys | ✅ In today's demo | 🟢 Ready in the code | 🟡 Needs a demo control |
 |---|---|---|---|---|
 | A. Everyday yes | 2 | 1 | 1 | 0 |
-| B. Hard limits | 10 | 2 | 8 | 0 |
+| B. Hard limits | 10 | 10 | 0 | 0 |
 | C. Warning signs | 6 | 1 | 5 | 0 |
 | D. Cart check | 7 | 1 | 5 | 1 |
 | E. Asking Asha | 6 | 6 | 0 | 0 |
 | F. Paying | 9 | 6 | 3 | 0 |
 | G. Disputes | 12 | 1 | 9 | 2 |
 | H. Refunds and proof | 8 | 4 | 3 | 1 |
-| **Total** | **60** | **22** | **34** | **4** |
+| **Total** | **60** | **30** | **26** | **4** |
 
-*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), and D5, F8, F9 and H6 (#281).*
+*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), D5, F8, F9 and H6 (#281), and B1 to B9 (#277).*
 
 **What this means for the build:**
-- **34 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
+- **26 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
 - **4 journeys still need a Scenario on a demo-only control:**
   1. **Fast-forward** (built for Consent requests, Payment windows and notice periods, ADR-0032): still to come for a stale cart check (D7) and a Dispute deadline (G11).
   2. **Failure switches** (built, ADR-0032): AI off is still to be shown in a Dispute (G8), and bank declining in a refund (H3).

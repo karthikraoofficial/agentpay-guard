@@ -1,0 +1,37 @@
+{
+  "id": "B1",
+  "title": "Over the per-payment limit",
+  "group": "B",
+  "playlists": ["payments-pm"],
+  "story": "Asha asks ShopBot to stock up for a family gathering, and the bulk order at FreshMart comes to INR 12,000. Her limit is INR 10,000 per payment. The Guard blocks it with PER_TXN_CAP_EXCEEDED: a single large mistake, or a manipulated assistant, can't empty the account in one go.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
+      "monthly_cap": {"minor": 5000000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"},
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 1200000, "currency": "INR"},
+      "chat": [
+        {"speaker": "asha", "text": "We have twenty people coming on Sunday. Stock up on rice, oil and snacks, please."},
+        {"speaker": "shopbot", "text": "The bulk order at FreshMart comes to INR 12,000. Checking with AgentPay Guard before I pay."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "block",
+    "reason_codes": [
+      "PER_TXN_CAP_EXCEEDED",
+      "AMOUNT_ABOVE_STEP_UP_THRESHOLD",
+      "MERCHANT_NEW",
+      "INTENT_MISSING"
+    ]
+  },
+  "what_to_notice": "Four Reason codes, but only one of them blocks. The amount is high, the shop is new to this Mandate and there was no cart check: each of those would only ask Asha. The per-payment cap is a hard limit, so the strictest answer wins and no Consent request is made. Approving can never widen Asha's limit."
+}

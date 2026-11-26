@@ -28,6 +28,24 @@ def test_a_file_must_be_named_after_its_scenario(tmp_path: Path) -> None:
         catalogue(tmp_path)
 
 
+def test_a_mandate_cant_both_start_later_and_have_expired(tmp_path: Path) -> None:
+    b9 = json.loads(Path("demo/scenarios/B9.json").read_text(encoding="utf-8"))
+    b9["setup"]["mandate"]["expired_days_ago"] = 1
+    (tmp_path / "B9.json").write_text(json.dumps(b9), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="start later and have expired"):
+        catalogue(tmp_path)
+
+
+def test_an_agent_step_acts_only_as_an_agent_an_earlier_step_registered(tmp_path: Path) -> None:
+    b6 = json.loads(Path("demo/scenarios/B6.json").read_text(encoding="utf-8"))
+    b6["steps"][1]["as_agent"] = "Rogue"
+    (tmp_path / "B6.json").write_text(json.dumps(b6), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Rogue"):
+        catalogue(tmp_path)
+
+
 def test_money_in_a_scenario_is_integer_minor_units(tmp_path: Path) -> None:
     a1 = json.loads(Path("demo/scenarios/A1.json").read_text(encoding="utf-8"))
     a1["steps"][0]["amount"] = {"minor": 1250.0, "currency": "INR"}

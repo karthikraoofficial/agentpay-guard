@@ -1,0 +1,36 @@
+{
+  "id": "B7",
+  "title": "A switched-off assistant",
+  "group": "B",
+  "playlists": [],
+  "story": "The wallet app finds a bug in ShopBot and switches it off for everyone. ShopBot, still running, tries to pay for Asha's groceries. The Guard blocks it with AGENT_DISABLED: the business has a kill switch for a misbehaving assistant, and it works at once under every Mandate.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
+      "monthly_cap": {"minor": 5000000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"},
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "tenant",
+      "route": "POST /v1/agents/{agent_id}/disable"
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 125000, "currency": "INR"},
+      "chat": [
+        {"speaker": "asha", "text": "Reorder my usual milk and bread, please."},
+        {"speaker": "shopbot", "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "block",
+    "reason_codes": ["AGENT_DISABLED"]
+  },
+  "what_to_notice": "Asha's Mandate wasn't touched: it is still active and still names ShopBot. The Agent's status is part of every Decision's inputs, so the Audit record shows ShopBot as disabled when it asked. Re-enabling the Agent lets it pay again without Asha granting anything new."
+}

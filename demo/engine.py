@@ -26,7 +26,10 @@ from typing import Any, Literal, get_args
 import httpx
 from pydantic import BaseModel
 
+from core.domain.decisions import Merchant
+from core.domain.money import Money
 from demo.scenario import (
+    REGISTER_AGENT,
     AgentStep,
     ChatLine,
     FastForward,
@@ -202,8 +205,6 @@ def _problem(response: httpx.Response) -> str:
 def check_supported(scenario: Scenario) -> None:
     """Raise Unsupported if this engine can't run the Scenario yet."""
     problems = []
-    if scenario.setup.history:
-        problems.append("setup history")
     for step in scenario.steps:
         if isinstance(step, AgentStep) and step.tool is not None:
             if step.tool not in _AGENT_TOOLS:
@@ -243,6 +244,8 @@ class Run:
         self._last: Card | None = None
         self.mandate_id: str | None = None
         self.agent_id: str | None = None
+        # Other Agents a Tenant step registered, by name, for `as_agent` (B6).
+        self._agents: dict[str, str] = {}
         self.decision: Json | None = None
         self.payment: Json | None = None
         self.consent: Json | None = None
@@ -412,12 +415,18 @@ class Run:
         agent = await self._post(step, "/v1/agents", {"name": "ShopBot"}, f"{key}-agent")
         now = self._now()
         terms = setup.mandate
-        # Valid until now, or (B10) granted for a period that already ended.
+        # Valid from just now, or (B10) granted for a period that already ended, or (B9)
+        # for one that starts later.
         until = now + timedelta(days=terms.valid_for_days)
         since = now - timedelta(minutes=5)
         if terms.expired_days_ago is not None:
             until = now - timedelta(days=terms.expired_days_ago)
             since = until - timedelta(days=terms.valid_for_days)
+        if terms.starts_in_days is not None:
+            since = now + timedelta(days=terms.starts_in_days)
+            until = since + timedelta(days=terms.valid_for_days)
+        # Asha agreed when the Mandate was granted, which is never in the future.
+        agreed = min(since, now - timedelta(minutes=5)) - timedelta(minutes=1)
         mandate_body: Json = {
             "payer_id": payer["payer_id"],
             "allowed_agent_ids": [agent["agent_id"]],
@@ -430,7 +439,7 @@ class Run:
             "consent_evidence": {
                 "method": "in_app_confirm",
                 "reference": "demo-consent",
-                "captured_at": _iso(since - timedelta(minutes=1)),
+                "captured_at": _iso(agreed),
             },
             "rail_token": {
                 "rail": "mock",
@@ -442,6 +451,8 @@ class Run:
         mandate = await self._post(step, "/v1/mandates", mandate_body, f"{key}-mandate")
         self.mandate_id = mandate["mandate_id"]
         self.agent_id = agent["agent_id"]
+        for i, prior in enumerate(setup.history):
+            await self._pay_before(i, prior.amount, prior.merchant or setup.merchant, key)
         return Card(
             step=0,
             actor="tenant",
@@ -451,7 +462,40 @@ class Run:
             ),
         )
 
+    async def _pay_before(self, i: int, amount: Money, merchant: Merchant, key: str) -> None:
+        """One Payment of the setup's history: ShopBot asks and pays through the same tools
+        as in a step, so it counts in Spent this month exactly as a real one would."""
+        step = "Earlier payments"
+        asked = {
+            "mandate_id": self.mandate_id,
+            "agent_id": self.agent_id,
+            "amount": amount.model_dump(),
+            "merchant": merchant.model_dump(),
+            "idempotency_key": f"{key}-history-{i}",
+        }
+        decided = await call(self._agent, _TOOLS["request_decision"], asked)
+        decision = dict(decided.structured_content or {})
+        if decided.is_error or decision.get("outcome") != "allow":
+            got = decision.get("code") or decision.get("outcome")
+            raise StepFailed(step, f"earlier payment {i + 1} wasn't allowed ({got})")
+        paid = await call(
+            self._agent,
+            _TOOLS["create_payment"],
+            {"decision_id": decision["decision_id"], "idempotency_key": f"{key}-history-{i}-pay"},
+        )
+        if paid.is_error:
+            code = (paid.structured_content or {}).get("code", "TOOL_ERROR")
+            raise StepFailed(step, f"earlier payment {i + 1} couldn't be paid ({code})")
+
     # --- Agent tool steps -----------------------------------------------------------------
+
+    def _acting(self, step: AgentStep) -> str | None:
+        """The Agent the step asks as: ShopBot, or another Agent the run registered."""
+        if step.as_agent is None:
+            return self.agent_id
+        if step.as_agent not in self._agents:
+            raise StepFailed(str(step.tool), f"no Agent {step.as_agent} was registered")
+        return self._agents[step.as_agent]
 
     def _arguments(self, index: int, step: AgentStep) -> Json:
         tool = step.tool
@@ -460,7 +504,7 @@ class Run:
                 raise StepFailed(tool, "the step names no amount")
             asked: Json = {
                 "mandate_id": self.mandate_id,
-                "agent_id": self.agent_id,
+                "agent_id": self._acting(step),
                 "amount": step.amount.model_dump(),
                 "merchant": self.scenario.setup.merchant.model_dump(),
                 "idempotency_key": self._key(index),
@@ -474,7 +518,7 @@ class Run:
             total = step.amount.model_dump()
             return {
                 "mandate_id": self.mandate_id,
-                "agent_id": self.agent_id,
+                "agent_id": self._acting(step),
                 "payer_instruction": step.instruction,
                 "merchant": self.scenario.setup.merchant.model_dump(),
                 "line_items": [{"description": step.item, "quantity": 1, "unit_amount": total}],
@@ -545,6 +589,8 @@ class Run:
             refused = self.refusal = code
         elif step.expect_refusal:
             raise StepFailed(route, f"expected {step.expect_refusal}, but it was allowed")
+        if route == REGISTER_AGENT and refused is None:
+            self._agents[str(answer["name"])] = str(answer["agent_id"])
         decision = await self._with_rules(self._remember(answer) if refused is None else None)
         return Card(
             step=index,

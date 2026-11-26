@@ -74,7 +74,8 @@ class _Model(BaseModel):
 
 
 class ChatLine(_Model):
-    speaker: Literal["asha", "shopbot"]
+    # Asha, ShopBot, or (B6) DealHunter, an Agent Asha never authorised.
+    speaker: Literal["asha", "shopbot", "dealhunter"]
     text: Text
 
 
@@ -89,11 +90,21 @@ class MandateTerms(_Model):
     # Granted already expired: its validity ended this many days ago (B10). The real rule
     # then gives MANDATE_EXPIRED, with no Demo control and nothing edited (ADR-0032).
     expired_days_ago: int | None = Field(default=None, ge=1, le=300)
+    # Granted to start later: its validity begins this many days from now (B9). The real
+    # rule then gives MANDATE_NOT_YET_VALID, again with nothing edited.
+    starts_in_days: int | None = Field(default=None, ge=1, le=300)
+
+    @model_validator(mode="after")
+    def _one_window(self) -> Self:
+        if self.expired_days_ago is not None and self.starts_in_days is not None:
+            raise ValueError("a Mandate can't both start later and have expired already")
+        return self
 
 
 class PriorPayment(_Model):
-    """History built before the steps: an allowed, captured Payment, e.g. for Spent this
-    month."""
+    """History built before the steps, e.g. for Spent this month: ShopBot asks for this
+    amount, is allowed, and pays. The setup doesn't wait for the Payment to be captured,
+    since an allow counts in Spent this month from the moment it is made (B2)."""
 
     amount: Money
     merchant: Merchant | None = None
@@ -109,6 +120,8 @@ class Setup(_Model):
 # An HTTP route as `METHOD /v1/path`; `{name}` is filled from the run: mandate_id,
 # agent_id, decision_id, payment_id or consent_request_id.
 Route = Annotated[str, StringConstraints(pattern=r"^(GET|POST) /v1/\S+$")]
+# The Tenant step that registers another Agent, by the `name` in its body (B6).
+REGISTER_AGENT = "POST /v1/agents"
 
 
 class AgentStep(_Model):
@@ -121,6 +134,9 @@ class AgentStep(_Model):
     actor: Literal["agent"]
     tool: AgentTool | None = None
     route: Route | None = None
+    # request_decision or check_intent as another Agent than ShopBot: the name an earlier
+    # `POST /v1/agents` Tenant step registered (B6).
+    as_agent: Text | None = None
     chat: list[ChatLine] = []
     # request_decision: the amount to ask for. check_intent: the cart's Quoted total.
     amount: Money | None = None
@@ -239,6 +255,20 @@ class Scenario(_Model):
         pressed = {step.control for step in self.steps if isinstance(step, VisitorStep)}
         if missing := pressed - set(self.demo_controls):
             raise ValueError(f"steps press Demo controls not in demo_controls: {sorted(missing)}")
+        return self
+
+    @model_validator(mode="after")
+    def _agents_registered_first(self) -> Self:
+        registered: set[str] = set()
+        for step in self.steps:
+            if isinstance(step, TenantStep) and step.route == REGISTER_AGENT:
+                registered.add(str((step.body or {}).get("name")))
+            elif isinstance(step, AgentStep) and step.as_agent is not None:
+                if step.as_agent not in registered:
+                    raise ValueError(
+                        f"a step acts as {step.as_agent}, but no earlier "
+                        f"`{REGISTER_AGENT}` step registers an Agent of that name"
+                    )
         return self
 
 

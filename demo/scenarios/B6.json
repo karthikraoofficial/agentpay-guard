@@ -1,0 +1,37 @@
+{
+  "id": "B6",
+  "title": "An assistant Asha never authorised",
+  "group": "B",
+  "playlists": [],
+  "story": "The wallet app also offers DealHunter, a bargain-finding assistant. Asha never gave it permission to spend, but DealHunter spots a deal at FreshMart and tries to pay under the Mandate she granted ShopBot. The Guard blocks it with AGENT_NOT_ALLOWED: permission is given to a specific assistant, not to any bot.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
+      "monthly_cap": {"minor": 5000000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"},
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "tenant",
+      "route": "POST /v1/agents",
+      "body": {"name": "DealHunter"}
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "as_agent": "DealHunter",
+      "amount": {"minor": 125000, "currency": "INR"},
+      "chat": [
+        {"speaker": "dealhunter", "text": "FreshMart has a deal on Asha's usual basket, INR 1,250. I'll pay for it under her grocery permission."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "block",
+    "reason_codes": ["AGENT_NOT_ALLOWED"]
+  },
+  "what_to_notice": "DealHunter is a real, active Agent of the same wallet app, and the request is small and to an allowed shop. It is blocked only because Asha's Mandate names ShopBot and nobody else: compare the Decision's agent_id with the Mandate snapshot's allowed_agent_ids in the Audit record."
+}

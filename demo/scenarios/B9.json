@@ -1,0 +1,33 @@
+{
+  "id": "B9",
+  "title": "Permission not started yet",
+  "group": "B",
+  "playlists": [],
+  "story": "Asha sets ShopBot up to start buying next week, when her new grocery budget begins. ShopBot, keen to help, tries to pay today. The Guard blocks it with MANDATE_NOT_YET_VALID: a permission respects its start date as well as its end date.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
+      "monthly_cap": {"minor": 5000000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"],
+      "starts_in_days": 7
+    },
+    "merchant": {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"},
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 125000, "currency": "INR"},
+      "chat": [
+        {"speaker": "asha", "text": "From next week, keep my kitchen stocked with the usual."},
+        {"speaker": "shopbot", "text": "I'll start now: the usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "block",
+    "reason_codes": ["MANDATE_NOT_YET_VALID"]
+  },
+  "what_to_notice": "Nothing was edited or fast-forwarded: Asha granted a Mandate whose validity starts in seven days, and the mandate_validity rule compares that start with the real time of the request. The inspector's Mandate snapshot shows the dates. On the start date the same request would be allowed."
+}

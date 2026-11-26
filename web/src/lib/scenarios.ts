@@ -3,7 +3,14 @@
 // reads are typed here; the schema is the full format.
 import data from "@/data/scenarios.json";
 
-export type ChatLine = { speaker: "asha" | "shopbot"; text: string };
+export type ChatLine = { speaker: "asha" | "shopbot" | "dealhunter"; text: string };
+
+// Who says a chat line: Asha, ShopBot, or (B6) DealHunter, an Agent she never authorised.
+export const SPEAKER_NAMES: Record<ChatLine["speaker"], string> = {
+  asha: "Asha",
+  shopbot: "ShopBot",
+  dealhunter: "DealHunter",
+};
 
 export type Scenario = {
   id: string;
