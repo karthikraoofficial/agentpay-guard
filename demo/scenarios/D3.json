@@ -1,0 +1,64 @@
+{
+  "id": "D3",
+  "title": "No cart check at all",
+  "group": "D",
+  "playlists": [],
+  "story": "ShopBot skips the cart check and goes straight to asking whether it may pay INR 3,000 at FreshMart. From INR 2,000 a cart check is required, so the Guard asks Asha instead.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures",
+    "history": [
+      {
+        "amount": {
+          "minor": 50000,
+          "currency": "INR"
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 300000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Pick up some snacks and drinks for the weekend."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Snacks and drinks at FreshMart come to INR 3,000. Asking AgentPay Guard if I may pay."
+        }
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "step_up",
+    "reason_codes": [
+      "INTENT_MISSING"
+    ]
+  },
+  "what_to_notice": "Skipping the check never gets a quicker yes: no check counts the same as an unsure one. No model was called, so this run cost nothing."
+}

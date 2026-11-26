@@ -477,7 +477,7 @@
     },
     "ModelReply": {
       "additionalProperties": false,
-      "description": "A scripted model reply CI plays through the fake model gateway, so CI makes no paid\ncall. The live demo compares the live verdict with it.",
+      "description": "A scripted model reply CI plays through the fake model gateway, so CI makes no paid\ncall. The live demo compares the live verdict with it.\n\nAn Intent check's reply is `{\"verdict\": \"match\" | \"mismatch\" | \"unknown\"}`: the one\nword the model answers (core/signals/intent_check.py).",
       "properties": {
         "job": {
           "enum": [

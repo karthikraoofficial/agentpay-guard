@@ -121,7 +121,7 @@ There are 60 journeys in 8 groups.
 **Guard's answer:** Allow. ShopBot pays, and the payment is scheduled, then taken.
 **Why it matters:** The Guard must stay invisible for normal, small, expected spending. If it questioned everything, nobody would use the assistant.
 
-### A2. A medium-sized order with a matching cart 🟢
+### A2. A medium-sized order with a matching cart ✅
 **Story:** Asha asks for "this week's groceries for a family of four." The cart is ₹3,200 of groceries at a shop she has used before. The cart check says it matches.
 **Guard's answer:** Allow.
 **Why it matters:** It shows the Guard checks *what* is being bought, not just *how much*, and still says yes quickly when everything lines up.
@@ -224,22 +224,22 @@ None of these is necessarily wrong, but each is unusual enough that a human shou
 
 From ₹2,000 upwards, ShopBot must show the Guard what Asha asked for and what is actually in the cart. An AI model compares the two. This is the only AI involved before a payment, and it can only ever make the Guard *more* careful, never less.
 
-### D1. Cart matches 🟢
+### D1. Cart matches ✅
 **Story:** Asha: "Get ingredients for biryani for 8." Cart: rice, chicken, spices, yoghurt, ₹2,800 at FreshMart, where she shops regularly.
 **Guard's answer:** The cart check says *match*. With no other warning signs, Allow.
 **Why it matters:** It shows the AI check adding confidence, not just friction.
 
-### D2. Cart doesn't match 🟢
+### D2. Cart doesn't match ✅
 **Story:** Asha asked for "groceries for the week." The cart has six bottles of premium whisky.
 **Guard's answer:** The cart check says *mismatch*. Step up, reason `INTENT_MISMATCH`. Asha's approval screen says plainly that the cart doesn't match what she asked for.
 **Why it matters:** This catches an assistant that misunderstood, or was tricked into buying something else, even though the shop type and amount looked fine.
 
-### D3. No cart check at all 🟢
+### D3. No cart check at all ✅
 **Story:** ShopBot skips the cart check and goes straight to "may I pay ₹3,000?"
 **Guard's answer:** Step up, reason `INTENT_MISSING`.
 **Why it matters:** Skipping the check never gets you a quicker yes.
 
-### D4. The AI can't tell 🟢
+### D4. The AI can't tell ✅
 **Story:** Asha's request is vague ("get the usual") and the AI can't confirm the cart.
 **Guard's answer:** The cart check says *unsure*. Step up, reason `INTENT_UNKNOWN`.
 **Why it matters:** When in doubt, ask the human.
@@ -249,7 +249,7 @@ From ₹2,000 upwards, ShopBot must show the Guard what Asha asked for and what 
 **Guard's answer:** The cart check comes back *unsure*, so the Guard steps up. Payments keep flowing; they just ask Asha first.
 **Why it matters:** An AI outage makes the system more careful, never less safe, and never stops it working. *Demo control:* a "switch the AI off" toggle.
 
-### D6. The price crept up 🟢
+### D6. The price crept up ✅
 **Story:** The cart check was done at ₹2,500. By the time ShopBot pays, the amount is ₹2,700 (8% more: a hidden delivery fee).
 **Guard's answer:** Step up, reason `PRICE_DRIFT`. Up to 2% extra is tolerated; paying *less* is always fine.
 **Why it matters:** It stops "drip pricing", where fees appear between the basket and the payment.
@@ -460,20 +460,20 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 
 | Group | Journeys | ✅ In today's demo | 🟢 Ready in the code | 🟡 Needs a demo control |
 |---|---|---|---|---|
-| A. Everyday yes | 2 | 1 | 1 | 0 |
+| A. Everyday yes | 2 | 2 | 0 | 0 |
 | B. Hard limits | 10 | 10 | 0 | 0 |
 | C. Warning signs | 6 | 1 | 5 | 0 |
-| D. Cart check | 7 | 1 | 5 | 1 |
+| D. Cart check | 7 | 6 | 0 | 1 |
 | E. Asking Asha | 6 | 6 | 0 | 0 |
 | F. Paying | 9 | 6 | 3 | 0 |
 | G. Disputes | 12 | 1 | 9 | 2 |
 | H. Refunds and proof | 8 | 4 | 3 | 1 |
-| **Total** | **60** | **30** | **26** | **4** |
+| **Total** | **60** | **36** | **20** | **4** |
 
-*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), D5, F8, F9 and H6 (#281), and B1 to B9 (#277).*
+*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), D5, F8, F9 and H6 (#281), B1 to B9 (#277), and A2, D1 to D4 and D6 (#279).*
 
 **What this means for the build:**
-- **26 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
+- **20 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
 - **4 journeys still need a Scenario on a demo-only control:**
   1. **Fast-forward** (built for Consent requests, Payment windows and notice periods, ADR-0032): still to come for a stale cart check (D7) and a Dispute deadline (G11).
   2. **Failure switches** (built, ADR-0032): AI off is still to be shown in a Dispute (G8), and bank declining in a refund (H3).

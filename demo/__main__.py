@@ -130,6 +130,14 @@ def _describe(card: engine.Card) -> str:
             f"{call.name}: {d.outcome} (Reason codes: {reasons}; Decision {d.decision_id}, "
             f"pack {d.policy_pack}, Audit record {d.audit_record_id})"
         )
+    if card.intent is not None:
+        i = card.intent
+        line = f"{call.name}: {i.verdict}" + (f", {i.failure_cause}" if i.failure_cause else "")
+        if i.scripted is not None:
+            line += f" (scripted: {i.scripted})"
+        if i.differs:
+            line += "; the live verdict differs from the script, so the run carries on with it"
+        return line
     response = call.response
     if card.consent is not None:
         return f"{call.name}: Consent request {card.consent.status}"

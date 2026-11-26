@@ -1,0 +1,88 @@
+{
+  "id": "D4",
+  "title": "The AI can't tell",
+  "group": "D",
+  "playlists": [],
+  "story": "Asha's request is vague: \"get the usual.\" ShopBot's cart is INR 2,400 of assorted groceries at FreshMart. The cart check can't confirm it matches, so the Guard asks Asha.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures",
+    "history": [
+      {
+        "amount": {
+          "minor": 50000,
+          "currency": "INR"
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "check_intent",
+      "amount": {
+        "minor": 240000,
+        "currency": "INR"
+      },
+      "instruction": "Get the usual.",
+      "item": "Assorted groceries",
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Get the usual."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "I've put together the usual at FreshMart for INR 2,400. Getting the cart checked."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 240000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Asking AgentPay Guard before I pay."
+        }
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "step_up",
+    "reason_codes": [
+      "INTENT_UNKNOWN"
+    ]
+  },
+  "model_replies": [
+    {
+      "job": "intent_check",
+      "reply": {
+        "verdict": "unknown"
+      }
+    }
+  ],
+  "what_to_notice": "Unsure never counts as yes. When the model can't tell, the human is asked, the same as when the model is down (D5)."
+}

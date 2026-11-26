@@ -1,0 +1,86 @@
+{
+  "id": "D1",
+  "title": "Cart matches",
+  "group": "D",
+  "playlists": [],
+  "story": "Asha asks ShopBot for biryani ingredients for 8. The cart is rice, chicken, spices and yoghurt, INR 2,800 at FreshMart, where she shops regularly. The cart check says match, and with no other warning signs the Guard allows it.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures",
+    "history": [
+      {
+        "amount": {
+          "minor": 50000,
+          "currency": "INR"
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "check_intent",
+      "amount": {
+        "minor": 280000,
+        "currency": "INR"
+      },
+      "instruction": "Get ingredients for biryani for 8.",
+      "item": "Biryani for 8: basmati rice, chicken, biryani spices, yoghurt",
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Get ingredients for biryani for 8."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Rice, chicken, spices and yoghurt at FreshMart come to INR 2,800. Getting the cart checked."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 280000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Asking AgentPay Guard before I pay."
+        }
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "allow",
+    "reason_codes": []
+  },
+  "model_replies": [
+    {
+      "job": "intent_check",
+      "reply": {
+        "verdict": "match"
+      }
+    }
+  ],
+  "what_to_notice": "The model's match is what lets an INR 2,800 payment through without asking Asha: the AI check adds confidence, not just friction. It can never loosen a hard limit, though; it only stands in for one warning sign."
+}

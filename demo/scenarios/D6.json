@@ -1,0 +1,88 @@
+{
+  "id": "D6",
+  "title": "The price crept up",
+  "group": "D",
+  "playlists": [],
+  "story": "The cart check was done at INR 2,500 and matched. By the time ShopBot pays, a delivery fee has appeared and the amount is INR 2,700, 8% more. Up to 2% extra is tolerated, so the Guard asks Asha.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures",
+    "history": [
+      {
+        "amount": {
+          "minor": 50000,
+          "currency": "INR"
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "check_intent",
+      "amount": {
+        "minor": 250000,
+        "currency": "INR"
+      },
+      "instruction": "Order this week's vegetables and fruit.",
+      "item": "Vegetables and fruit for the week",
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Order this week's vegetables and fruit."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "This week's vegetables and fruit at FreshMart come to INR 2,500. Getting the cart checked."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 270000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Checkout added a delivery fee: it's INR 2,700 now. Asking AgentPay Guard before I pay."
+        }
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "step_up",
+    "reason_codes": [
+      "PRICE_DRIFT"
+    ]
+  },
+  "model_replies": [
+    {
+      "job": "intent_check",
+      "reply": {
+        "verdict": "match"
+      }
+    }
+  ],
+  "what_to_notice": "The cart matched, but the amount asked for is 8% above the checked total. That's drip pricing, and the Guard catches it: INTENT passes and PRICE_DRIFT steps up. Paying less than the checked total is always fine."
+}

@@ -53,3 +53,29 @@ def test_money_in_a_scenario_is_integer_minor_units(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="minor"):
         catalogue(tmp_path)
+
+
+def test_a_scripted_intent_reply_is_one_verdict(tmp_path: Path) -> None:
+    d1 = json.loads(Path("demo/scenarios/D1.json").read_text(encoding="utf-8"))
+    d1["model_replies"] = [{"job": "intent_check", "reply": {"verdict": "probably"}}]
+    (tmp_path / "D1.json").write_text(json.dumps(d1), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="verdict"):
+        catalogue(tmp_path)
+
+
+def test_each_intent_check_that_reaches_the_model_has_one_scripted_reply(tmp_path: Path) -> None:
+    d1 = json.loads(Path("demo/scenarios/D1.json").read_text(encoding="utf-8"))
+    d1["model_replies"] = []
+    (tmp_path / "D1.json").write_text(json.dumps(d1), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"1 Intent check step.* 0 scripted"):
+        catalogue(tmp_path)
+
+
+def test_scripted_verdicts_skip_a_check_made_with_the_ai_off() -> None:
+    scenarios = catalogue()
+
+    assert scenarios["D5"].scripted_verdicts() == {}
+    assert scenarios["D2"].scripted_verdicts() == {0: "mismatch"}
+    assert scenarios["D6"].scripted_verdicts() == {0: "match"}
