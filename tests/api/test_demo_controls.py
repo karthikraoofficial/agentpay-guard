@@ -15,6 +15,7 @@ from adapters.memory.settling_rail import SettlingMockRail
 from api.admin import create_tenant
 from api.payability import payable_until
 from core.debits import run_debit_step
+from core.disputes import expire_dispute
 from core.domain.decisions import DecisionId
 from core.domain.demo_controls import DemoControl
 from core.domain.disputes import DisputeId
@@ -358,6 +359,96 @@ def test_a_disputed_payment_whose_notice_was_ended_still_builds_its_evidence(api
     )
     assert report is not None and [v.problems for v in report.versions] == [[]]
     demo.api.assert_evidence_holds()
+
+
+def _disputed(demo: Demo) -> dict[str, Any]:
+    """A captured INR 1,250 Payment, disputed with a 10-day deadline, its pack built."""
+    decision = demo.decide(SMALL)
+    paid = demo.api.post("/v1/payments", demo.headers, {"decision_id": decision["decision_id"]})
+    assert paid.status_code == 202, paid.text
+    demo.api.clock.advance(timedelta(minutes=2))
+    sweep(demo.api.store, SettlingMockRail(demo.api.store), demo.api.clock, timedelta(seconds=60))
+    respond_by = demo.api.clock.now() + timedelta(days=10)
+    opened = demo.api.post(
+        "/v1/disputes",
+        demo.headers,
+        {
+            "payment_id": paid.json()["payment_id"],
+            "reason": "unauthorised",
+            "respond_by": respond_by.isoformat().replace("+00:00", "Z"),
+        },
+    )
+    assert opened.status_code == 201, opened.text
+    dispute: dict[str, Any] = opened.json()
+    built = build_evidence_pack(
+        demo.api.store,
+        demo.tenant_id,
+        DisputeId(dispute["dispute_id"]),
+        demo.api.clock,
+        demo.api.packs,
+        None,
+    )
+    assert built == "built"
+    return dispute
+
+
+def _dispute(demo: Demo, dispute_id: str) -> dict[str, Any]:
+    found: dict[str, Any] = demo.api.client.get(
+        f"/v1/disputes/{dispute_id}", headers=demo.headers
+    ).json()
+    return found
+
+
+def test_expire_now_expires_a_dispute_as_its_deadline_would(demo: Demo) -> None:
+    dispute = _disputed(demo)
+
+    ended = demo.control(f"disputes/{dispute['dispute_id']}/expire")
+
+    assert ended.status_code == 200, ended.text
+    assert ended.json()["control"] == "expire_dispute"
+    assert ended.json()["decision_id"] == dispute["decision_id"]
+    read = _dispute(demo, dispute["dispute_id"])
+    assert read["status"] == "expired"
+    assert read["respond_by"] == dispute["respond_by"]  # the deadline wasn't edited
+    with demo.api.store.transaction(demo.tenant_id) as tx:
+        rows, _ = tx.read_audit_chain()
+    assert rows[-1].kind == "demo_control"
+    events = {e.event_type for e in demo.api.store.undelivered(100)}
+    # The Tenant hears of it as of a deadline, and the workflow stops waiting.
+    assert {"dispute.expired", "dispute_closed"} <= events
+    demo.api.assert_evidence_holds()
+
+
+def test_the_deadline_timer_then_finds_the_dispute_closed(demo: Demo) -> None:
+    dispute = _disputed(demo)
+    demo.control(f"disputes/{dispute['dispute_id']}/expire")
+    demo.api.clock.advance(timedelta(days=11))
+
+    outcome = expire_dispute(
+        demo.api.store, demo.tenant_id, DisputeId(dispute["dispute_id"]), demo.api.clock
+    )
+
+    assert outcome == "already_closed"
+
+
+def test_a_closed_dispute_cant_be_expired(demo: Demo) -> None:
+    dispute = _disputed(demo)
+    withdrawn = demo.api.post(f"/v1/disputes/{dispute['dispute_id']}/withdraw", demo.headers)
+    assert withdrawn.status_code == 200, withdrawn.text
+
+    refused = demo.control(f"disputes/{dispute['dispute_id']}/expire")
+
+    assert refused.status_code == 409
+    assert refused.json()["code"] == "DISPUTE_CLOSED"
+
+
+def test_another_tenants_dispute_cant_be_expired(demo: Demo) -> None:
+    refused = demo.control("disputes/dsp_missing/expire")
+    other = demo.api.new_tenant("Other")
+
+    elsewhere = demo.control("disputes/dsp_missing/expire", other)
+
+    assert (refused.status_code, elsewhere.status_code) == (404, 404)
 
 
 def test_a_payment_the_worker_debited_can_be_refunded_through_the_api(api: Api) -> None:

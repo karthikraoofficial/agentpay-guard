@@ -1,0 +1,142 @@
+{
+  "id": "G5",
+  "title": "\"I had cancelled this\"",
+  "group": "G",
+  "playlists": [],
+  "story": "ShopBot pays FreshMart INR 1,250 for Asha's usual groceries. Afterwards Asha cancels ShopBot's permission, then tells her bank the payment came after she had cancelled. The Guard checks the timestamps: the permission was active when the Decision was made, so the evidence is strong.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "check_intent",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "instruction": "Reorder my usual milk and bread.",
+      "item": "Usual milk and bread",
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Reorder my usual milk and bread, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart is INR 1,250. Getting the cart checked."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Allowed. Paying FreshMart now."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": [
+        "captured",
+        "failed"
+      ],
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The payment is scheduled. I'll let you know once the money is taken."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/mandates/{mandate_id}/revoke",
+      "body": {
+        "revoked_by": "payer"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "I don't want ShopBot paying for things any more. Cancelling its permission."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/disputes",
+      "body": {
+        "payment_id": "{payment_id}",
+        "reason": "cancelled_recurring"
+      },
+      "respond_in_days": 10,
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "I had cancelled ShopBot, and FreshMart still charged me. I've disputed it."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/disputes/{dispute_id}",
+      "until_status": [
+        "in_review"
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "allow",
+    "payment_status": "captured",
+    "dispute_status": "in_review",
+    "evidence_strength": "strong",
+    "visa_code": "13.2",
+    "mastercard_code": "4841",
+    "missing_evidence": []
+  },
+  "model_replies": [
+    {
+      "job": "intent_check",
+      "reply": {
+        "verdict": "match"
+      }
+    }
+  ],
+  "what_to_notice": "The Revocation is in the records with its time, and so is the Decision. The Mandate was active when the Decision was made and was cancelled only afterwards, so \"I had cancelled\" doesn't hold. Revoking stops new payments; it doesn't undo one already made."
+}

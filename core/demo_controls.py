@@ -9,10 +9,12 @@ allow a Demo Tenant only on the mock rail, so no control can touch real money.
 
 from datetime import datetime
 
+from core.disputes import expire_now
 from core.domain.audit import AuditRecord, DemoControlEvidence, seal
 from core.domain.consent import ConsentRequest
 from core.domain.decisions import AuditRecordId, DecisionId
 from core.domain.demo_controls import DemoControl, DemoControlKind
+from core.domain.disputes import Dispute
 from core.domain.parties import TenantId, new_id
 from core.ports import TenantTransaction
 from core.resolutions import record_resolution
@@ -80,4 +82,13 @@ def expire_consent_now(
         tx, "expire_consent", consent.consent_request_id, consent.decision_id, now
     )
     record_resolution(tx, consent, "expired", "demo_control", None, now)
+    return control
+
+
+def expire_dispute_now(tx: TenantTransaction, dispute: Dispute, now: datetime) -> DemoControl:
+    """End a Dispute's response deadline now: the control's record, then the same `expired`
+    transition the deadline runs. `respond_by` is left as it was. The caller holds the
+    Dispute's lock and has checked it isn't closed."""
+    control = record_control(tx, "expire_dispute", dispute.dispute_id, dispute.decision_id, now)
+    expire_now(tx, dispute, now)
     return control

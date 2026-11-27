@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { OUTCOME_TEXT, reasonText } from "@/lib/reason-codes";
+import { FACT_TEXT } from "@/lib/review-api";
 import {
   demoStatus,
   nextStep,
@@ -548,6 +549,13 @@ function DisputeCard({ dispute }: { dispute: DisputeView }) {
           )}
           , narrative written by {dispute.narrative_source === "model" ? "the model" : "code"}.
           {dispute.signed_off_version !== null && ` Version ${dispute.signed_off_version} signed off by ${dispute.reviewer}.`}
+        </p>
+      )}
+      {dispute.visa_code && (
+        <p className="text-xs">
+          Filed under Visa {dispute.visa_code}, Mastercard {dispute.mastercard_code}.
+          {dispute.missing_evidence.length > 0 &&
+            ` Missing for strong evidence: ${dispute.missing_evidence.map((f) => FACT_TEXT[f] ?? f).join("; ")}.`}
         </p>
       )}
       {dispute.narrative_note && (

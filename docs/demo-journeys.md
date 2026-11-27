@@ -355,32 +355,32 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 **Guard's answer:** Builds an evidence pack rated **strong**: here is the permission she gave, here is the matching cart check, here is the decision record. A reviewer signs it off, and the pack is verified as unaltered.
 **Why it matters:** This is the case the whole product exists for. The business can prove the assistant did what it was allowed to do.
 
-### G2. "I never authorised this" with weak evidence 🟢
+### G2. "I never authorised this" with weak evidence ✅
 **Story:** Asha disputes a payment where she *had* approved a step-up, but the cart check had said *mismatch*. Or she had cancelled the permission before the money was taken.
 **Guard's answer:** Rates the evidence **weak** and says why.
 **Why it matters:** The Guard is honest when the business is in the wrong, which saves it from fighting disputes it will lose.
 
-### G3. "I was charged the wrong amount" 🟢
+### G3. "I was charged the wrong amount" ✅
 **Story:** Asha says she was charged more than she agreed to.
 **Guard's answer:** Compares the amount taken with the approved amount and the cart total. Strong if they match; weak if they don't.
 **Why it matters:** Proves (or disproves) a price complaint from records, not memory.
 
-### G4. "I was charged twice" 🟢
+### G4. "I was charged twice" ✅
 **Story:** Asha sees two ₹1,250 FreshMart charges and disputes one as a duplicate.
 **Guard's answer:** Looks for another payment to the same shop, for the same amount, within 24 hours. None means strong; one found means weak.
 **Why it matters:** A quick, factual answer to one of the most common complaints.
 
-### G5. "I had cancelled this" 🟢
+### G5. "I had cancelled this" ✅
 **Story:** Asha says she had cancelled ShopBot's permission before the payment.
 **Guard's answer:** Checks whether the permission was active when the decision was made. Active means strong; already cancelled means weak.
 **Why it matters:** Settles "I cancelled it!" arguments with timestamps.
 
-### G6. "It never arrived" or "it's not what was described" 🟢
+### G6. "It never arrived" or "it's not what was described" ✅
 **Story:** Asha says the groceries never arrived, or were the wrong items.
 **Guard's answer:** Builds the pack but says openly that it's **not strong**: the Guard knows what was agreed and paid, but not what was delivered. The shop's delivery proof has to be added.
 **Why it matters:** The Guard doesn't overclaim. It knows the limits of its own evidence.
 
-### G7. Already refunded 🟢
+### G7. Already refunded ✅
 **Story:** Asha disputes a payment that the wallet app had already refunded in full.
 **Guard's answer:** Strong, whatever the complaint, because the records show she already has her money back.
 **Why it matters:** It stops the same money being returned twice.
@@ -400,7 +400,7 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 **Guard's answer:** The dispute is marked withdrawn and closed.
 **Why it matters:** A complete lifecycle, not just the happy path.
 
-### G11. The deadline passes 🟡
+### G11. The deadline passes ✅
 **Story:** Nobody signs off the pack before the response deadline.
 **Guard's answer:** The dispute expires automatically at the deadline.
 **Why it matters:** Missed deadlines are visible and recorded, not silently forgotten. *Demo control:* fast-forward to the deadline.
@@ -466,16 +466,16 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 | D. Cart check | 7 | 6 | 0 | 1 |
 | E. Asking Asha | 6 | 6 | 0 | 0 |
 | F. Paying | 9 | 6 | 3 | 0 |
-| G. Disputes | 12 | 5 | 6 | 1 |
+| G. Disputes | 12 | 12 | 0 | 0 |
 | H. Refunds and proof | 8 | 5 | 2 | 1 |
-| **Total** | **60** | **41** | **16** | **3** |
+| **Total** | **60** | **48** | **10** | **2** |
 
-*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), D5, F8, F9 and H6 (#281), B1 to B9 (#277), A2, D1 to D4 and D6 (#279), and G1, G8, G9, G10, G12 and H7 (#283).*
+*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), D5, F8, F9 and H6 (#281), B1 to B9 (#277), A2, D1 to D4 and D6 (#279), G1, G8, G9, G10, G12 and H7 (#283), and G2 to G7 and G11 (#284).*
 
 **What this means for the build:**
-- **16 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
-- **3 journeys still need a Scenario on a demo-only control:**
-  1. **Fast-forward** (built for Consent requests, Payment windows and notice periods, ADR-0032): still to come for a stale cart check (D7) and a Dispute deadline (G11).
+- **10 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
+- **2 journeys still need a Scenario on a demo-only control:**
+  1. **Fast-forward** (built for Consent requests, Payment windows, notice periods and Dispute deadlines, ADR-0032): still to come for a stale cart check (D7).
   2. **Failure switches** (built, ADR-0032): bank declining is still to be shown in a refund (H3).
 
   Both work only for the demo account on pretend money. The pretend bank already has "declines", "refused" and "times out" cards, so several bank failures need no new switch at all.

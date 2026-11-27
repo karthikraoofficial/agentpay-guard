@@ -321,8 +321,8 @@ demo_controls = Table(
         ["tenant_id", "decision_id"], ["decisions.tenant_id", "decisions.decision_id"]
     ),
     CheckConstraint(
-        "kind IN ('expire_consent', 'expire_payment_window', 'expire_notice', 'ai_off', "
-        "'rail_declining', 'lose_payment', 'rail_down')",
+        "kind IN ('expire_consent', 'expire_payment_window', 'expire_notice', "
+        "'expire_dispute', 'ai_off', 'rail_declining', 'lose_payment', 'rail_down')",
         name="demo_controls_kind",
     ),
     Index("ix_demo_controls_target", "tenant_id", "kind", "target_id"),

@@ -1,0 +1,119 @@
+{
+  "id": "G11",
+  "title": "The deadline passes",
+  "group": "G",
+  "playlists": [],
+  "story": "Asha disputes an INR 1,250 FreshMart payment as unauthorised, with ten days for the business to respond. The Evidence pack is built and waits for a reviewer, but nobody signs it off. The visitor skips to the deadline, and the Dispute expires as it would have on day ten.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Reorder my usual milk and bread, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Allowed. Paying FreshMart now."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": [
+        "captured",
+        "failed"
+      ],
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The payment is scheduled. I'll let you know once the money is taken."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/disputes",
+      "body": {
+        "payment_id": "{payment_id}",
+        "reason": "unauthorised"
+      },
+      "respond_in_days": 10,
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "I don't remember agreeing to this FreshMart charge. I've told my bank I never authorised it."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/disputes/{dispute_id}",
+      "until_status": [
+        "in_review"
+      ]
+    },
+    {
+      "actor": "visitor",
+      "control": "expire_dispute",
+      "label": "Skip to the deadline"
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/disputes/{dispute_id}"
+    }
+  ],
+  "demo_controls": [
+    "expire_dispute"
+  ],
+  "expected": {
+    "outcome": "allow",
+    "payment_status": "captured",
+    "dispute_status": "expired",
+    "evidence_strength": "mixed",
+    "visa_code": "10.4",
+    "mastercard_code": "4837",
+    "missing_evidence": [
+      "payer_intent_confirmed"
+    ]
+  },
+  "what_to_notice": "The deadline wasn't moved and nothing was edited: the Demo control is its own Audit record, and it runs the same transition the deadline timer would. The Dispute is expired, the Tenant is told, and the timer later finds it already closed. A missed deadline is recorded, not forgotten."
+}

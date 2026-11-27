@@ -16,6 +16,9 @@ or the control's time if that came first".
   (`PAYMENT_WINDOW_CLOSED`).
 - `POST /v1/demo/payments/{id}/expire-notice`: the worker's debit step debits the Payment
   on its next run, or fails it if the Mandate no longer allows it.
+- `POST /v1/demo/disputes/{id}/expire`: the Dispute's response deadline passes now, so it
+  is `expired` through the same transition the deadline runs (#284). A closed Dispute
+  answers 409 `DISPUTE_CLOSED`.
 
 The switches (#281) force a failure:
 
@@ -39,11 +42,12 @@ from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
 from api.payability import was_granted
 from core.audit_inspection import verify_tampered_copy
-from core.demo_controls import expire_consent_now, record_control
+from core.demo_controls import expire_consent_now, expire_dispute_now, record_control
 from core.demo_switches import outage_ends_at
 from core.domain.consent import ConsentRequestId
 from core.domain.decisions import DecisionId, decision_time
 from core.domain.demo_controls import RAIL_TARGET, DemoControl, DemoControlKind
+from core.domain.disputes import CLOSED, DisputeId
 from core.domain.mandates import MandateId
 from core.domain.payments import PaymentId
 from core.ports import TenantId
@@ -163,6 +167,31 @@ def expire_notice(
             )
         control = record_control(tx, "expire_notice", payment.payment_id, payment.decision_id, now)
         return 200, _out(control)
+
+    with store.transaction(tenant) as tx:
+        return run_idempotent(tx, key, request_hash(request, None), clock, write)
+
+
+@router.post("/disputes/{dispute_id}/expire", response_model=DemoControlOut)
+def expire_dispute(
+    request: Request,
+    dispute_id: str,
+    tenant: ManageTenant,
+    store: StoreDep,
+    clock: ClockDep,
+    settings: SettingsDep,
+    key: IdemKey,
+) -> Response:
+    _demo_only(tenant, settings, f"Dispute {dispute_id}")
+
+    def write(read_at: datetime) -> tuple[int, DemoControlOut]:
+        now = decision_time(read_at)
+        dispute = tx.lock_dispute(DisputeId(dispute_id))
+        if dispute is None:
+            raise ApiError(404, "NOT_FOUND", f"No Dispute {dispute_id}.")
+        if dispute.status in CLOSED:
+            raise ApiError(409, "DISPUTE_CLOSED", "This Dispute has already closed.")
+        return 200, _out(expire_dispute_now(tx, dispute, now))
 
     with store.transaction(tenant) as tx:
         return run_idempotent(tx, key, request_hash(request, None), clock, write)

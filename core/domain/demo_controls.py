@@ -9,6 +9,8 @@ the one configured Demo Tenant on the mock rail.
 - `expire_payment_window`: the Decision's Payment window ends now.
 - `expire_notice`: the Payment's Pre-debit notice period ends now; the worker's debit step
   then debits it, or fails it if the Mandate no longer allows it.
+- `expire_dispute`: the Dispute's response deadline passes now. The control runs the
+  deadline's transition, so the Dispute is `expired`; `respond_by` is left as it was.
 
 The switches force a failure, and run before any Decision, so they have no `decision_id`:
 
@@ -30,6 +32,7 @@ DemoControlKind = Literal[
     "expire_consent",
     "expire_payment_window",
     "expire_notice",
+    "expire_dispute",
     "ai_off",
     "rail_declining",
     "lose_payment",
@@ -47,7 +50,8 @@ class DemoControl(BaseModel):
     control_id: str
     tenant_id: TenantId
     kind: DemoControlKind
-    # What it acts on: a Consent request, Decision, Payment or Mandate id, or RAIL_TARGET.
+    # What it acts on: a Consent request, Decision, Payment, Dispute or Mandate id, or
+    # RAIL_TARGET.
     target_id: str
     # The Decision it concerns, so its Audit record sits in that Decision's trail. A
     # switch has none.
