@@ -193,27 +193,27 @@ None of these is necessarily wrong, but each is unusual enough that a human shou
 **Guard's answer:** Step up, reason `AMOUNT_ABOVE_STEP_UP_THRESHOLD`. Asha opens the link, sees the amount and shop, and approves. Then ShopBot pays.
 **Why it matters:** Large payments get a human look without being forbidden. The ₹5,000 line is deliberately stricter than the RBI's ₹15,000 limit for automatic debits without extra authentication.
 
-### C2. Nearly at the monthly limit 🟢
-**Story:** Asha has spent ₹38,000 this month. A ₹3,000 order at her usual grocer, with a matching cart, would take her past 80% of her ₹50,000 limit.
+### C2. Nearly at the monthly limit ✅
+**Story:** Asha has spent ₹38,000 this month. A ₹3,000 order at her usual grocer, with a matching cart, would take her past 80% of her ₹50,000 limit. (Demo: a ₹12,000 monthly limit with ₹7,600 already spent in four earlier payments, for the same reason as B2: building ₹38,000 of history would trip the velocity rule on the way.)
 **Guard's answer:** Step up, reason `MONTHLY_CAP_NEAR`.
 **Why it matters:** It warns her before she hits the wall, rather than only refusing afterwards.
 
-### C3. A sudden burst of payments 🟢
-**Story:** ShopBot gets stuck in a loop and fires off its sixth payment request in a few minutes.
+### C3. A sudden burst of payments ✅
+**Story:** ShopBot gets stuck in a loop and fires off its sixth payment request in a few minutes. (Demo: the first five are earlier payments made when the run starts, and Asha declines the sixth.)
 **Guard's answer:** Step up, reason `VELOCITY_HIGH`. If the Guard can't even count the recent requests, it still steps up rather than letting the payment through.
 **Why it matters:** Runaway loops and automated attacks look exactly like this.
 
-### C4. A shop Asha has never paid before 🟢
+### C4. A shop Asha has never paid before ✅
 **Story:** ShopBot finds a cheaper grocer, "GreenBasket", that Asha has never used, for a ₹2,500 order.
 **Guard's answer:** Step up, reason `MERCHANT_NEW`. Small first-time payments (under ₹2,000) are let through.
 **Why it matters:** Fake or look-alike shops are a common scam. A quick confirmation the first time is cheap insurance.
 
-### C5. Several warning signs at once 🟢
+### C5. Several warning signs at once ✅
 **Story:** A ₹7,000 order at a shop Asha has never used, with no cart check.
 **Guard's answer:** Step up, listing *every* reason (`AMOUNT_ABOVE_STEP_UP_THRESHOLD`, `MERCHANT_NEW`, `INTENT_MISSING`), so Asha sees the full picture in one message.
 **Why it matters:** It shows the rules are combined openly, not hidden behind one opaque score.
 
-### C6. A warning sign plus a hard limit 🟢
+### C6. A warning sign plus a hard limit ✅
 **Story:** A ₹6,000 order (a warning sign) at an electronics store (a hard limit).
 **Guard's answer:** Block. The strictest answer wins, and both reasons are recorded.
 **Why it matters:** Asha is never asked to approve something that isn't allowed anyway.
@@ -462,18 +462,18 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 |---|---|---|---|---|
 | A. Everyday yes | 2 | 2 | 0 | 0 |
 | B. Hard limits | 10 | 10 | 0 | 0 |
-| C. Warning signs | 6 | 1 | 5 | 0 |
+| C. Warning signs | 6 | 6 | 0 | 0 |
 | D. Cart check | 7 | 6 | 0 | 1 |
 | E. Asking Asha | 6 | 6 | 0 | 0 |
 | F. Paying | 9 | 6 | 3 | 0 |
 | G. Disputes | 12 | 12 | 0 | 0 |
 | H. Refunds and proof | 8 | 5 | 2 | 1 |
-| **Total** | **60** | **48** | **10** | **2** |
+| **Total** | **60** | **53** | **5** | **2** |
 
-*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), D5, F8, F9 and H6 (#281), B1 to B9 (#277), A2, D1 to D4 and D6 (#279), G1, G8, G9, G10, G12 and H7 (#283), and G2 to G7 and G11 (#284).*
+*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), D5, F8, F9 and H6 (#281), B1 to B9 (#277), A2, D1 to D4 and D6 (#279), G1, G8, G9, G10, G12 and H7 (#283), G2 to G7 and G11 (#284), and C2 to C6 (#278).*
 
 **What this means for the build:**
-- **10 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
+- **5 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
 - **2 journeys still need a Scenario on a demo-only control:**
   1. **Fast-forward** (built for Consent requests, Payment windows, notice periods and Dispute deadlines, ADR-0032): still to come for a stale cart check (D7).
   2. **Failure switches** (built, ADR-0032): bank declining is still to be shown in a refund (H3).

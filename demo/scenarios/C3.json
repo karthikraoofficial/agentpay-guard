@@ -1,0 +1,48 @@
+{
+  "id": "C3",
+  "title": "A sudden burst of payments",
+  "group": "C",
+  "playlists": ["risk-compliance"],
+  "story": "ShopBot gets stuck in a loop: it has already asked to pay FreshMart five times in the last few minutes, and now it asks a sixth time. Each request is small and at a shop Asha uses, but the Guard steps up with VELOCITY_HIGH. Runaway loops and automated attacks look exactly like this, so Asha is asked, and she declines.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
+      "monthly_cap": {"minor": 5000000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"},
+    "card": "token_mock_captures",
+    "history": [
+      {"amount": {"minor": 40000, "currency": "INR"}},
+      {"amount": {"minor": 40000, "currency": "INR"}},
+      {"amount": {"minor": 40000, "currency": "INR"}},
+      {"amount": {"minor": 40000, "currency": "INR"}},
+      {"amount": {"minor": 40000, "currency": "INR"}}
+    ]
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 40000, "currency": "INR"},
+      "chat": [
+        {"speaker": "asha", "text": "Add a packet of tea to this week's order."},
+        {"speaker": "shopbot", "text": "Ordering tea at FreshMart for INR 400. Checking with AgentPay Guard before I pay."}
+      ]
+    },
+    {
+      "actor": "payer",
+      "action": "decline",
+      "chat": [
+        {"speaker": "shopbot", "text": "AgentPay Guard wants you to confirm this one, Asha. I've sent it to your phone."},
+        {"speaker": "asha", "text": "Six orders in a few minutes? I only asked for tea once. No."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "step_up",
+    "reason_codes": ["VELOCITY_HIGH"],
+    "consent_status": "declined"
+  },
+  "what_to_notice": "Every other rule passes: INR 400 is small, FreshMart isn't new, and Asha is far from her monthly limit. velocity steps up because five earlier Decisions on this Mandate fall in the last 10 minutes; the count and the window come from the Policy pack. The five earlier orders are real allowed Decisions made when the run started. If the Guard couldn't count them, the rule would still step up rather than let the payment through."
+}
