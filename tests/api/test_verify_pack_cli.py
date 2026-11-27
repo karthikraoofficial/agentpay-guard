@@ -100,6 +100,25 @@ def test_an_edited_narrative_on_a_signed_off_version_is_caught(
     assert "Pack v2: the narrative written by code differs" in out
 
 
+def test_the_inspector_endpoint_reports_the_same_edit(disputes: Disputes, engine: Engine) -> None:
+    dispute = _signed(disputes)
+    _edit_pack(engine, dispute["dispute_id"], 2, "was captured", "was refunded")
+
+    body = disputes.api.client.get(
+        f"/v1/disputes/{dispute['dispute_id']}/verify-pack", headers=disputes.manage
+    ).json()
+
+    assert (body["status"], body["clean"]) == ("different", False)
+    assert body["versions"][1] == {
+        "version": 2,
+        "signed_off": True,
+        "problems": [
+            "differs from the pack hash its Sign-off recorded",
+            "the narrative written by code differs",
+        ],
+    }
+
+
 def test_an_edited_assessment_is_caught(disputes: Disputes, cli, engine: Engine) -> None:  # type: ignore[no-untyped-def]
     dispute = disputes.built(disputes.captured())
     _edit_pack(engine, dispute["dispute_id"], 1, '"strength":"mixed"', '"strength":"strong"')

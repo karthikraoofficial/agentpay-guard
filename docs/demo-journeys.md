@@ -385,17 +385,17 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 **Guard's answer:** Strong, whatever the complaint, because the records show she already has her money back.
 **Why it matters:** It stops the same money being returned twice.
 
-### G8. The AI writer is unavailable 🟡
+### G8. The AI writer is unavailable ✅
 **Story:** The AI service is down when the evidence summary needs writing.
 **Guard's answer:** Falls back to a plain summary written by code from a template. The dispute still proceeds on time.
 **Why it matters:** Deadlines in disputes are strict, and AI is a nice-to-have here, not a single point of failure. *Demo control:* the "switch the AI off" toggle.
 
-### G9. The reviewer asks for a rewrite 🟢
+### G9. The reviewer asks for a rewrite ✅
 **Story:** The reviewer finds the summary unclear and clicks Regenerate.
 **Guard's answer:** Produces a new version (up to a limit). Sign-off always applies to one exact version, and older versions can't be signed.
 **Why it matters:** A human stays in control of what gets sent, and it's always clear which version was approved.
 
-### G10. The dispute is dropped 🟢
+### G10. The dispute is dropped ✅
 **Story:** Asha calls her bank and drops the complaint.
 **Guard's answer:** The dispute is marked withdrawn and closed.
 **Why it matters:** A complete lifecycle, not just the happy path.
@@ -405,7 +405,7 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 **Guard's answer:** The dispute expires automatically at the deadline.
 **Why it matters:** Missed deadlines are visible and recorded, not silently forgotten. *Demo control:* fast-forward to the deadline.
 
-### G12. Disputing something that can't be disputed 🟢
+### G12. Disputing something that can't be disputed ✅
 **Story:** Someone tries to dispute a payment that was never taken, or dispute the same payment twice.
 **Guard's answer:** Refused with a clear reason (`PAYMENT_NOT_DISPUTABLE`, `PAYMENT_ALREADY_DISPUTED`).
 **Why it matters:** Clean records.
@@ -444,7 +444,7 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 **Guard's answer:** Verification fails and points to exactly where the chain breaks.
 **Why it matters:** It shows the tamper-evidence actually works, rather than just claiming it. *Demo control:* a "tamper with a copy" button. The real database refuses edits outright.
 
-### H7. Proving the evidence pack sent is the one signed 🟢
+### H7. Proving the evidence pack sent is the one signed ✅
 **Story:** Someone questions whether the evidence pack sent to the bank is the one the reviewer approved.
 **Guard's answer:** Checks the pack's fingerprint (hash) against the sign-off, and confirms every claim points to a real record.
 **Why it matters:** Nobody can swap the evidence after approval.
@@ -466,17 +466,17 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 | D. Cart check | 7 | 6 | 0 | 1 |
 | E. Asking Asha | 6 | 6 | 0 | 0 |
 | F. Paying | 9 | 6 | 3 | 0 |
-| G. Disputes | 12 | 1 | 9 | 2 |
-| H. Refunds and proof | 8 | 4 | 3 | 1 |
-| **Total** | **60** | **36** | **20** | **4** |
+| G. Disputes | 12 | 5 | 6 | 1 |
+| H. Refunds and proof | 8 | 5 | 2 | 1 |
+| **Total** | **60** | **41** | **16** | **3** |
 
-*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), D5, F8, F9 and H6 (#281), B1 to B9 (#277), and A2, D1 to D4 and D6 (#279).*
+*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), D5, F8, F9 and H6 (#281), B1 to B9 (#277), A2, D1 to D4 and D6 (#279), and G1, G8, G9, G10, G12 and H7 (#283).*
 
 **What this means for the build:**
-- **20 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
-- **4 journeys still need a Scenario on a demo-only control:**
+- **16 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
+- **3 journeys still need a Scenario on a demo-only control:**
   1. **Fast-forward** (built for Consent requests, Payment windows and notice periods, ADR-0032): still to come for a stale cart check (D7) and a Dispute deadline (G11).
-  2. **Failure switches** (built, ADR-0032): AI off is still to be shown in a Dispute (G8), and bank declining in a refund (H3).
+  2. **Failure switches** (built, ADR-0032): bank declining is still to be shown in a refund (H3).
 
   Both work only for the demo account on pretend money. The pretend bank already has "declines", "refused" and "times out" cards, so several bank failures need no new switch at all.
 

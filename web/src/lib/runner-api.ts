@@ -31,7 +31,12 @@ export type Card = {
     scripted: IntentVerdict | null;
     differs: boolean;
   } | null;
-  // A Payer step: the Consent link Asha answers on (the consent screen, ADR-0008).
+  // A Dispute step: the Dispute as the step left it, with its latest Evidence pack in brief.
+  dispute: DisputeView | null;
+  // A verify-pack step: every pack version against the Audit chain and its Sign-off.
+  pack_check: PackCheck | null;
+  // A Payer step: the Consent link Asha answers on (the consent screen, ADR-0008). A
+  // reviewer step: the Review link the reviewer acts on (the dispute viewer).
   link: string | null;
   // The Consent request as this step left it.
   consent: { consent_request_id: string; status: ConsentStatus; reason_codes: string[] | null } | null;
@@ -44,6 +49,27 @@ export type Card = {
   waiting: boolean;
   finished: boolean;
   mismatches: string[];
+};
+
+export type DisputeView = {
+  dispute_id: string;
+  status: "open" | "in_review" | "ready" | "expired" | "withdrawn";
+  pack_version: number | null;
+  pack_hash: string | null;
+  evidence_strength: "strong" | "mixed" | "weak" | null;
+  // Who wrote the narrative, and why code stood in for the model, if it did.
+  narrative_source: "model" | "template" | null;
+  narrative_note: string | null;
+  signed_off_version: number | null;
+  reviewer: string | null;
+};
+
+export type PackCheck = {
+  dispute_id: string;
+  status: "clean" | "different" | "pack_problem";
+  clean: boolean;
+  versions: { version: number; signed_off: boolean; problems: string[] }[];
+  pack_problems: string[];
 };
 
 export type IntentVerdict = "match" | "mismatch" | "unknown";
@@ -63,6 +89,8 @@ export type Verification = {
     detail: string | null;
   };
   chain: { clean: boolean; record_count: number; first_broken_seq: number | null };
+  // verify-pack, when the run has a Dispute.
+  pack: PackCheck | null;
 };
 
 export type Failure =

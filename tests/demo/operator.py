@@ -10,9 +10,11 @@ from adapters.memory.rail import MockRail
 from adapters.memory.settling_rail import SettlingMockRail
 from api.admin import create_tenant
 from core.debits import run_debit_step
+from core.demo_switches import switchable_writer
 from core.domain.disputes import DisputeId
+from core.domain.evidence import EvidenceBundle
 from core.domain.parties import TenantId
-from core.evidence import build_evidence_pack
+from core.evidence import ModelNarrative, NarrativeWriter, build_evidence_pack, template_narrative
 from core.reconcile import sweep
 from core.relay import relay_once
 from tests.api.conftest import Api, tenant_webhooks
@@ -24,6 +26,12 @@ NOTICE = timedelta(seconds=120)
 LINK = re.compile(r"https?://\S+#(\S+)")
 
 
+def stand_in_writer(tenant_id: TenantId, bundle: EvidenceBundle) -> ModelNarrative:
+    """The model's place in CI: a narrative whose claims cite the bundle's own records,
+    which no scripted reply can, since record ids are made at run time."""
+    return ModelNarrative(template_narrative(bundle), ())
+
+
 class Operator:
     """Everything outside the CLI: the worker, the Payer and the reviewer."""
 
@@ -31,7 +39,6 @@ class Operator:
         self.api = api
         self.out = out
         self.used: set[str] = set()
-        self.built: set[str] = set()
         self.waits = 0
 
     def _links(self, label: str) -> list[str]:
@@ -60,24 +67,25 @@ class Operator:
                 json={"pack_version": 1},
             )
             assert signed.status_code == 200, signed.text
-        # The worker: the debit step, mock settle, the outbox relay, and each new
-        # Dispute's pack.
+        # The worker: the debit step, mock settle, the outbox relay, and each Dispute's
+        # next pack (its first, or one a Regenerate asked for).
         api.clock.advance(timedelta(seconds=30))
         demo = api.client.app.state.settings.demo_controls_tenant_id  # type: ignore[attr-defined]
         demo_tenant = None if demo is None else TenantId(demo)
         run_debit_step(api.store, SettlingMockRail(api.store), api.clock, demo_tenant)
         sweep(api.store, SettlingMockRail(api.store), api.clock, SETTLE_AFTER)
         relay_once(api.store, api.workflow, api.clock, tenant_webhooks(api.store, api.clock))
+        # As the worker does, the AI-off Demo control keeps the model out (ADR-0032).
+        writer: NarrativeWriter = stand_in_writer
+        if demo_tenant is not None:
+            writer = switchable_writer(stand_in_writer, api.store, demo_tenant)
         # Only this test's Tenants: on Postgres the relay also sees other tests' events.
         for dispute_id, tenant_id in api.workflow.dispute_starts.items():
-            if dispute_id not in self.built and tenant_id in api.tenants:
-                self.built.add(dispute_id)
-                assert (
-                    build_evidence_pack(
-                        api.store, tenant_id, DisputeId(dispute_id), api.clock, api.packs, None
-                    )
-                    == "built"
+            if tenant_id in api.tenants:
+                built = build_evidence_pack(
+                    api.store, tenant_id, DisputeId(dispute_id), api.clock, api.packs, writer
                 )
+                assert built in ("built", "already_built", "closed"), built
 
 
 def demo_keys(api: Api) -> tuple[str, str]:

@@ -7,8 +7,9 @@ schema is stale, so the web app, `python -m demo` and the Demo runner read one f
 
 The fields follow `docs/demo-journeys.md` section 8. The chat script is carried on the
 steps (each step's `chat` lines come before its call), and the human steps (approve,
-decline, ignore, sign off, regenerate, withdraw) are steps of their own, so the order of
-what is said and done is the order of one list.
+decline, ignore, sign off, regenerate) are steps of their own, so the order of what is
+said and done is the order of one list. Withdrawing a Dispute is the wallet app's call, a
+Tenant step, as the API has it (G10).
 
 Each step names its actor. An Agent step names a `guard_mcp` tool and goes through that
 tool layer with the decide key; a Tenant step names an HTTP route; a Payer or reviewer
@@ -119,7 +120,7 @@ class Setup(_Model):
 
 
 # An HTTP route as `METHOD /v1/path`; `{name}` is filled from the run: mandate_id,
-# agent_id, decision_id, payment_id or consent_request_id.
+# agent_id, decision_id, audit_record_id, payment_id, consent_request_id or dispute_id.
 Route = Annotated[str, StringConstraints(pattern=r"^(GET|POST) /v1/\S+$")]
 # The Tenant step that registers another Agent, by the `name` in its body (B6).
 REGISTER_AGENT = "POST /v1/agents"
@@ -159,13 +160,27 @@ class AgentStep(_Model):
 
 class TenantStep(_Model):
     """The wallet app calls an HTTP route with the tenant key, e.g.
-    `POST /v1/mandates/{mandate_id}/revoke`."""
+    `POST /v1/mandates/{mandate_id}/revoke`.
+
+    A body value that is exactly `{name}` is filled from the run as in a route, e.g.
+    `{"payment_id": "{payment_id}"}` to open a Dispute on the run's Payment."""
 
     actor: Literal["tenant"]
     route: Route
     chat: list[ChatLine] = []
     body: dict[str, Any] | None = None
+    # Sets the body's `respond_by` to this many days from now: a Dispute's deadline.
+    respond_in_days: int | None = Field(default=None, ge=1, le=120)
+    # A read the run repeats until the answer's `status` is one of these, e.g. a Dispute
+    # waiting for its Evidence pack (`in_review`).
+    until_status: list[str] | None = None
     expect_refusal: str | None = None
+
+    @model_validator(mode="after")
+    def _only_reads_wait(self) -> Self:
+        if self.until_status is not None and not self.route.startswith("GET "):
+            raise ValueError("only a GET route can wait with until_status")
+        return self
 
 
 class HumanStep(_Model):
@@ -176,9 +191,21 @@ class HumanStep(_Model):
     `taps` with one idempotency key, as a double tap on a slow connection would."""
 
     actor: Literal["payer", "reviewer"]
-    action: Literal["approve", "decline", "ignore", "sign_off", "regenerate", "withdraw"]
+    action: Literal["approve", "decline", "ignore", "sign_off", "regenerate"]
     chat: list[ChatLine] = []
     taps: int = Field(default=1, ge=1, le=3)
+
+    @model_validator(mode="after")
+    def _actions_are_the_actors(self) -> Self:
+        allowed = REVIEWER_ACTIONS if self.actor == "reviewer" else PAYER_ACTIONS
+        if self.action not in allowed:
+            raise ValueError(f"a {self.actor} step's action is one of {sorted(allowed)}")
+        return self
+
+
+# What each person can do on their link: the consent screen, and the dispute viewer.
+PAYER_ACTIONS = frozenset({"approve", "decline", "ignore"})
+REVIEWER_ACTIONS = frozenset({"sign_off", "regenerate"})
 
 
 # The Demo controls a visitor can press: fast-forwards (#280) and switches (#281).
@@ -228,6 +255,11 @@ class Expected(_Model):
     replay_status: Literal["identical", "different"] | None = None
     # Whether a Verify step found the Tenant's Audit chain clean (H5).
     chain_clean: bool | None = None
+    # Who wrote the latest Evidence pack's narrative: the model, or code (G8).
+    narrative_source: Literal["model", "template"] | None = None
+    # Whether a verify-pack step found every pack version matching the Audit chain and
+    # its Sign-off, and the chain clean (H7).
+    pack_clean: bool | None = None
 
 
 class ModelReply(_Model):

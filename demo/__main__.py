@@ -2,7 +2,8 @@
 
 `--scenario <id>` runs one Scenario from the catalogue (demo/scenarios/) through the step
 engine the Demo runner uses; `--journey 1..4` runs the original four journeys, of which
-journey 2 (a step-up the Payer approves) is now Scenario E1.
+journey 2 (a step-up the Payer approves) is now Scenario E1 and journey 3 (a disputed
+Payment, signed off and verified) Scenario G1.
 
 The Demo Tenant's keys come from settings (AGENTPAY_DEMO_AGENT_KEY and
 AGENTPAY_DEMO_TENANT_KEY), never from the command line, and are never printed. The
@@ -23,8 +24,8 @@ from demo.journeys import Demo, StepFailed
 from demo.scenario import Scenario, catalogue
 
 JOURNEYS = ("1", "2", "3", "4")
-# Journeys that now run as a Scenario through the step engine (#276).
-AS_SCENARIO = {"2": "E1"}
+# Journeys that now run as a Scenario through the step engine (#276, #283).
+AS_SCENARIO = {"2": "E1", "3": "G1"}
 
 
 def main(argv: Sequence[str] | None = None, settings: Settings | None = None) -> int:
@@ -138,6 +139,25 @@ def _describe(card: engine.Card) -> str:
         if i.differs:
             line += "; the live verdict differs from the script, so the run carries on with it"
         return line
+    if card.pack_check is not None:
+        p = card.pack_check
+        signed = [str(v.version) for v in p.versions if v.signed_off and not v.problems]
+        matches = f" (v{', v'.join(signed)} matches its Sign-off)" if signed else ""
+        problems = [f"v{v.version}: {'; '.join(v.problems)}" for v in p.versions if v.problems]
+        found = f" ({'; '.join(problems)})" if problems else ""
+        return f"verify-pack: {p.status}{matches}{found}"
+    if card.dispute is not None:
+        ds = card.dispute
+        line = f"{call.name}: Dispute {ds.dispute_id} {ds.status}"
+        if ds.pack_version is not None:
+            writer = {"model": "the model", "template": "code"}.get(str(ds.narrative_source))
+            line += f", pack v{ds.pack_version}, strength {ds.evidence_strength or 'n/a'}"
+            line += f", narrative by {writer or ds.narrative_source}"
+            if ds.narrative_note:
+                line += f" ({ds.narrative_note})"
+        if ds.signed_off_version is not None:
+            line += f", v{ds.signed_off_version} signed off by {ds.reviewer}"
+        return line
     response = call.response
     if card.consent is not None:
         return f"{call.name}: Consent request {card.consent.status}"
@@ -173,7 +193,9 @@ async def run_scenario(
             told.add(card.step)
             for line in card.chat:
                 say(f"  {_SPEAKERS[line.speaker]}: {line.text}")
-            if card.link and card.waiting:
+            if card.link and card.waiting and card.actor == "reviewer":
+                say(f"  - Review link (open it and act as the reviewer): {card.link}")
+            elif card.link and card.waiting:
                 say(f"  - Consent link (open it and answer as Asha): {card.link}")
         if card.fast_forward:
             # No button in a terminal: press fast-forward at once (a Demo control).

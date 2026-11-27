@@ -3,13 +3,13 @@
 1. An Agent pays within its Mandate: allow, then a Payment.
 2. A step-up the Payer approves: now Scenario E1 (demo/scenarios/E1.json), which
    `python -m demo --journey 2` plays through the step engine (#276).
-3. A dispute: a captured Payment is disputed, a reviewer signs off its Evidence pack
-   through the printed Review link, and the pack is verified against its Sign-off.
+3. A dispute signed off and verified: now Scenario G1 (demo/scenarios/G1.json), which
+   `python -m demo --journey 3` plays through the step engine (#283).
 4. A refund: a captured Payment is refunded in two parts, and the Monthly cap it used is
    given back, so a Decision it blocked is allowed (#211).
 
 Each journey sets up its own Payer, Agent and Mandate the first time it needs them, so any
-journey can run on its own. Whenever it waits (for the worker, the Payer or the reviewer)
+journey can run on its own. Whenever it waits (for the worker or the Payer)
 it calls `wait`, which sleeps in the CLI and plays those parts in the tests. A failure
 raises StepFailed naming the step. Keys go only into Authorization headers, never into
 output."""
@@ -21,9 +21,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
 
 import httpx
-from pydantic import ValidationError
-
-from core.domain.evidence import EvidencePack
 
 T = TypeVar("T")
 Json = dict[str, Any]
@@ -37,7 +34,6 @@ MOCK_CARD = {
     "token_ref": "token_mock_captures",
     "display": "visa 1111",
 }
-REVIEWER = {"id": "demo-reviewer", "name": "Demo reviewer"}
 
 
 class StepFailed(Exception):
@@ -229,65 +225,6 @@ class Demo:
         decision = self._decide(SMALL, "allow")
         return self._pay(decision["decision_id"])
 
-    def journey_3(self) -> Json:
-        self.say("Journey 3: a captured Payment is disputed, and its evidence signed off")
-        decision = self._decide(SMALL, "allow")
-        payment_id = self._captured(self._pay(decision["decision_id"])["payment_id"])["payment_id"]
-
-        opened = self._call(
-            "Open a Dispute",
-            "POST",
-            "/v1/disputes",
-            self.tenant_key,
-            {
-                "payment_id": payment_id,
-                "reason": "unauthorised",
-                "respond_by": _iso(self.now() + timedelta(days=10)),
-            },
-        )
-        dispute_id = opened["dispute_id"]
-        self._step(f"The Payer says it was unauthorised: Dispute {dispute_id} opened")
-
-        step = "Wait for the Evidence pack"
-
-        def built() -> Json | None:
-            got = self._call(step, "GET", f"/v1/disputes/{dispute_id}", self.tenant_key)
-            return got if got["status"] != "open" else None
-
-        dispute = self._until(step, built)
-        if dispute["pack"] is None:
-            raise StepFailed(step, f"the Dispute is {dispute['status']} with no pack")
-        assessment = dispute["pack"]["assessment"] or {}
-        self._step(
-            f"Evidence pack v{dispute['pack']['version']}: strength "
-            f"{assessment.get('strength', 'n/a')}, Visa {assessment.get('visa_code', 'n/a')}, "
-            f"Mastercard {assessment.get('mastercard_code', 'n/a')}, "
-            f"{len(dispute['pack']['narrative'])} cited claims, written by "
-            f"{'the model' if dispute['pack']['narrative_source'] == 'model' else 'code'}"
-        )
-
-        link = self._call(
-            "Make a Review link",
-            "POST",
-            f"/v1/disputes/{dispute_id}/review-link",
-            self.tenant_key,
-            {"reviewer": REVIEWER},
-        )
-        self._step(f"Review link (open it and sign off as the reviewer): {link['url']}")
-
-        step = "Wait for the reviewer to sign off"
-
-        def signed() -> Json | None:
-            got = self._call(step, "GET", f"/v1/disputes/{dispute_id}", self.tenant_key)
-            return got if got["status"] != "in_review" else None
-
-        dispute = self._until(step, signed)
-        if dispute["status"] != "ready":
-            raise StepFailed(step, f"the Dispute is {dispute['status']}")
-        self._step(f"Signed off by {dispute['sign_off']['reviewer']['name']}")
-        self._verify(dispute)
-        return dispute
-
     def journey_4(self) -> Json:
         self.say("Journey 4: a captured Payment is refunded, and its Monthly cap given back")
         # A Mandate of its own, so the cap is tight enough to show: INR 2,000 a month.
@@ -307,20 +244,3 @@ class Demo:
             f"{money(refunded['refunded'])} refunded in {len(refunded['refunds'])} Refunds"
         )
         return refunded
-
-    def _verify(self, dispute: Json) -> None:
-        step = "Verify the Evidence pack"
-        try:
-            pack = EvidencePack.model_validate(dispute["pack"])
-        except ValidationError as exc:
-            raise StepFailed(step, f"the pack doesn't hold together: {exc}") from exc
-        sign_off = dispute["sign_off"]
-        computed = pack.hash()
-        if computed != dispute["pack_hash"] or computed != sign_off["pack_hash"]:
-            raise StepFailed(step, "the pack's hash doesn't match its Sign-off")
-        if pack.version != sign_off["pack_version"]:
-            raise StepFailed(step, "the Sign-off is for another pack version")
-        self._step(
-            f"Verified: pack v{pack.version} hashes to {computed[:19]}..., the hash the "
-            "Sign-off approved, and every claim cites a record in its bundle"
-        )

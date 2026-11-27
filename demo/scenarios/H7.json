@@ -1,0 +1,110 @@
+{
+  "id": "H7",
+  "title": "Proving the evidence pack sent is the one signed",
+  "group": "H",
+  "playlists": [],
+  "story": "A disputed INR 1,250 payment's Evidence pack is signed off by a reviewer. Later someone asks whether the pack sent to the bank is the one the reviewer approved. Verify-pack rebuilds the evidence from the Audit chain, checks the pack's hash against the Sign-off, and walks the chain.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Reorder my usual milk and bread, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Allowed. Paying FreshMart now."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": [
+        "captured",
+        "failed"
+      ],
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The payment is scheduled. I'll let you know once the money is taken."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/disputes",
+      "body": {
+        "payment_id": "{payment_id}",
+        "reason": "unauthorised"
+      },
+      "respond_in_days": 10,
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "I don't remember agreeing to this FreshMart charge. I've told my bank I never authorised it."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/disputes/{dispute_id}",
+      "until_status": [
+        "in_review"
+      ]
+    },
+    {
+      "actor": "reviewer",
+      "action": "sign_off"
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/disputes/{dispute_id}/verify-pack"
+    }
+  ],
+  "expected": {
+    "outcome": "allow",
+    "payment_status": "captured",
+    "dispute_status": "ready",
+    "pack_clean": true
+  },
+  "what_to_notice": "The Sign-off recorded the pack's hash in the Audit chain. Verify-pack hashes the stored pack again and compares, rebuilds its bundle from the chain, and checks every claim cites a record in it. Nobody can swap the evidence after approval without it showing."
+}

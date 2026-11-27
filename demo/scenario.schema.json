@@ -227,6 +227,22 @@
           "default": null,
           "title": "Evidence Strength"
         },
+        "narrative_source": {
+          "anyOf": [
+            {
+              "enum": [
+                "model",
+                "template"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Narrative Source"
+        },
         "outcome": {
           "anyOf": [
             {
@@ -243,6 +259,18 @@
           ],
           "default": null,
           "title": "Outcome"
+        },
+        "pack_clean": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pack Clean"
         },
         "payment_failure_code": {
           "anyOf": [
@@ -347,8 +375,7 @@
             "decline",
             "ignore",
             "sign_off",
-            "regenerate",
-            "withdraw"
+            "regenerate"
           ],
           "title": "Action",
           "type": "string"
@@ -587,7 +614,7 @@
     },
     "TenantStep": {
       "additionalProperties": false,
-      "description": "The wallet app calls an HTTP route with the tenant key, e.g.\n`POST /v1/mandates/{mandate_id}/revoke`.",
+      "description": "The wallet app calls an HTTP route with the tenant key, e.g.\n`POST /v1/mandates/{mandate_id}/revoke`.\n\nA body value that is exactly `{name}` is filled from the run as in a route, e.g.\n`{\"payment_id\": \"{payment_id}\"}` to open a Dispute on the run's Payment.",
       "properties": {
         "actor": {
           "const": "tenant",
@@ -627,10 +654,39 @@
           "default": null,
           "title": "Expect Refusal"
         },
+        "respond_in_days": {
+          "anyOf": [
+            {
+              "maximum": 120,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Respond In Days"
+        },
         "route": {
           "pattern": "^(GET|POST) /v1/\\S+$",
           "title": "Route",
           "type": "string"
+        },
+        "until_status": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Until Status"
         }
       },
       "required": [

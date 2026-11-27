@@ -56,7 +56,8 @@ _AGENT_TOOLS = {
     "create_payment",
     "get_payment",
 }
-_PAYER_ACTIONS = {"approve", "decline", "ignore"}
+# Who the run's Review links name: the Tenant attests who reviews (Reviewer).
+_REVIEWER = {"id": "demo-reviewer", "name": "Demo reviewer"}
 _CHECKED = {
     "outcome",
     "reason_codes",
@@ -66,6 +67,10 @@ _CHECKED = {
     "refusal_code",
     "replay_status",
     "chain_clean",
+    "dispute_status",
+    "evidence_strength",
+    "narrative_source",
+    "pack_clean",
 }
 _FAST_FORWARDS = set(get_args(FastForward))
 # Each fast-forward's Demo control route (ADR-0032) and the run's id it ends.
@@ -143,11 +148,46 @@ class ChainView(BaseModel):
     first_broken_seq: int | None = None
 
 
+class PackVersionView(BaseModel):
+    version: int
+    signed_off: bool
+    problems: list[str]
+
+
+class PackCheckView(BaseModel):
+    """verify-pack's answer (#283): each Evidence pack version against the Audit chain
+    and its Sign-off, then the chain."""
+
+    dispute_id: str
+    status: str  # clean, different or pack_problem
+    clean: bool
+    versions: list[PackVersionView]
+    pack_problems: list[str] = []
+
+
 class Verification(BaseModel):
-    """The inspector's Verify / Replay button: both answers (#275)."""
+    """The inspector's Verify / Replay button: both answers (#275), and verify-pack's
+    when the run has a Dispute (#283)."""
 
     replay: ReplayView
     chain: ChainView
+    pack: PackCheckView | None = None
+
+
+class DisputeView(BaseModel):
+    """A Dispute as the Tenant reads it, with its latest Evidence pack in brief."""
+
+    dispute_id: str
+    status: str
+    pack_version: int | None = None
+    pack_hash: str | None = None
+    evidence_strength: str | None = None
+    # Who wrote the narrative (model or template) and, for code standing in for the
+    # model, why (e.g. "model narrative unavailable").
+    narrative_source: str | None = None
+    narrative_note: str | None = None
+    signed_off_version: int | None = None
+    reviewer: str | None = None
 
 
 class IntentView(BaseModel):
@@ -182,7 +222,12 @@ class Card(BaseModel):
     decision: DecisionView | None = None
     # A cart check step: its verdict. None if that read failed.
     intent: IntentView | None = None
-    # A Payer step: the Consent link Asha answers on (the consent screen, ADR-0008).
+    # A Dispute step: the Dispute as this step left it.
+    dispute: DisputeView | None = None
+    # A verify-pack step: its answer.
+    pack_check: PackCheckView | None = None
+    # A Payer step: the Consent link Asha answers on (the consent screen, ADR-0008). A
+    # reviewer step: the Review link the reviewer acts on (the dispute viewer).
     link: str | None = None
     # The Consent request as this step left it.
     consent: ConsentView | None = None
@@ -226,9 +271,6 @@ def check_supported(scenario: Scenario) -> None:
         if isinstance(step, AgentStep) and step.tool is not None:
             if step.tool not in _AGENT_TOOLS:
                 problems.append(f"the {step.tool} tool")
-        elif isinstance(step, HumanStep):
-            if step.actor != "payer" or step.action not in _PAYER_ACTIONS:
-                problems.append(f"{step.actor} {step.action} steps")
     if unknown := set(scenario.demo_controls) - _FAST_FORWARDS:
         problems.append(f"the Demo controls {sorted(unknown)}")
     unchecked = scenario.expected.model_fields_set - _CHECKED
@@ -270,6 +312,11 @@ class Run:
         self.intent_id: str | None = None
         self.replayed: Json | None = None
         self.chain: Json | None = None
+        self.dispute: Json | None = None
+        self.pack_check: Json | None = None
+        # The run's one Review link: a Regenerate through it keeps it working, so every
+        # reviewer step uses the link the visitor already has open.
+        self._review_link: str | None = None
         self._rules: dict[str, list[RuleView]] = {}
         self._problems: list[str] = []
 
@@ -299,7 +346,9 @@ class Run:
             card = await self._setup()
         else:
             scenario_step = self.scenario.steps[index - 1]
-            if isinstance(scenario_step, HumanStep):
+            if isinstance(scenario_step, HumanStep) and scenario_step.actor == "reviewer":
+                card = await self._reviewer_step(index, scenario_step)
+            elif isinstance(scenario_step, HumanStep):
                 card = await self._payer_step(index, scenario_step)
             elif isinstance(scenario_step, VisitorStep):
                 card = await self._fast_forward(index, scenario_step, press)
@@ -338,8 +387,8 @@ class Run:
             raise StepFailed(step, _problem(response))
         return _body(response)
 
-    def _fill(self, route: str) -> tuple[str, str]:
-        """`POST /v1/mandates/{mandate_id}/revoke` -> ("POST", "/v1/mandates/man_.../revoke")."""
+    def _known(self, name: str, where: str) -> str:
+        """A `{name}` placeholder's value from the run."""
         known = {
             "mandate_id": self.mandate_id,
             "agent_id": self.agent_id,
@@ -347,16 +396,30 @@ class Run:
             "audit_record_id": (self.decision or {}).get("audit_record_id"),
             "payment_id": (self.payment or {}).get("payment_id"),
             "consent_request_id": self._consent_request_id(),
+            "dispute_id": (self.dispute or {}).get("dispute_id"),
         }
+        found = known.get(name)
+        if not found:
+            raise StepFailed(where, f"the run has no {name} yet")
+        return str(found)
 
-        def value(match: re.Match[str]) -> str:
-            found = known.get(match.group(1))
-            if not found:
-                raise StepFailed(route, f"the run has no {match.group(1)} yet")
-            return str(found)
-
+    def _fill(self, route: str) -> tuple[str, str]:
+        """`POST /v1/mandates/{mandate_id}/revoke` -> ("POST", "/v1/mandates/man_.../revoke")."""
         method, path = route.split(" ", 1)
-        return method, _PLACEHOLDER.sub(value, path)
+        return method, _PLACEHOLDER.sub(lambda m: self._known(m.group(1), route), path)
+
+    def _filled_body(self, step: TenantStep) -> Json | None:
+        """The step's body, each `{name}` value filled from the run, and `respond_by` set
+        `respond_in_days` from now."""
+        if step.body is None and step.respond_in_days is None:
+            return None
+        body: Json = {}
+        for name, value in (step.body or {}).items():
+            whole = _PLACEHOLDER.fullmatch(value) if isinstance(value, str) else None
+            body[name] = self._known(whole.group(1), step.route) if whole else value
+        if step.respond_in_days is not None:
+            body["respond_by"] = _iso(self._now() + timedelta(days=step.respond_in_days))
+        return body
 
     def _consent_request_id(self) -> str | None:
         step_up = (self.decision or {}).get("step_up") or {}
@@ -370,6 +433,10 @@ class Run:
             return _decision_view(body)
         if "intent_id" in body:
             self.intent_id = str(body["intent_id"])
+        elif "versions" in body and "chain" in body:
+            self.pack_check = body
+        elif "dispute_id" in body and "reason" in body:
+            self.dispute = body
         elif "identical" in body:
             self.replayed = body
         elif "clean" in body:
@@ -403,6 +470,13 @@ class Run:
         if self.decision is None:
             return None
         step = "Verify / Replay"
+        pack = None
+        if self.dispute is not None:
+            path = f"/v1/disputes/{self.dispute['dispute_id']}/verify-pack"
+            checked = await self._send(self._tenant, step, "GET", path)
+            if not checked.is_success:
+                raise StepFailed(step, _problem(checked))
+            pack = PackCheckView.model_validate(_body(checked))
         audit_record_id = self.decision["audit_record_id"]
         replayed = await self._send(
             self._tenant, step, "GET", f"/v1/audit-records/{audit_record_id}/replay"
@@ -415,6 +489,7 @@ class Run:
         return Verification(
             replay=ReplayView.model_validate(_body(replayed)),
             chain=ChainView.model_validate(_body(chain)),
+            pack=pack,
         )
 
     # --- Setup ----------------------------------------------------------------------------
@@ -621,7 +696,7 @@ class Run:
     async def _route_step(self, index: int, step: AgentStep | TenantStep) -> Card:
         route = str(step.route)
         method, path = self._fill(route)
-        body = step.body if isinstance(step, TenantStep) else None
+        body = self._filled_body(step) if isinstance(step, TenantStep) else None
         if method == "POST" and body is None:
             body = {}
         headers = {"Idempotency-Key": self._key(index)} if method == "POST" else None
@@ -639,13 +714,22 @@ class Run:
         if route == REGISTER_AGENT and refused is None:
             self._agents[str(answer["name"])] = str(answer["agent_id"])
         decision = await self._with_rules(self._remember(answer) if refused is None else None)
+        waiting = (
+            refused is None
+            and isinstance(step, TenantStep)
+            and step.until_status is not None
+            and answer.get("status") not in step.until_status
+        )
         return Card(
             step=index,
             actor=step.actor,
             chat=step.chat,
             call=Call(kind="route", name=route, request=body, response=answer),
             decision=decision,
+            dispute=_dispute_view(answer) if refused is None else None,
+            pack_check=_pack_check_view(answer) if refused is None else None,
             refused=refused,
+            waiting=waiting,
         )
 
     # --- Payer steps ----------------------------------------------------------------------
@@ -737,6 +821,81 @@ class Run:
             consent=_consent_view(answers[0]),
         )
 
+    # --- Reviewer steps: the dispute viewer, on a Review link ------------------------------
+
+    async def _read_dispute(self, step: str) -> Json:
+        dispute_id = self._known("dispute_id", step)
+        response = await self._send(self._tenant, step, "GET", f"/v1/disputes/{dispute_id}")
+        if not response.is_success:
+            raise StepFailed(step, _problem(response))
+        self.dispute = _body(response)
+        return self.dispute
+
+    async def _review_url(self, index: int) -> str:
+        """The run's Review link, minted on its first reviewer step."""
+        if self._review_link is None:
+            dispute_id = self._known("dispute_id", "Make a Review link")
+            minted = await self._post(
+                "Make a Review link",
+                f"/v1/disputes/{dispute_id}/review-link",
+                {"reviewer": _REVIEWER},
+                f"{self._key(index)}-review-link",
+            )
+            if not minted.get("url"):
+                raise StepFailed("Make a Review link", "the link's answer was lost; start again")
+            self._review_link = str(minted["url"])
+        return self._review_link
+
+    async def _reviewer_step(self, index: int, step: HumanStep) -> Card:
+        """The reviewer signs off or regenerates the pack in the dispute viewer. When a
+        visitor plays the reviewer, the step waits while the pack is still in review: the
+        Dispute is then signed off (ready), rebuilding (open), or closed by the Tenant."""
+        link = await self._review_url(index)
+        if self.people == "engine":
+            return await self._review(index, step, link)
+        name = "The dispute viewer"
+        dispute = await self._read_dispute(name)
+        return Card(
+            step=index,
+            actor="reviewer",
+            chat=step.chat,
+            call=Call(
+                kind="route",
+                name=f"GET /v1/disputes/{dispute['dispute_id']}",
+                request=None,
+                response=dispute,
+            ),
+            link=link,
+            dispute=_dispute_view(dispute),
+            waiting=dispute.get("status") == "in_review",
+        )
+
+    async def _review(self, index: int, step: HumanStep, link: str) -> Card:
+        """CI's reviewer: acts on the Review link as the dispute viewer does, on the
+        latest pack version."""
+        name = "The reviewer's answer"
+        latest = ((await self._read_dispute(name)).get("pack") or {}).get("version")
+        action = "sign-off" if step.action == "sign_off" else "regenerate"
+        body = {"pack_version": latest} if action == "sign-off" else None
+        headers = {
+            "Review-Link": link.split("#", 1)[1],
+            "Idempotency-Key": f"{self._key(index)}-review",
+        }
+        route = f"/v1/review-link/{action}"
+        response = await self._send(self._tenant, name, "POST", route, body, headers)
+        if not response.is_success:
+            raise StepFailed(name, _problem(response))
+        answer = _body(response)
+        self._remember(answer)
+        return Card(
+            step=index,
+            actor="reviewer",
+            chat=step.chat,
+            call=Call(kind="route", name=f"POST {route}", request=body, response=answer),
+            link=link,
+            dispute=_dispute_view(answer),
+        )
+
     # --- Fast-forward: a Demo control the visitor presses (ADR-0032) ----------------------
 
     async def _fast_forward(self, index: int, step: VisitorStep, press: bool) -> Card:
@@ -796,6 +955,16 @@ class Run:
         check("refusal", expected.refusal_code, self.refusal)
         check("replay", expected.replay_status, (self.replayed or {}).get("status"))
         check("chain clean", expected.chain_clean, (self.chain or {}).get("clean"))
+        dispute = self.dispute or {}
+        pack = dispute.get("pack") or {}
+        check("dispute status", expected.dispute_status, dispute.get("status"))
+        check(
+            "evidence strength",
+            expected.evidence_strength,
+            (pack.get("assessment") or {}).get("strength"),
+        )
+        check("narrative source", expected.narrative_source, pack.get("narrative_source"))
+        check("pack clean", expected.pack_clean, (self.pack_check or {}).get("clean"))
         return found
 
 
@@ -809,6 +978,30 @@ def _decision_view(body: Json) -> DecisionView:
         pack_hash=pack["hash"],
         audit_record_id=body["audit_record_id"],
     )
+
+
+def _dispute_view(body: Json) -> DisputeView | None:
+    if "dispute_id" not in body or "reason" not in body:
+        return None
+    pack = body.get("pack") or {}
+    sign_off = body.get("sign_off") or {}
+    return DisputeView(
+        dispute_id=str(body["dispute_id"]),
+        status=str(body["status"]),
+        pack_version=pack.get("version"),
+        pack_hash=body.get("pack_hash"),
+        evidence_strength=(pack.get("assessment") or {}).get("strength"),
+        narrative_source=pack.get("narrative_source"),
+        narrative_note=pack.get("narrative_note"),
+        signed_off_version=sign_off.get("pack_version"),
+        reviewer=(sign_off.get("reviewer") or {}).get("name"),
+    )
+
+
+def _pack_check_view(body: Json) -> PackCheckView | None:
+    if "versions" not in body or "chain" not in body:
+        return None
+    return PackCheckView.model_validate(body)
 
 
 def _consent_view(body: Json) -> ConsentView | None:

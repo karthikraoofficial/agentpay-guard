@@ -1,0 +1,137 @@
+{
+  "id": "G1",
+  "title": "\"I never authorised this\" with strong evidence",
+  "group": "G",
+  "playlists": [
+    "pitch"
+  ],
+  "story": "ShopBot buys Asha's usual INR 1,250 groceries, inside her permission and with a cart check that matched. Later Asha tells her bank she never authorised it. The Guard builds an Evidence pack rated strong: the permission she gave, the matching cart check, the Decision. A reviewer reads it in the dispute viewer and signs it off, and the pack is verified as unaltered.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "check_intent",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "instruction": "Reorder my usual milk and bread.",
+      "item": "Usual milk and bread",
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Reorder my usual milk and bread, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart is INR 1,250. Getting the cart checked."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Allowed. Paying FreshMart now."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": [
+        "captured",
+        "failed"
+      ],
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The payment is scheduled. I'll let you know once the money is taken."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/disputes",
+      "body": {
+        "payment_id": "{payment_id}",
+        "reason": "unauthorised"
+      },
+      "respond_in_days": 10,
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "I don't remember agreeing to this FreshMart charge. I've told my bank I never authorised it."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/disputes/{dispute_id}",
+      "until_status": [
+        "in_review"
+      ]
+    },
+    {
+      "actor": "reviewer",
+      "action": "sign_off"
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/disputes/{dispute_id}/verify-pack"
+    }
+  ],
+  "expected": {
+    "outcome": "allow",
+    "payment_status": "captured",
+    "dispute_status": "ready",
+    "evidence_strength": "strong",
+    "pack_clean": true
+  },
+  "model_replies": [
+    {
+      "job": "intent_check",
+      "reply": {
+        "verdict": "match"
+      }
+    }
+  ],
+  "what_to_notice": "Strong, because the Decision was inside the Mandate and the cart check confirmed what Asha asked for. Every sentence of the narrative cites the Audit record that proves it. The reviewer signs off one exact version, and verify-pack shows that version's hash is the one the Sign-off recorded."
+}
