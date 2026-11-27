@@ -1,0 +1,45 @@
+{
+  "id": "C6",
+  "title": "A warning sign plus a hard limit",
+  "group": "C",
+  "playlists": ["engineering"],
+  "story": "ShopBot wants to pay INR 6,000 for headphones at VoltHub, an electronics store. INR 6,000 is a warning sign, over Asha's INR 5,000 \"ask me\" amount, but electronics are outside what she allowed, which is a hard limit. The Guard blocks: the strictest answer wins, and every reason is recorded. Asha is never asked to approve something that isn't allowed anyway.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
+      "monthly_cap": {"minor": 5000000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_volthub", "name": "VoltHub", "mcc": "5732"},
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "check_intent",
+      "amount": {"minor": 600000, "currency": "INR"},
+      "instruction": "Get me some noise-cancelling headphones.",
+      "item": "Noise-cancelling over-ear headphones",
+      "chat": [
+        {"speaker": "asha", "text": "Get me some noise-cancelling headphones."},
+        {"speaker": "shopbot", "text": "VoltHub has a pair for INR 6,000. Getting the cart checked."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 600000, "currency": "INR"},
+      "chat": [
+        {"speaker": "shopbot", "text": "The cart matches. Asking AgentPay Guard before I pay."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "block",
+    "reason_codes": ["MCC_NOT_ALLOWED", "AMOUNT_ABOVE_STEP_UP_THRESHOLD", "MERCHANT_NEW"]
+  },
+  "model_replies": [
+    {"job": "intent_check", "reply": {"verdict": "match"}}
+  ],
+  "what_to_notice": "mcc_allowed blocks, and step_up_threshold and merchant_new still run and step up: every enabled rule runs, and the most severe result wins. The Decision records all three reasons, so the Audit record shows the warning signs too. No Consent link is made: an approval can never widen what Asha allowed."
+}

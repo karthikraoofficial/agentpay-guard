@@ -1,0 +1,73 @@
+{
+  "id": "C2",
+  "title": "Nearly at the monthly limit",
+  "group": "C",
+  "playlists": [],
+  "story": "Asha gives ShopBot INR 12,000 a month, and it has already spent INR 7,600 of it at FreshMart, her usual grocer. A INR 3,000 order there, with a cart that matches what she asked for, would take her past 80% of the limit. The Guard steps up with MONTHLY_CAP_NEAR: it warns her before she hits the wall, rather than only refusing afterwards.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
+      "monthly_cap": {"minor": 1200000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"},
+    "card": "token_mock_captures",
+    "history": [
+      {"amount": {"minor": 190000, "currency": "INR"}},
+      {"amount": {"minor": 190000, "currency": "INR"}},
+      {"amount": {"minor": 190000, "currency": "INR"}},
+      {"amount": {"minor": 190000, "currency": "INR"}}
+    ]
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "check_intent",
+      "amount": {"minor": 300000, "currency": "INR"},
+      "instruction": "Do the weekly grocery shop.",
+      "item": "Weekly groceries: vegetables, fruit, dal, rice, milk, eggs",
+      "chat": [
+        {"speaker": "asha", "text": "Do the weekly grocery shop."},
+        {"speaker": "shopbot", "text": "The weekly shop at FreshMart comes to INR 3,000. Getting the cart checked."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 300000, "currency": "INR"},
+      "chat": [
+        {"speaker": "shopbot", "text": "The cart matches. You've spent INR 7,600 of your INR 12,000 this month. Asking AgentPay Guard before I pay."}
+      ]
+    },
+    {
+      "actor": "payer",
+      "action": "approve",
+      "chat": [
+        {"speaker": "shopbot", "text": "This would take you past 80% of your monthly limit, so I've sent it to your phone to approve."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_consent_request",
+      "chat": [
+        {"speaker": "shopbot", "text": "Asha approved. Checking the approval before I pay."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {"speaker": "shopbot", "text": "Paying FreshMart INR 3,000 now."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "step_up",
+    "reason_codes": ["MONTHLY_CAP_NEAR"],
+    "consent_status": "approved"
+  },
+  "model_replies": [
+    {"job": "intent_check", "reply": {"verdict": "match"}}
+  ],
+  "what_to_notice": "MONTHLY_CAP_NEAR is the only reason. The amount is under the INR 5,000 \"ask me\" line, FreshMart isn't new, and the cart matched, so every other warning sign passes. INR 7,600 spent plus INR 3,000 is INR 10,600, over 80% of INR 12,000; the 80% comes from the Policy pack named in the inspector. The four earlier orders are real allowed Decisions made when the run started."
+}

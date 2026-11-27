@@ -1,0 +1,41 @@
+{
+  "id": "C5",
+  "title": "Several warning signs at once",
+  "group": "C",
+  "playlists": ["engineering"],
+  "story": "ShopBot wants to pay INR 7,000 at SpiceRoute, a shop Asha has never used, and skips the cart check. The Guard steps up and lists every reason at once: AMOUNT_ABOVE_STEP_UP_THRESHOLD, MERCHANT_NEW and INTENT_MISSING. Asha sees the full picture in one message, and declines. The rules are combined openly, not hidden behind one opaque score.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
+      "monthly_cap": {"minor": 5000000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_spiceroute", "name": "SpiceRoute", "mcc": "5411"},
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 700000, "currency": "INR"},
+      "chat": [
+        {"speaker": "asha", "text": "Stock up the spice cupboard for Diwali."},
+        {"speaker": "shopbot", "text": "SpiceRoute has a Diwali hamper for INR 7,000. Checking with AgentPay Guard before I pay."}
+      ]
+    },
+    {
+      "actor": "payer",
+      "action": "decline",
+      "chat": [
+        {"speaker": "shopbot", "text": "AgentPay Guard has a few concerns about this one. I've sent them to your phone."},
+        {"speaker": "asha", "text": "INR 7,000, at a shop I don't know, for a hamper I didn't ask for? No."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "step_up",
+    "reason_codes": ["AMOUNT_ABOVE_STEP_UP_THRESHOLD", "MERCHANT_NEW", "INTENT_MISSING"],
+    "consent_status": "declined"
+  },
+  "what_to_notice": "Three rules step up, and the Decision lists all three in the order the Policy pack runs them: step_up_threshold, merchant_new, intent. There is no score to add up: each Rule result in the inspector says which rule fired and why, and the consent screen shows Asha every reason."
+}

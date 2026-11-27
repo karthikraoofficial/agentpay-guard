@@ -1,0 +1,76 @@
+{
+  "id": "C4",
+  "title": "A shop Asha has never paid before",
+  "group": "C",
+  "playlists": ["payments-pm"],
+  "story": "ShopBot finds a cheaper grocer, GreenBasket, that Asha has never used, for a INR 2,500 order. The cart matches what she asked for, but the Guard steps up with MERCHANT_NEW. Fake and look-alike shops are a common scam, so a quick confirmation the first time is cheap insurance. Asha approves, and ShopBot pays.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
+      "monthly_cap": {"minor": 5000000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_greenbasket", "name": "GreenBasket", "mcc": "5411"},
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "check_intent",
+      "amount": {"minor": 250000, "currency": "INR"},
+      "instruction": "Order fruit and vegetables for the week, wherever's cheapest.",
+      "item": "Fruit and vegetables for the week: bananas, apples, tomatoes, onions, spinach",
+      "chat": [
+        {"speaker": "asha", "text": "Order fruit and vegetables for the week, wherever's cheapest."},
+        {"speaker": "shopbot", "text": "GreenBasket has them for INR 2,500, cheaper than FreshMart. Getting the cart checked."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 250000, "currency": "INR"},
+      "chat": [
+        {"speaker": "shopbot", "text": "The cart matches. Asking AgentPay Guard before I pay."}
+      ]
+    },
+    {
+      "actor": "payer",
+      "action": "approve",
+      "chat": [
+        {"speaker": "shopbot", "text": "You've never paid GreenBasket before, so I've sent this to your phone to approve."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_consent_request",
+      "chat": [
+        {"speaker": "shopbot", "text": "Asha approved. Checking the approval before I pay."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {"speaker": "shopbot", "text": "Paying GreenBasket INR 2,500 now."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": ["captured", "failed"],
+      "chat": [
+        {"speaker": "shopbot", "text": "The payment is scheduled. I'll let you know once the money is taken."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "step_up",
+    "reason_codes": ["MERCHANT_NEW"],
+    "consent_status": "approved",
+    "payment_status": "captured"
+  },
+  "model_replies": [
+    {"job": "intent_check", "reply": {"verdict": "match"}}
+  ],
+  "what_to_notice": "MERCHANT_NEW is the only reason: the cart matched and INR 2,500 is under the INR 5,000 \"ask me\" line. The rule only applies from the medium tier (INR 2,000) up, so a small first order at a new shop would have been let through. Next time ShopBot pays GreenBasket, it won't be new."
+}
