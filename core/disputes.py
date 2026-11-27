@@ -178,11 +178,25 @@ def expire_dispute(
             return "already_closed"
         if now < dispute.respond_by:
             raise NotYetDue(f"Dispute {dispute_id} is not due yet")
-        expired = dispute.model_copy(update={"status": "expired", "updated_at": now})
-        tx.update_dispute(expired)
-        latest = tx.get_evidence_pack(dispute_id)
-        tx.publish(dispute_changed(expired, None if latest is None else latest.version, now))
+        _expire(tx, dispute, now)
     return "expired"
+
+
+def expire_now(tx: TenantTransaction, dispute: Dispute, now: datetime) -> Dispute:
+    """The deadline's transition before the deadline, for the expire-now Demo control
+    (ADR-0032), on a Dispute the caller holds and has checked isn't closed. The workflow is
+    told to stop waiting, as for a Sign-off; its timer would then find the Dispute closed."""
+    expired = _expire(tx, dispute, now)
+    _nudge(tx, expired, "dispute_closed", now)
+    return expired
+
+
+def _expire(tx: TenantTransaction, dispute: Dispute, now: datetime) -> Dispute:
+    expired = dispute.model_copy(update={"status": "expired", "updated_at": now})
+    tx.update_dispute(expired)
+    latest = tx.get_evidence_pack(dispute.dispute_id)
+    tx.publish(dispute_changed(expired, None if latest is None else latest.version, now))
+    return expired
 
 
 def _nudge(tx: TenantTransaction, dispute: Dispute, event_type: EventType, now: datetime) -> None:

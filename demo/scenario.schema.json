@@ -227,6 +227,33 @@
           "default": null,
           "title": "Evidence Strength"
         },
+        "mastercard_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mastercard Code"
+        },
+        "missing_evidence": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Missing Evidence"
+        },
         "narrative_source": {
           "anyOf": [
             {
@@ -360,6 +387,18 @@
           ],
           "default": null,
           "title": "Replay Status"
+        },
+        "visa_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Visa Code"
         }
       },
       "title": "Expected",
@@ -718,6 +757,7 @@
             "expire_consent",
             "expire_payment_window",
             "expire_notice",
+            "expire_dispute",
             "ai_off",
             "rail_declining",
             "lose_payment",

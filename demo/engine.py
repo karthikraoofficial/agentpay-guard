@@ -67,8 +67,12 @@ _CHECKED = {
     "refusal_code",
     "replay_status",
     "chain_clean",
+    "refund_status",
     "dispute_status",
     "evidence_strength",
+    "visa_code",
+    "mastercard_code",
+    "missing_evidence",
     "narrative_source",
     "pack_clean",
 }
@@ -78,6 +82,7 @@ _CONTROL_ROUTES = {
     "expire_consent": "POST /v1/demo/consent-requests/{consent_request_id}/expire",
     "expire_payment_window": "POST /v1/demo/decisions/{decision_id}/expire-payment-window",
     "expire_notice": "POST /v1/demo/payments/{payment_id}/expire-notice",
+    "expire_dispute": "POST /v1/demo/disputes/{dispute_id}/expire",
     "ai_off": "POST /v1/demo/mandates/{mandate_id}/ai-off",
     "rail_declining": "POST /v1/demo/mandates/{mandate_id}/rail-declining",
     "lose_payment": "POST /v1/demo/mandates/{mandate_id}/lose-payment",
@@ -182,6 +187,11 @@ class DisputeView(BaseModel):
     pack_version: int | None = None
     pack_hash: str | None = None
     evidence_strength: str | None = None
+    # The network reason codes to file under, and the Evidence facts a strong pack would
+    # need that don't hold, as the Policy pack's Dispute rules work them out.
+    visa_code: str | None = None
+    mastercard_code: str | None = None
+    missing_evidence: list[str] = []
     # Who wrote the narrative (model or template) and, for code standing in for the
     # model, why (e.g. "model narrative unavailable").
     narrative_source: str | None = None
@@ -314,6 +324,7 @@ class Run:
         self.chain: Json | None = None
         self.dispute: Json | None = None
         self.pack_check: Json | None = None
+        self.refund: Json | None = None
         # The run's one Review link: a Regenerate through it keeps it working, so every
         # reviewer step uses the link the visitor already has open.
         self._review_link: str | None = None
@@ -441,6 +452,8 @@ class Run:
             self.replayed = body
         elif "clean" in body:
             self.chain = body
+        elif "refund_id" in body:  # before the Payment: a Refund names its Payment too
+            self.refund = body
         elif "payment_id" in body:
             self.payment = body
         elif "consent_request_id" in body and "status" in body:
@@ -955,14 +968,15 @@ class Run:
         check("refusal", expected.refusal_code, self.refusal)
         check("replay", expected.replay_status, (self.replayed or {}).get("status"))
         check("chain clean", expected.chain_clean, (self.chain or {}).get("clean"))
+        check("refund status", expected.refund_status, (self.refund or {}).get("status"))
         dispute = self.dispute or {}
         pack = dispute.get("pack") or {}
+        assessment = pack.get("assessment") or {}
         check("dispute status", expected.dispute_status, dispute.get("status"))
-        check(
-            "evidence strength",
-            expected.evidence_strength,
-            (pack.get("assessment") or {}).get("strength"),
-        )
+        check("evidence strength", expected.evidence_strength, assessment.get("strength"))
+        check("Visa code", expected.visa_code, assessment.get("visa_code"))
+        check("Mastercard code", expected.mastercard_code, assessment.get("mastercard_code"))
+        check("missing evidence", expected.missing_evidence, assessment.get("missing"))
         check("narrative source", expected.narrative_source, pack.get("narrative_source"))
         check("pack clean", expected.pack_clean, (self.pack_check or {}).get("clean"))
         return found
@@ -984,13 +998,17 @@ def _dispute_view(body: Json) -> DisputeView | None:
     if "dispute_id" not in body or "reason" not in body:
         return None
     pack = body.get("pack") or {}
+    assessment = pack.get("assessment") or {}
     sign_off = body.get("sign_off") or {}
     return DisputeView(
         dispute_id=str(body["dispute_id"]),
         status=str(body["status"]),
         pack_version=pack.get("version"),
         pack_hash=body.get("pack_hash"),
-        evidence_strength=(pack.get("assessment") or {}).get("strength"),
+        evidence_strength=assessment.get("strength"),
+        visa_code=assessment.get("visa_code"),
+        mastercard_code=assessment.get("mastercard_code"),
+        missing_evidence=list(assessment.get("missing") or []),
         narrative_source=pack.get("narrative_source"),
         narrative_note=pack.get("narrative_note"),
         signed_off_version=sign_off.get("pack_version"),

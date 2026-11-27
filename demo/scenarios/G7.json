@@ -1,0 +1,151 @@
+{
+  "id": "G7",
+  "title": "Already refunded",
+  "group": "G",
+  "playlists": [],
+  "story": "ShopBot pays FreshMart INR 1,250 for Asha's usual groceries. The groceries don't come, and the wallet app refunds the whole INR 1,250. Asha disputes the payment with her bank anyway, as never received. The Guard rates the evidence strong: the records show she already has her money back.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "check_intent",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "instruction": "Reorder my usual milk and bread.",
+      "item": "Usual milk and bread",
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Reorder my usual milk and bread, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart is INR 1,250. Getting the cart checked."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Allowed. Paying FreshMart now."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": [
+        "captured",
+        "failed"
+      ],
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The payment is scheduled. I'll let you know once the money is taken."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/payments/{payment_id}/refunds",
+      "body": {
+        "amount": {
+          "minor": 125000,
+          "currency": "INR"
+        },
+        "reason": "Delivery didn't arrive"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "My groceries didn't come."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Sorry about that. FreshMart's refunding the full INR 1,250."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/disputes",
+      "body": {
+        "payment_id": "{payment_id}",
+        "reason": "not_received"
+      },
+      "respond_in_days": 10,
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "My FreshMart groceries never arrived. I've disputed the charge too."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/disputes/{dispute_id}",
+      "until_status": [
+        "in_review"
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "allow",
+    "payment_status": "captured",
+    "dispute_status": "in_review",
+    "evidence_strength": "strong",
+    "visa_code": "13.1",
+    "mastercard_code": "4855",
+    "missing_evidence": [],
+    "refund_status": "processed"
+  },
+  "model_replies": [
+    {
+      "job": "intent_check",
+      "reply": {
+        "verdict": "match"
+      }
+    }
+  ],
+  "what_to_notice": "A never-received complaint is never strong on its own (G6), but a processed Refund of the whole amount is a credit already issued: strong whatever the reason, with nothing missing. The pack cites the Refund's record, which stops the same money going back twice."
+}

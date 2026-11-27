@@ -15,6 +15,7 @@ The gate has three parts:
 - **Consent request.** The control runs the same `expired` resolution the timer writes, with `resolved_via = demo_control`.
 - **Payment window.** `payable_until` ends at the control's time, so paying is refused with `PAYMENT_WINDOW_CLOSED`. The Decision is not edited.
 - **Pre-debit notice period.** The worker's debit step treats the Payment as due, then runs its usual re-check. It debits the Payment, or fails it if the Mandate no longer allows it (`MANDATE_REVOKED`). `AGENTPAY_MOCK_NOTICE_SECONDS` gives the mock rail a notice period, so the deployed demo behaves like a card debit.
+- **Dispute deadline.** _(Added: #284)_ The control runs the transition the deadline timer runs, so the Dispute is `expired` and the Tenant gets `dispute.expired`. `respond_by` is not edited. The workflow is told to stop waiting, as for a Sign-off, and if its timer fires later anyway it finds the Dispute already closed.
 - **Mandate expiry has no control.** Journey B10 grants a Mandate whose validity has already ended, so the real rule answers `MANDATE_EXPIRED` with no control and no engine change.
 
 ## The switches
@@ -33,5 +34,5 @@ A switch runs before any Decision exists, so **a `demo_control` Audit record is 
 
 - **Replay is unaffected.** The engine never sees a control. Decisions before and after one replay byte-identically, and a test proves it per control.
 - **The Audit chain shows every control.** `verify` covers `demo_control` records like any others.
-- **Evidence bundles leave `demo_control` records out.** They end demo timers and are not evidence about the payment. This is a known limit: a bundle for a Demo Tenant Payment doesn't show that a timer was ended early. #284 adds the Dispute-deadline control and revisits it.
+- **Evidence bundles leave `demo_control` records out.** They end demo timers and are not evidence about the payment. This is a known limit: a bundle for a Demo Tenant Payment doesn't show that a timer was ended early. _(Updated: #284. The Dispute-deadline control doesn't change this. Its record comes after the `dispute_opened` record, where the bundle stops, and an expired Dispute is never built again. So the limit still applies only to the earlier timers, and it stays.)_
 - **Later controls follow the same rule.** The Intent check's usable age is #294, and its control id must go in the Decision's Audit record because it affects a Decision. The Dispute deadline is #284 and settle-now is #287.

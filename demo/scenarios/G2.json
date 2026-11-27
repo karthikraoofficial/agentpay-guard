@@ -1,0 +1,163 @@
+{
+  "id": "G2",
+  "title": "\"I never authorised this\" with weak evidence",
+  "group": "G",
+  "playlists": [],
+  "story": "ShopBot's cart for Asha's weekly groceries is six bottles of premium whisky. The cart check says mismatch, so the Guard asks Asha, and she approves it anyway. Later she tells her bank she never authorised it. The Guard rates its own evidence weak and says why: the records show she approved a cart the check had flagged.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures",
+    "history": [
+      {
+        "amount": {
+          "minor": 50000,
+          "currency": "INR"
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "check_intent",
+      "amount": {
+        "minor": 480000,
+        "currency": "INR"
+      },
+      "instruction": "Groceries for the week.",
+      "item": "Premium single malt whisky, 6 bottles",
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Get groceries for the week."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "I've got a cart at FreshMart for INR 4,800. Getting it checked."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 480000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Asking AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "payer",
+      "action": "approve",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "This one needs your approval, Asha. I've sent it to your phone."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_consent_request",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Asha approved. Checking the approval before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Allowed. Paying FreshMart now."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": [
+        "captured",
+        "failed"
+      ],
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The payment is scheduled. I'll let you know once the money is taken."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/disputes",
+      "body": {
+        "payment_id": "{payment_id}",
+        "reason": "unauthorised"
+      },
+      "respond_in_days": 10,
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Whisky? I never agreed to that. I've told my bank it wasn't me."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/disputes/{dispute_id}",
+      "until_status": [
+        "in_review"
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "step_up",
+    "payment_status": "captured",
+    "dispute_status": "in_review",
+    "evidence_strength": "weak",
+    "visa_code": "10.4",
+    "mastercard_code": "4837",
+    "missing_evidence": [
+      "payer_intent_confirmed"
+    ],
+    "reason_codes": [
+      "INTENT_MISMATCH"
+    ],
+    "consent_status": "approved"
+  },
+  "model_replies": [
+    {
+      "job": "intent_check",
+      "reply": {
+        "verdict": "mismatch"
+      }
+    }
+  ],
+  "what_to_notice": "Weak, not strong, though the Payer approved: the cart check said the cart didn't match what she asked for, and the pack says so. An honest weak rating tells the business this is a dispute it would lose, so it can refund rather than fight."
+}

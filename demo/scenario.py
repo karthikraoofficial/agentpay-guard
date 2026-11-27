@@ -213,6 +213,7 @@ FastForward = Literal[
     "expire_consent",
     "expire_payment_window",
     "expire_notice",
+    "expire_dispute",
     "ai_off",
     "rail_declining",
     "lose_payment",
@@ -246,7 +247,13 @@ class Expected(_Model):
     payment_status: Literal["scheduled", "captured", "failed"] | None = None
     refund_status: Literal["pending", "processed", "failed"] | None = None
     dispute_status: str | None = None
+    # The latest Evidence pack's assessment, as the Dispute golden cases name it: its
+    # strength, the Visa and Mastercard reason codes, and the Evidence facts missing for a
+    # strong pack (an empty list when none are).
     evidence_strength: Literal["strong", "mixed", "weak"] | None = None
+    visa_code: str | None = None
+    mastercard_code: str | None = None
+    missing_evidence: list[str] | None = None
     # The last Payment's failure code, when it failed, e.g. MANDATE_REVOKED.
     payment_failure_code: str | None = None
     # The last Consent request's status at the end of the run.

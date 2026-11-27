@@ -1,0 +1,129 @@
+{
+  "id": "G3",
+  "title": "\"I was charged the wrong amount\"",
+  "group": "G",
+  "playlists": [],
+  "story": "Asha tells her bank FreshMart charged her more than she agreed to for her usual INR 1,250 basket. The Guard compares the amount taken with the amount it allowed and with the cart's Quoted total. All three are INR 1,250, so the evidence is strong.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "check_intent",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "instruction": "Reorder my usual milk and bread.",
+      "item": "Usual milk and bread",
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Reorder my usual milk and bread, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart is INR 1,250. Getting the cart checked."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Allowed. Paying FreshMart now."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": [
+        "captured",
+        "failed"
+      ],
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The payment is scheduled. I'll let you know once the money is taken."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/disputes",
+      "body": {
+        "payment_id": "{payment_id}",
+        "reason": "amount_differs"
+      },
+      "respond_in_days": 10,
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "FreshMart charged me more than I agreed to. I've disputed the amount."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/disputes/{dispute_id}",
+      "until_status": [
+        "in_review"
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "allow",
+    "payment_status": "captured",
+    "dispute_status": "in_review",
+    "evidence_strength": "strong",
+    "visa_code": "12.5",
+    "mastercard_code": "4834",
+    "missing_evidence": []
+  },
+  "model_replies": [
+    {
+      "job": "intent_check",
+      "reply": {
+        "verdict": "match"
+      }
+    }
+  ],
+  "what_to_notice": "The pack proves the amount from records, not memory: the captured amount equals the Decision's amount, and neither is above the Quoted total the cart check saw. Filed under Visa 12.5 and Mastercard 4834, the incorrect-amount codes."
+}

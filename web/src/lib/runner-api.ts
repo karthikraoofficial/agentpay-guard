@@ -57,6 +57,11 @@ export type DisputeView = {
   pack_version: number | null;
   pack_hash: string | null;
   evidence_strength: "strong" | "mixed" | "weak" | null;
+  // The network reason codes to file under, and the Evidence facts a strong pack would
+  // need that don't hold.
+  visa_code: string | null;
+  mastercard_code: string | null;
+  missing_evidence: string[];
   // Who wrote the narrative, and why code stood in for the model, if it did.
   narrative_source: "model" | "template" | null;
   narrative_note: string | null;
