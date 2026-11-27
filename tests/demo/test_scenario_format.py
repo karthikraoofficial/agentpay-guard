@@ -91,6 +91,15 @@ def test_a_reviewer_does_only_what_the_dispute_viewer_offers(tmp_path: Path) -> 
         catalogue(tmp_path)
 
 
+def test_only_a_write_is_resent(tmp_path: Path) -> None:
+    a1 = json.loads(Path("demo/scenarios/A1.json").read_text(encoding="utf-8"))
+    a1["steps"].append({"actor": "agent", "tool": "get_decision", "sends": 2})
+    (tmp_path / "A1.json").write_text(json.dumps(a1), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="only a tool that takes an idempotency key"):
+        catalogue(tmp_path)
+
+
 def test_only_a_read_waits(tmp_path: Path) -> None:
     g10 = json.loads(Path("demo/scenarios/G10.json").read_text(encoding="utf-8"))
     g10["steps"][-1]["until_status"] = ["withdrawn"]

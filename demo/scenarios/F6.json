@@ -1,0 +1,49 @@
+{
+  "id": "F6",
+  "title": "The card is declined",
+  "group": "F",
+  "playlists": [],
+  "story": "The Guard allows Asha's grocery order and ShopBot pays, but the bank declines her card when the charge is attempted. The Payment is marked failed, with the bank's reason, and nothing is retried behind her back, so ShopBot can tell Asha plainly what happened.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
+      "monthly_cap": {"minor": 5000000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"},
+    "card": "token_mock_refused"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 150000, "currency": "INR"},
+      "chat": [
+        {"speaker": "asha", "text": "Order the cleaning supplies we're low on."},
+        {"speaker": "shopbot", "text": "Detergent, dish soap and floor cleaner at FreshMart come to INR 1,500. Checking with AgentPay Guard before I pay."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {"speaker": "shopbot", "text": "Allowed. Paying FreshMart INR 1,500 now."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": ["captured", "failed"],
+      "chat": [
+        {"speaker": "shopbot", "text": "Checking the payment once more. Asha, your bank declined the card, so no money was taken. I haven't tried again; tell me if you want to use another card."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "allow",
+    "reason_codes": [],
+    "payment_status": "failed",
+    "payment_failure_code": "BAD_REQUEST_ERROR"
+  },
+  "what_to_notice": "create_payment answers failed straight away, with the bank's failure code (BAD_REQUEST_ERROR, Razorpay's code for a declined debit), and the later read still says failed. The Guard doesn't try the card again: a failed Payment is final, the allow can't be paid twice, and any new attempt needs a new Decision that ShopBot has to ask for. The pretend bank's refused card plays the decline here, as it does on the hosted demo."
+}

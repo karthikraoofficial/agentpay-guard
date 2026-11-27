@@ -1,0 +1,50 @@
+{
+  "id": "F3",
+  "title": "A network hiccup and a retry",
+  "group": "F",
+  "playlists": ["payments-pm", "engineering"],
+  "story": "ShopBot asks to pay, but the answer is lost on its side, so it sends exactly the same request again, with the same idempotency key. The Guard recognises the retry and returns the original answer: one Payment, and Asha is charged once. Double charges from retries are one of the most common real payment bugs.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
+      "monthly_cap": {"minor": 5000000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"},
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 90000, "currency": "INR"},
+      "chat": [
+        {"speaker": "asha", "text": "Get eggs, butter and paneer, please."},
+        {"speaker": "shopbot", "text": "That's INR 900 at FreshMart. Checking with AgentPay Guard before I pay."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "sends": 2,
+      "chat": [
+        {"speaker": "shopbot", "text": "Allowed. Paying FreshMart INR 900 now."},
+        {"speaker": "shopbot", "text": "My connection dropped before the answer came back. Sending the same payment request again."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": ["captured", "failed"],
+      "chat": [
+        {"speaker": "shopbot", "text": "Both tries came back with the same payment. I'll let you know once the money is taken."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "allow",
+    "reason_codes": [],
+    "payment_status": "captured"
+  },
+  "what_to_notice": "The create_payment card shows the request sent twice with one idempotency key, and one distinct answer: the same Payment id both times. The second send didn't make a second Payment or a second charge; it got the first answer back. Every write and every rail call takes an idempotency key for exactly this."
+}

@@ -1,0 +1,57 @@
+{
+  "id": "F2",
+  "title": "ShopBot tries to pay twice for one yes",
+  "group": "F",
+  "playlists": ["engineering"],
+  "story": "ShopBot gets one allow for Asha's groceries and pays. Then it tries to make a second Payment on the same allow. The Guard refuses with DECISION_ALREADY_PAID: one yes means one Payment, so an assistant can't turn a single approval into repeated charges.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
+      "monthly_cap": {"minor": 5000000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"},
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 120000, "currency": "INR"},
+      "chat": [
+        {"speaker": "asha", "text": "Order rice and dal for the week."},
+        {"speaker": "shopbot", "text": "Rice and dal at FreshMart come to INR 1,200. Checking with AgentPay Guard before I pay."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {"speaker": "shopbot", "text": "Allowed. Paying FreshMart INR 1,200 now."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "expect_refusal": "DECISION_ALREADY_PAID",
+      "chat": [
+        {"speaker": "shopbot", "text": "FreshMart has a second batch of the same order. I'll pay for that one on the same approval."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": ["captured", "failed"],
+      "chat": [
+        {"speaker": "shopbot", "text": "AgentPay Guard refused the second payment: that approval was already used. I'll ask again if you want the second batch. The first payment is going through."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "allow",
+    "reason_codes": [],
+    "refusal_code": "DECISION_ALREADY_PAID",
+    "payment_status": "captured"
+  },
+  "what_to_notice": "The second create_payment carries a new idempotency key, so it is a new request, not a retry, and the Guard refuses it with DECISION_ALREADY_PAID. Only the first Payment exists, and it is captured. To pay again ShopBot must ask for a new Decision, which counts against the limits like any other."
+}
