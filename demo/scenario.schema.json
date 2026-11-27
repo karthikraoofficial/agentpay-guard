@@ -95,6 +95,13 @@
           "default": null,
           "title": "Route"
         },
+        "sends": {
+          "default": 1,
+          "maximum": 3,
+          "minimum": 1,
+          "title": "Sends",
+          "type": "integer"
+        },
         "tool": {
           "anyOf": [
             {

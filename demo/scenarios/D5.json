@@ -75,8 +75,8 @@
   "expected": {
     "outcome": "step_up",
     "reason_codes": [
-      "INTENT_UNKNOWN",
-      "MERCHANT_NEW"
+      "MERCHANT_NEW",
+      "INTENT_UNKNOWN"
     ]
   },
   "what_to_notice": "INTENT_UNKNOWN is the AI outage: no model was called, and an unsure check never counts as a yes. MERCHANT_NEW is here because this run's Asha hasn't paid FreshMart before. The Decision was still made at once."

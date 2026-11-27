@@ -150,12 +150,27 @@ class AgentStep(_Model):
     until_status: list[str] | None = None
     # The error code the API answers with, when the journey shows a refusal.
     expect_refusal: str | None = None
+    # How many times ShopBot sends the call, each with the step's one idempotency key, as
+    # a retry after a lost answer would (F3). Every send must get the first answer back.
+    sends: int = Field(default=1, ge=1, le=3)
 
     @model_validator(mode="after")
     def _tool_or_route(self) -> Self:
         if (self.tool is None) == (self.route is None):
             raise ValueError("an Agent step names exactly one of tool or route")
         return self
+
+    @model_validator(mode="after")
+    def _only_writes_resend(self) -> Self:
+        if self.sends > 1 and self.tool not in KEYED_TOOLS:
+            raise ValueError(
+                f"only a tool that takes an idempotency key is resent: {sorted(KEYED_TOOLS)}"
+            )
+        return self
+
+
+# The guard_mcp tools that write, each taking an idempotency key.
+KEYED_TOOLS = frozenset({"request_decision", "check_intent", "create_payment"})
 
 
 class TenantStep(_Model):

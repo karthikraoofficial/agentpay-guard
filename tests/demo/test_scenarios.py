@@ -104,6 +104,47 @@ async def test_e6_a_double_tap_records_one_approval(api: Api, keys: tuple[str, s
     assert tapped.call.response["distinct_answers"] == 1
 
 
+async def test_f3_a_resent_payment_request_makes_one_payment(
+    api: Api, keys: tuple[str, str]
+) -> None:
+    operator = Operator(api, [])
+    async with clients(api, keys) as (agent, tenant):
+        run = Run(catalogue()["F3"], agent=agent, tenant=tenant, now=api.clock.now, people="engine")
+
+        cards = await play(run, wait=operator.wait, patience=20)
+
+    paid = next(card for card in cards if card.call and card.call.name == "create_payment")
+    assert paid.call is not None and paid.call.response["sends"] == 2
+    assert paid.call.response["distinct_answers"] == 1
+    payment_id = paid.call.response["answer"]["payment_id"]
+    assert payment_id.startswith("pmt_")
+    read = cards[-1].call
+    assert read is not None and read.response["payment_id"] == payment_id
+    assert cards[-1].mismatches == []
+
+
+async def test_the_cli_prints_a_resent_calls_one_answer(api: Api, keys: tuple[str, str]) -> None:
+    out: list[str] = []
+    operator = Operator(api, out)
+    async with clients(api, keys) as (agent, tenant):
+        code = await run_scenario(
+            catalogue()["F3"],
+            agent=agent,
+            tenant=tenant,
+            say=out.append,
+            wait=operator.wait,
+            now=api.clock.now,
+            patience=20,
+        )
+
+    assert code == 0
+    assert any(
+        line.startswith("  - create_payment: pmt_")
+        and line.endswith("scheduled (sent 2 times, 1 distinct answer)")
+        for line in out
+    ), "\n".join(out)
+
+
 async def test_b6_asks_as_the_agent_the_run_registered(api: Api, keys: tuple[str, str]) -> None:
     operator = Operator(api, [])
     async with clients(api, keys) as (agent, tenant):

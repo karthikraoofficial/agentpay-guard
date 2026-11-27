@@ -161,11 +161,19 @@ def _describe(card: engine.Card) -> str:
     response = call.response
     if card.consent is not None:
         return f"{call.name}: Consent request {card.consent.status}"
-    for name in ("mandate_id", "payment_id", "refund_id", "dispute_id"):
+    # A resent call (F3): the answer every send got, and how many distinct answers came.
+    resent = ""
+    if "sends" in response and isinstance(response.get("answer"), dict):
+        distinct = response["distinct_answers"]
+        plural = "" if distinct == 1 else "s"
+        resent = f" (sent {response['sends']} times, {distinct} distinct answer{plural})"
+        response = response["answer"]
+    # Most specific first: a Refund names its Payment, and a Payment its Mandate.
+    for name in ("refund_id", "dispute_id", "payment_id", "mandate_id"):
         if name in response:
             status = response.get("status")
-            return f"{call.name}: {response[name]}" + (f" {status}" if status else "")
-    return call.name
+            return f"{call.name}: {response[name]}" + (f" {status}" if status else "") + resent
+    return call.name + resent
 
 
 async def run_scenario(

@@ -302,12 +302,12 @@ From ₹2,000 upwards, ShopBot must show the Guard what Asha asked for and what 
 **Guard's answer:** Tracks the payment through to captured.
 **Why it matters:** A decision and a payment are separate things, and both are tracked.
 
-### F2. ShopBot tries to pay twice for one yes 🟢
+### F2. ShopBot tries to pay twice for one yes ✅
 **Story:** ShopBot gets one Allow, pays, then tries to make a second payment on the same Allow.
-**Guard's answer:** Refused (`DECISION_HAS_PAYMENT`). One yes means one payment.
+**Guard's answer:** Refused (`DECISION_ALREADY_PAID`). One yes means one payment.
 **Why it matters:** It stops an assistant turning a single approval into repeated charges.
 
-### F3. A network hiccup and a retry 🟢
+### F3. A network hiccup and a retry ✅
 **Story:** ShopBot's payment request times out on its side, so it sends exactly the same request again.
 **Guard's answer:** Recognises the retry (it carries the same request ID) and returns the original result. Asha is charged once.
 **Why it matters:** Double charges from retries are one of the most common real payment bugs.
@@ -322,10 +322,10 @@ From ₹2,000 upwards, ShopBot must show the Guard what Asha asked for and what 
 **Guard's answer:** Just before charging, the Guard checks again, sees the permission is gone, and cancels the payment (`MANDATE_REVOKED`). No money moves.
 **Why it matters:** The notice period exists so people can change their minds, and this proves the system honours it. *Demo control:* fast-forward to the end of the notice period.
 
-### F6. The card is declined 🟢
+### F6. The card is declined ✅
 **Story:** Asha's card is declined by the bank when the charge is attempted.
 **Guard's answer:** The payment is marked *failed* with the reason. Nothing is retried behind her back.
-**Why it matters:** Clear, honest status, so ShopBot can tell Asha. (Demo: the pretend bank has a "declines" card.)
+**Why it matters:** Clear, honest status, so ShopBot can tell Asha. (Demo: the pretend bank's "refused" card, which declines the charge as soon as it is attempted. Its "declines" card fails only when the in-process rail settles it, and the hosted demo's Mock settle captures every debited Payment.)
 
 ### F7. The advance notice couldn't be sent ✅
 **Story:** The bank couldn't deliver the required advance notice to Asha.
@@ -465,15 +465,15 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 | C. Warning signs | 6 | 6 | 0 | 0 |
 | D. Cart check | 7 | 6 | 0 | 1 |
 | E. Asking Asha | 6 | 6 | 0 | 0 |
-| F. Paying | 9 | 6 | 3 | 0 |
+| F. Paying | 9 | 9 | 0 | 0 |
 | G. Disputes | 12 | 12 | 0 | 0 |
 | H. Refunds and proof | 8 | 5 | 2 | 1 |
-| **Total** | **60** | **53** | **5** | **2** |
+| **Total** | **60** | **56** | **2** | **2** |
 
-*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), D5, F8, F9 and H6 (#281), B1 to B9 (#277), A2, D1 to D4 and D6 (#279), G1, G8, G9, G10, G12 and H7 (#283), G2 to G7 and G11 (#284), and C2 to C6 (#278).*
+*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), D5, F8, F9 and H6 (#281), B1 to B9 (#277), A2, D1 to D4 and D6 (#279), G1, G8, G9, G10, G12 and H7 (#283), G2 to G7 and G11 (#284), C2 to C6 (#278), and F1, F2, F3 and F6 (#282).*
 
 **What this means for the build:**
-- **5 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
+- **2 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
 - **2 journeys still need a Scenario on a demo-only control:**
   1. **Fast-forward** (built for Consent requests, Payment windows, notice periods and Dispute deadlines, ADR-0032): still to come for a stale cart check (D7).
   2. **Failure switches** (built, ADR-0032): bank declining is still to be shown in a refund (H3).

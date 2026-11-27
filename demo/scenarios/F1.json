@@ -1,0 +1,48 @@
+{
+  "id": "F1",
+  "title": "Paid and taken",
+  "group": "F",
+  "playlists": [],
+  "story": "Asha asks for her usual milk and bread. The Guard allows it, and ShopBot pays. The Payment is scheduled first, and shortly after it is captured: the money is taken. A Decision and a Payment are separate things, and the Guard tracks both.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
+      "monthly_cap": {"minor": 5000000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"},
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 80000, "currency": "INR"},
+      "chat": [
+        {"speaker": "asha", "text": "Reorder my usual milk and bread, please."},
+        {"speaker": "shopbot", "text": "Milk and bread at FreshMart come to INR 800. Checking with AgentPay Guard before I pay."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {"speaker": "shopbot", "text": "Allowed. Paying FreshMart INR 800 now."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": ["captured", "failed"],
+      "chat": [
+        {"speaker": "shopbot", "text": "The payment is scheduled with the bank. I'll let you know once the money is taken."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "allow",
+    "reason_codes": [],
+    "payment_status": "captured"
+  },
+  "what_to_notice": "Watch the Payment's status: create_payment answers scheduled, and get_payment later answers captured, once the pretend bank settles the debit. The allow is a Decision with its own Audit record; the Payment is a second record that points at it, and it can only be made once per Decision."
+}

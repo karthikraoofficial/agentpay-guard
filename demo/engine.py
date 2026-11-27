@@ -652,6 +652,15 @@ class Run:
         arguments = self._arguments(index, step)
         result = await call(self._agent, _TOOLS[tool], arguments)
         body: Json = dict(result.structured_content or {})
+        # A resent call (F3): the same arguments and idempotency key, as a retry after a
+        # lost answer. Each send must get the first answer back.
+        answers = [body]
+        for _ in range(step.sends - 1):
+            again = await call(self._agent, _TOOLS[tool], arguments)
+            answers.append(dict(again.structured_content or {}))
+        distinct = len({json.dumps(a, sort_keys=True) for a in answers})
+        if distinct != 1:
+            self._problems.append(f"{tool} sent {step.sends} times made {distinct} answers")
         refused = None
         if result.is_error:
             code = str(body.get("code", "TOOL_ERROR"))
@@ -666,11 +675,14 @@ class Run:
             intent = await self._intent_view(index, str(body["intent_id"]))
         waiting = step.until_status is not None and body.get("status") not in step.until_status
         request = {k: v for k, v in arguments.items() if k != "idempotency_key"}
+        response = body
+        if step.sends > 1:
+            response = {"sends": step.sends, "distinct_answers": distinct, "answer": body}
         return Card(
             step=index,
             actor="agent",
             chat=step.chat,
-            call=Call(kind="tool", name=tool, request=request, response=body),
+            call=Call(kind="tool", name=tool, request=request, response=response),
             decision=decision,
             intent=intent,
             consent=_consent_view(body) if "outcome" not in body else None,
@@ -955,9 +967,8 @@ class Run:
                 found.append(f"{name}: expected {want}, got {got}")
 
         check("outcome", expected.outcome, decision.get("outcome"))
-        if expected.reason_codes is not None:
-            got = sorted(decision.get("reason_codes", []))
-            check("reason codes", sorted(expected.reason_codes), got)
+        # In the order the Decision lists them: the Policy pack's rule order.
+        check("reason codes", expected.reason_codes, decision.get("reason_codes", []))
         check("payment status", expected.payment_status, (self.payment or {}).get("status"))
         check(
             "payment failure code",
