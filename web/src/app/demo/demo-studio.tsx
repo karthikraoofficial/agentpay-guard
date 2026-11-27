@@ -11,9 +11,11 @@ import {
   verifyRun,
   type Card,
   type ConsentStatus,
+  type DisputeView,
   type Failure,
   type IntentVerdict,
   type Json,
+  type PackCheck,
   type Verification,
 } from "@/lib/runner-api";
 import { GROUPS, SCENARIOS, SPEAKER_NAMES, type Scenario } from "@/lib/scenarios";
@@ -390,6 +392,8 @@ function Chat({
           {typeof card.call?.response.tampered_seq === "number" && <TamperResult response={card.call.response} />}
           {card.refused && <Refused code={card.refused} />}
           {card.intent && <CartCheck intent={card.intent} />}
+          {card.dispute && <DisputeCard dispute={card.dispute} />}
+          {card.pack_check && <PackCheckCard check={card.pack_check} />}
           {card.decision && <Verdict decision={card.decision} />}
           {card.actor === "payer" && card.consent && <Answer consent={card.consent} />}
         </li>
@@ -421,9 +425,13 @@ function Chat({
         <li className="text-sm text-neutral-500" aria-live="polite">
           {waiting.actor === "payer"
             ? "Waiting for Asha to approve or decline on her phone…"
-            : waiting.call?.name === "get_payment"
-              ? "Waiting for the bank to take the money…"
-              : "Waiting…"}
+            : waiting.actor === "reviewer"
+              ? "Waiting for the reviewer to sign off or regenerate in the dispute viewer…"
+              : waiting.call?.name === "get_payment"
+                ? "Waiting for the bank to take the money…"
+                : waiting.dispute
+                  ? "Waiting for the Evidence pack to be built…"
+                  : "Waiting…"}
         </li>
       )}
     </ol>
@@ -507,6 +515,67 @@ function Verdict({ decision }: { decision: NonNullable<Card["decision"]> }) {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+const DISPUTE_TEXT: Record<DisputeView["status"], string> = {
+  open: "Dispute opened. The Evidence pack is being built.",
+  in_review: "The Evidence pack is ready for a reviewer.",
+  ready: "Signed off: this exact pack version is approved to send.",
+  expired: "The deadline passed before a Sign-off.",
+  withdrawn: "Withdrawn: the Dispute is closed.",
+};
+
+const STRENGTH_TONE = {
+  strong: OUTCOME_TONE.allow,
+  mixed: OUTCOME_TONE.step_up,
+  weak: OUTCOME_TONE.block,
+} as const;
+
+function DisputeCard({ dispute }: { dispute: DisputeView }) {
+  const tone = dispute.evidence_strength ? STRENGTH_TONE[dispute.evidence_strength] : "border-neutral-300 dark:border-neutral-700";
+  return (
+    <div className={`rounded-md border p-2 text-sm ${tone}`}>
+      <div className="font-semibold">{DISPUTE_TEXT[dispute.status]}</div>
+      {dispute.pack_version !== null && (
+        <p className="text-xs">
+          Pack v{dispute.pack_version}
+          {dispute.evidence_strength && (
+            <>
+              , evidence <span className="font-semibold">{dispute.evidence_strength}</span>
+            </>
+          )}
+          , narrative written by {dispute.narrative_source === "model" ? "the model" : "code"}.
+          {dispute.signed_off_version !== null && ` Version ${dispute.signed_off_version} signed off by ${dispute.reviewer}.`}
+        </p>
+      )}
+      {dispute.narrative_note && (
+        <p role="status" className="mt-1 rounded border border-amber-300 bg-amber-50 p-1 text-xs dark:border-amber-800 dark:bg-amber-950">
+          ⚑ Written by code from a template: the AI writer was unavailable. Every claim still cites its record.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function packCheckText(check: PackCheck): string {
+  if (check.versions.length === 0) return "No pack built yet.";
+  if (check.status === "pack_problem") return `Couldn't check: ${check.pack_problems.join("; ")}`;
+  return check.versions
+    .map((v) =>
+      v.problems.length > 0
+        ? `v${v.version}: ${v.problems.join("; ")}.`
+        : `v${v.version} matches the Audit chain${v.signed_off ? " and the hash its Sign-off recorded" : ""}.`,
+    )
+    .join(" ");
+}
+
+function PackCheckCard({ check }: { check: PackCheck }) {
+  return (
+    <div className={`rounded-md border p-2 text-sm ${check.clean ? OUTCOME_TONE.allow : OUTCOME_TONE.block}`}>
+      <div className="font-semibold">{check.clean ? "verify-pack: clean" : "verify-pack: something changed"}</div>
+      <p className="text-xs">{packCheckText(check)}</p>
     </div>
   );
 }
@@ -604,7 +673,7 @@ function Phone({ card }: { card: Card | null }) {
         <iframe
           key={card.link}
           src={card.link!}
-          title="Asha's consent screen"
+          title={card.actor === "reviewer" ? "The dispute viewer" : "Asha's consent screen"}
           className="min-h-0 w-full flex-1 rounded-xl border-0 bg-white"
         />
       ) : card?.consent ? (
@@ -612,7 +681,7 @@ function Phone({ card }: { card: Card | null }) {
           <Answer consent={card.consent} />
         </div>
       ) : (
-        <p className="m-auto text-center text-sm text-neutral-500">Nothing for Asha to approve yet.</p>
+        <p className="m-auto text-center text-sm text-neutral-500">Nothing on the phone yet.</p>
       )}
     </div>
   );
@@ -640,7 +709,7 @@ function VerifyPanel({ runId }: { runId: string | null }) {
     else setFailure(result.failure);
   }
 
-  const good = answer?.replay.identical && answer.chain.clean;
+  const good = answer?.replay.identical && answer.chain.clean && (answer.pack?.clean ?? true);
   return (
     <div className="mt-3 flex flex-col gap-2">
       <button
@@ -679,6 +748,12 @@ function VerifyPanel({ runId }: { runId: string | null }) {
               ? `Clean: ${answer.chain.record_count} records chain correctly.`
               : `Broken: first fails at record ${answer.chain.first_broken_seq}.`}
           </p>
+          {answer.pack && (
+            <p>
+              <span className="font-semibold">Evidence packs: </span>
+              {packCheckText(answer.pack)}
+            </p>
+          )}
         </div>
       )}
     </div>

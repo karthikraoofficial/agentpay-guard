@@ -1,11 +1,13 @@
 """/v1/disputes: a Tenant reports that the Payer has disputed a captured Payment, and
-reads the Evidence pack built for it (ADR-0018).
+reads the Evidence pack built for it (ADR-0018), and checks its packs as `api.admin
+verify-pack` does (#283).
 
 Only a `manage` key may open or read one: an Agent never argues its own case. The pack
 is built after the request, by the `dispute_pack` workflow the outbox starts, so a new
 Dispute is `open` with no pack until then."""
 
 from datetime import datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Request, Response
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
@@ -13,6 +15,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from api.deps import ClockDep, IdemKey, ManageTenant, SettingsDep, StoreDep
 from api.errors import ApiError
 from api.idempotency import request_hash, run_idempotent
+from core.audit_inspection import verify_tenant_chain
 from core.disputes import (
     dispute_refusal,
     open_dispute,
@@ -37,6 +40,7 @@ from core.domain.disputes import (
 )
 from core.domain.evidence import EvidencePack
 from core.domain.payments import Payment, PaymentId
+from core.pack_verify import verify_pack
 from core.ports import TenantTransaction
 
 router = APIRouter(prefix="/v1/disputes", tags=["disputes"])
@@ -250,6 +254,63 @@ def mint_review_link(
         return run_idempotent(
             tx, key, request_hash(request, body), clock, write, kept_as=without_url
         )
+
+
+class PackVersionCheck(BaseModel):
+    version: int
+    signed_off: bool
+    problems: list[str]
+
+
+class PackChainOut(BaseModel):
+    clean: bool
+    record_count: int
+    first_broken_seq: int | None
+
+
+class PackCheckOut(BaseModel):
+    """`api.admin verify-pack`'s answer: `different` when a version or the chain fails
+    (its exit 1), `pack_problem` when a Policy pack a version recorded can't be loaded."""
+
+    dispute_id: DisputeId
+    status: Literal["clean", "different", "pack_problem"]
+    clean: bool
+    versions: list[PackVersionCheck]
+    pack_problems: list[str]
+    chain: PackChainOut
+
+
+@router.get("/{dispute_id}/verify-pack", response_model=PackCheckOut)
+def verify_dispute_packs(
+    dispute_id: str, tenant: ManageTenant, store: StoreDep, settings: SettingsDep
+) -> PackCheckOut:
+    """The inspector's check of every pack version against the Audit chain and its
+    Sign-off (core.pack_verify, as `api.admin verify-pack`), then the Tenant's chain."""
+    report = verify_pack(store, tenant, DisputeId(dispute_id), settings.policy_packs_dir)
+    if report is None:
+        raise ApiError(404, "DISPUTE_NOT_FOUND", f"No Dispute {dispute_id}.")
+    with store.transaction(tenant) as tx:
+        chain = verify_tenant_chain(tx)
+    status: Literal["clean", "different", "pack_problem"] = "clean"
+    if not report.clean or not chain.clean:
+        status = "different"
+    elif report.pack_problems:
+        status = "pack_problem"
+    return PackCheckOut(
+        dispute_id=DisputeId(dispute_id),
+        status=status,
+        clean=status == "clean",
+        versions=[
+            PackVersionCheck(version=v.version, signed_off=v.signed_off, problems=v.problems)
+            for v in report.versions
+        ],
+        pack_problems=report.pack_problems,
+        chain=PackChainOut(
+            clean=chain.clean,
+            record_count=chain.record_count,
+            first_broken_seq=chain.first_broken_seq,
+        ),
+    )
 
 
 @router.get("/{dispute_id}")

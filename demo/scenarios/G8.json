@@ -1,0 +1,114 @@
+{
+  "id": "G8",
+  "title": "The AI writer is unavailable",
+  "group": "G",
+  "playlists": [],
+  "story": "The AI is switched off just as Asha disputes an INR 1,250 payment. The Evidence pack's narrative can't be written by the model, so code writes it from a template instead, flagged as such. The Dispute still goes to review and is signed off on time.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Reorder my usual milk and bread, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Allowed. Paying FreshMart now."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": [
+        "captured",
+        "failed"
+      ],
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The payment is scheduled. I'll let you know once the money is taken."
+        }
+      ]
+    },
+    {
+      "actor": "visitor",
+      "control": "ai_off",
+      "label": "Switch the AI off"
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/disputes",
+      "body": {
+        "payment_id": "{payment_id}",
+        "reason": "unauthorised"
+      },
+      "respond_in_days": 10,
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "I don't remember agreeing to this FreshMart charge. I've told my bank I never authorised it."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/disputes/{dispute_id}",
+      "until_status": [
+        "in_review"
+      ]
+    },
+    {
+      "actor": "reviewer",
+      "action": "sign_off"
+    }
+  ],
+  "demo_controls": [
+    "ai_off"
+  ],
+  "expected": {
+    "outcome": "allow",
+    "payment_status": "captured",
+    "dispute_status": "ready",
+    "narrative_source": "template"
+  },
+  "what_to_notice": "The pack says its narrative was written by code because the model was unavailable. Every claim still cites its record, and the assessment and network codes are worked out by code either way. AI is a nice-to-have here, never a single point of failure."
+}

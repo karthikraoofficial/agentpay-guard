@@ -1,11 +1,9 @@
-"""The demo CLI (#138): demo journeys 1, 3 and 4 (journey 2 is Scenario E1, tested in
-tests/demo/test_scenarios.py) over HTTP against the in-process app, on
-the mock rail with mock settle on.
+"""The demo CLI (#138): demo journeys 1 and 4 (journeys 2 and 3 are Scenarios E1 and G1,
+tested in tests/demo/test_scenarios.py) over HTTP against the in-process app, on the mock
+rail with mock settle on.
 
 The CLI only talks HTTP. Each time it waits, this test plays the worker (the mock settle
-sweep, the outbox relay and the Evidence pack build) and the people the CLI waits for: the
-Payer who opens the printed Consent link and approves, and the reviewer who opens the
-printed Review link and signs off."""
+sweep and the outbox relay)."""
 
 from typing import Any
 
@@ -45,19 +43,6 @@ def test_journey_1_an_allow_becomes_a_payment(api: Api, keys: tuple[str, str]) -
     assert any("allow" in line for line in out)
 
 
-def test_journey_3_a_captured_payment_is_disputed_signed_off_and_verified(
-    api: Api, keys: tuple[str, str]
-) -> None:
-    out: list[str] = []
-    operator = Operator(api, out)
-
-    dispute = demo(api, keys, out, operator).journey_3()
-
-    assert dispute["status"] == "ready"
-    assert dispute["sign_off"]["pack_hash"] == dispute["pack_hash"]
-    assert any("verified" in line.lower() for line in out)
-
-
 def test_journey_4_a_payment_refunded_in_two_parts_gives_back_its_monthly_cap(
     api: Api, keys: tuple[str, str]
 ) -> None:
@@ -80,7 +65,6 @@ def test_the_journeys_run_one_after_another_and_never_print_a_key(
     run = demo(api, keys, out)
 
     run.journey_1()
-    run.journey_3()
     run.journey_4()
 
     text = "\n".join(out)
@@ -111,7 +95,7 @@ def test_waiting_gives_up_and_says_on_what(api: Api, keys: tuple[str, str]) -> N
     )
 
     with pytest.raises(StepFailed) as failed:
-        never.journey_3()
+        never.journey_4()
 
     assert failed.value.step == "Wait for the Payment to be captured"
 

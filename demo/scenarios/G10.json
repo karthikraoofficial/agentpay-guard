@@ -1,0 +1,111 @@
+{
+  "id": "G10",
+  "title": "The dispute is dropped",
+  "group": "G",
+  "playlists": [],
+  "story": "Asha disputes an INR 1,250 payment, then remembers she did order it and tells her bank to drop the complaint. The wallet app withdraws the Dispute, and it is closed.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
+    },
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Reorder my usual milk and bread, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "Allowed. Paying FreshMart now."
+        }
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": [
+        "captured",
+        "failed"
+      ],
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The payment is scheduled. I'll let you know once the money is taken."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/disputes",
+      "body": {
+        "payment_id": "{payment_id}",
+        "reason": "unauthorised"
+      },
+      "respond_in_days": 10,
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "I don't remember agreeing to this FreshMart charge. I've told my bank I never authorised it."
+        }
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/disputes/{dispute_id}",
+      "until_status": [
+        "in_review"
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/disputes/{dispute_id}/withdraw",
+      "chat": [
+        {
+          "speaker": "asha",
+          "text": "Sorry, I did order that after all. I've asked my bank to drop the dispute."
+        }
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "allow",
+    "payment_status": "captured",
+    "dispute_status": "withdrawn"
+  },
+  "what_to_notice": "Withdrawn is a closed state: the pack can no longer be signed off or regenerated, and a Review link for it stops working. The lifecycle has an honest ending, not only the happy path."
+}

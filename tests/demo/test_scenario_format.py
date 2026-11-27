@@ -79,3 +79,22 @@ def test_scripted_verdicts_skip_a_check_made_with_the_ai_off() -> None:
     assert scenarios["D5"].scripted_verdicts() == {}
     assert scenarios["D2"].scripted_verdicts() == {0: "mismatch"}
     assert scenarios["D6"].scripted_verdicts() == {0: "match"}
+
+
+def test_a_reviewer_does_only_what_the_dispute_viewer_offers(tmp_path: Path) -> None:
+    g1 = json.loads(Path("demo/scenarios/G1.json").read_text(encoding="utf-8"))
+    reviewer = next(step for step in g1["steps"] if step["actor"] == "reviewer")
+    reviewer["action"] = "approve"
+    (tmp_path / "G1.json").write_text(json.dumps(g1), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="a reviewer step's action is one of"):
+        catalogue(tmp_path)
+
+
+def test_only_a_read_waits(tmp_path: Path) -> None:
+    g10 = json.loads(Path("demo/scenarios/G10.json").read_text(encoding="utf-8"))
+    g10["steps"][-1]["until_status"] = ["withdrawn"]
+    (tmp_path / "G10.json").write_text(json.dumps(g10), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="only a GET route can wait"):
+        catalogue(tmp_path)

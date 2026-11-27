@@ -7,7 +7,7 @@ Each time a run waits, the test plays the worker and the people, as the demo CLI
 import pytest
 
 from core.ports import ModelSpendCapReached
-from demo.__main__ import main, run_scenario
+from demo.__main__ import AS_SCENARIO, main, run_scenario
 from demo.engine import Run, play
 from demo.scenario import Scenario, catalogue
 from tests.api.conftest import Api
@@ -229,3 +229,90 @@ async def test_the_cli_prints_the_cart_checks_verdict(api: Api, keys: tuple[str,
 
     assert code == 0, "\n".join(out)
     assert any("check_intent: unknown (scripted: unknown)" in line for line in out), out
+
+
+async def test_g1_builds_a_strong_pack_the_reviewer_signs_and_verify_pack_checks(
+    api: Api, keys: tuple[str, str]
+) -> None:
+    scenario = catalogue()["G1"]
+    operator = Operator(api, [])
+    script_the_model(api, scenario)
+    async with clients(api, keys) as (agent, tenant):
+        run = Run(scenario, agent=agent, tenant=tenant, now=api.clock.now, people="engine")
+        cards = await play(run, wait=operator.wait, patience=20)
+        verification = await run.verify()
+
+    built = next(card for card in cards if card.dispute and card.dispute.status == "in_review")
+    assert built.dispute is not None
+    assert (built.dispute.pack_version, built.dispute.evidence_strength) == (1, "strong")
+    assert built.dispute.narrative_source == "model"
+    signed = next(card for card in cards if card.actor == "reviewer")
+    assert signed.link is not None and "/dispute#" in signed.link
+    assert signed.dispute is not None and signed.dispute.status == "ready"
+    assert signed.dispute.signed_off_version == 1
+    checked = cards[-1]
+    assert checked.pack_check is not None and checked.pack_check.clean
+    assert [(v.version, v.signed_off) for v in checked.pack_check.versions] == [(1, True)]
+    assert verification is not None and verification.pack is not None
+    assert verification.pack.clean
+
+
+async def test_g8_flags_a_narrative_written_by_code(api: Api, keys: tuple[str, str]) -> None:
+    operator = Operator(api, [])
+    async with clients(api, keys) as (agent, tenant):
+        run = Run(catalogue()["G8"], agent=agent, tenant=tenant, now=api.clock.now, people="engine")
+        cards = await play(run, wait=operator.wait, patience=20)
+
+    built = next(card for card in cards if card.dispute and card.dispute.status == "in_review")
+    assert built.dispute is not None
+    assert built.dispute.narrative_source == "template"
+    assert built.dispute.narrative_note == "model narrative unavailable"
+
+
+async def test_a_visitor_reviewer_signs_off_in_the_dispute_viewer(
+    api: Api, keys: tuple[str, str]
+) -> None:
+    operator = Operator(api, [])
+    async with clients(api, keys) as (agent, tenant):
+        run = Run(catalogue()["H7"], agent=agent, tenant=tenant, now=api.clock.now)
+        card = await run.next()
+        while card.actor != "reviewer":
+            if card.waiting:
+                operator.wait()
+            card = await run.next()
+        assert card.waiting and card.link is not None
+        assert (await run.next(card.step)).waiting  # nobody has signed yet
+
+        token = card.link.split("#", 1)[1]
+        signed = await tenant.post(
+            "/v1/review-link/sign-off",
+            headers={"Review-Link": token, "Idempotency-Key": "visitor-sign-off"},
+            json={"pack_version": 1},
+        )
+        assert signed.status_code == 200, signed.text
+        after = await run.next(card.step)
+
+    assert not after.waiting
+    assert after.dispute is not None and after.dispute.status == "ready"
+
+
+async def test_journey_3_on_the_cli_is_scenario_g1(api: Api, keys: tuple[str, str]) -> None:
+    out: list[str] = []
+    operator = Operator(api, out)  # signs off through the Review link the CLI prints
+    script_the_model(api, catalogue()["G1"])
+    async with clients(api, keys) as (agent, tenant):
+        code = await run_scenario(
+            catalogue()[AS_SCENARIO["3"]],
+            agent=agent,
+            tenant=tenant,
+            say=out.append,
+            wait=operator.wait,
+            now=api.clock.now,
+            patience=20,
+        )
+
+    assert code == 0, "\n".join(out)
+    assert AS_SCENARIO["3"] == "G1"
+    assert operator.used, "the CLI never printed a Review link"
+    assert any("strength strong" in line for line in out), out
+    assert any("verify-pack: clean" in line for line in out), out
