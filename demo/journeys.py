@@ -1,16 +1,14 @@
-"""The four demo journeys, over HTTP only, so they run against any deployment.
+"""The first demo journey, over HTTP only, so it runs against any deployment.
 
 1. An Agent pays within its Mandate: allow, then a Payment.
 2. A step-up the Payer approves: now Scenario E1 (demo/scenarios/E1.json), which
    `python -m demo --journey 2` plays through the step engine (#276).
 3. A dispute signed off and verified: now Scenario G1 (demo/scenarios/G1.json), which
    `python -m demo --journey 3` plays through the step engine (#283).
-4. A refund: a captured Payment is refunded in two parts, and the Monthly cap it used is
-   given back, so a Decision it blocked is allowed (#211).
+4. A refund that gives the Monthly cap back: now Scenario H1 (demo/scenarios/H1.json),
+   which `python -m demo --journey 4` plays through the step engine (#285).
 
-Each journey sets up its own Payer, Agent and Mandate the first time it needs them, so any
-journey can run on its own. Whenever it waits (for the worker or the Payer)
-it calls `wait`, which sleeps in the CLI and plays those parts in the tests. A failure
+Journey 1 sets up its own Payer, Agent and Mandate the first time it needs them. A failure
 raises StepFailed naming the step. Keys go only into Authorization headers, never into
 output."""
 
@@ -18,11 +16,10 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, TypeVar
+from typing import Any
 
 import httpx
 
-T = TypeVar("T")
 Json = dict[str, Any]
 
 GROCER = {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"}
@@ -70,10 +67,7 @@ class Demo:
     agent_key: str
     tenant_key: str
     say: Callable[[str], None]
-    wait: Callable[[], None]
     now: Callable[[], datetime]
-    # How many times to wait for something before giving up.
-    patience: int = 200
     mandate_id: str | None = None
     agent_id: str | None = None
 
@@ -91,17 +85,6 @@ class Demo:
             raise StepFailed(step, f"HTTP {response.status_code}: {_problem(response)}")
         result: Json = response.json()
         return result
-
-    def _until(self, step: str, check: Callable[[], T | None]) -> T:
-        for _ in range(self.patience):
-            found = check()
-            if found is not None:
-                return found
-            self.wait()
-        found = check()
-        if found is None:
-            raise StepFailed(step, f"still waiting after {self.patience} checks")
-        return found
 
     def _step(self, text: str) -> None:
         self.say(f"  - {text}")
@@ -156,8 +139,8 @@ class Demo:
         )
         return mandate["mandate_id"], agent["agent_id"]
 
-    def _decide(self, amount: Json, expected: str, on: tuple[str, str] | None = None) -> Json:
-        mandate_id, agent_id = on or self._setup()
+    def _decide(self, amount: Json, expected: str) -> Json:
+        mandate_id, agent_id = self._setup()
         step = "Ask for a Decision"
         decision = self._call(
             step,
@@ -182,65 +165,9 @@ class Demo:
         self._step(f"Payment {payment['payment_id']}: {payment['status']}")
         return payment
 
-    def _captured(self, payment_id: str) -> Json:
-        """The Payment once the worker's sweep captured it (mock settle)."""
-        step = "Wait for the Payment to be captured"
-
-        def settled() -> Json | None:
-            got = self._call(step, "GET", f"/v1/payments/{payment_id}", self.agent_key)
-            return None if got["status"] == "scheduled" else got
-
-        payment = self._until(step, settled)
-        self._step(f"Payment {payment_id}: {payment['status']}")
-        if payment["status"] != "captured":
-            raise StepFailed(step, f"the Payment {payment['status']}")
-        return payment
-
-    def _refund(self, payment_id: str, amount: Json) -> Json:
-        step = "Refund the Payment"
-        refund = self._call(
-            step,
-            "POST",
-            f"/v1/payments/{payment_id}/refunds",
-            self.tenant_key,
-            {"amount": amount, "reason": "Part of the order came back"},
-        )
-        path = f"/v1/payments/{payment_id}/refunds/{refund['refund_id']}"
-
-        def settled() -> Json | None:
-            got = self._call(step, "GET", path, self.tenant_key)
-            return None if got["status"] == "pending" else got
-
-        if refund["status"] == "pending":
-            refund = self._until("Wait for the Refund to settle", settled)
-        self._step(f"Refund {refund['refund_id']} of {money(amount)}: {refund['status']}")
-        if refund["status"] != "processed":
-            raise StepFailed(step, f"the Refund {refund['status']}: {refund['failure_code']}")
-        return refund
-
     # --- Journeys -----------------------------------------------------------------------
 
     def journey_1(self) -> Json:
         self.say("Journey 1: an Agent pays within its Mandate")
         decision = self._decide(SMALL, "allow")
         return self._pay(decision["decision_id"])
-
-    def journey_4(self) -> Json:
-        self.say("Journey 4: a captured Payment is refunded, and its Monthly cap given back")
-        # A Mandate of its own, so the cap is tight enough to show: INR 2,000 a month.
-        tight = self._grant(2_000_00, 2_000_00)
-        decision = self._decide(SMALL, "allow", on=tight)
-        payment = self._captured(self._pay(decision["decision_id"])["payment_id"])
-        self._decide(SMALL, "block", on=tight)  # INR 1,250 of 2,000 used: no room for more
-        self._refund(payment["payment_id"], {"minor": 500_00, "currency": "INR"})
-        rest = payment["amount"]["minor"] - 500_00
-        self._refund(payment["payment_id"], {"minor": rest, "currency": "INR"})
-        self._decide(SMALL, "allow", on=tight)  # the refunds gave the cap back
-        refunded: Json = self._call(
-            "Read the Payment", "GET", f"/v1/payments/{payment['payment_id']}", self.tenant_key
-        )
-        self._step(
-            f"Payment {refunded['payment_id']}: still {refunded['status']}, with "
-            f"{money(refunded['refunded'])} refunded in {len(refunded['refunds'])} Refunds"
-        )
-        return refunded

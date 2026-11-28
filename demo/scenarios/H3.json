@@ -1,0 +1,82 @@
+{
+  "id": "H3",
+  "title": "Refund fails at the bank",
+  "group": "H",
+  "playlists": [],
+  "story": "Asha's monthly limit for ShopBot is INR 2,000, and a INR 1,250 order is paid. The order comes back, but the bank fails to process the refund. The Guard marks the Refund failed, and the money doesn't count back towards the limit: Asha doesn't have it yet. A second INR 1,250 order is still blocked.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 200000, "currency": "INR"},
+      "monthly_cap": {"minor": 200000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"},
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 125000, "currency": "INR"},
+      "expect_outcome": "allow",
+      "chat": [
+        {"speaker": "asha", "text": "Reorder my usual milk and bread, please."},
+        {"speaker": "shopbot", "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {"speaker": "shopbot", "text": "Allowed. Paying FreshMart INR 1,250 now."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": ["captured", "failed"],
+      "chat": [
+        {"speaker": "shopbot", "text": "Waiting for the bank to confirm the payment."}
+      ]
+    },
+    {
+      "actor": "visitor",
+      "control": "rail_declining",
+      "label": "Make the bank decline",
+      "chat": [
+        {"speaker": "asha", "text": "What if the bank can't process my refund?"}
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/payments/{payment_id}/refunds",
+      "body": {"amount": {"minor": 125000, "currency": "INR"}, "reason": "Order returned"},
+      "chat": [
+        {"speaker": "asha", "text": "I returned the whole order. Please refund it."}
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/payments/{payment_id}/refunds/{refund_id}",
+      "until_status": ["processed", "failed"]
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 125000, "currency": "INR"},
+      "expect_outcome": "block",
+      "chat": [
+        {"speaker": "asha", "text": "Order the same basket for my mother, then."},
+        {"speaker": "shopbot", "text": "Another INR 1,250 at FreshMart. Checking with AgentPay Guard."}
+      ]
+    }
+  ],
+  "demo_controls": ["rail_declining"],
+  "expected": {
+    "outcome": "block",
+    "reason_codes": ["MONTHLY_CAP_EXCEEDED", "MONTHLY_CAP_NEAR"],
+    "payment_status": "captured",
+    "refund_status": "failed"
+  },
+  "what_to_notice": "The Refund is recorded as failed, with the bank's failure code. Only Refunds that went through count back towards the Monthly cap, so Spent this month is still INR 1,250 and the second order is blocked with MONTHLY_CAP_EXCEEDED. The bank-declining switch is a Demo control scoped to this run's Mandate: it writes its own Audit record and affects no one else."
+}

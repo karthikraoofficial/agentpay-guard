@@ -85,11 +85,13 @@ def refund_refusal(
     amount: Money,
     window: timedelta,
     now: datetime,
+    window_ended_at: datetime | None = None,
 ) -> RefundRefusal | None:
     """Why `amount` can't be refunded on `payment` at `now`, or None if it can. Only money
     that moved is returned: a scheduled Payment is cancelled instead, which is a Void.
     `dispute` is the status of the Payment's Dispute, if it has one. `window` is the active
-    Policy pack's Refund window, counted from capture. Pending Refunds count with processed
+    Policy pack's Refund window, counted from capture; `window_ended_at` is when a Demo
+    control ended it early (ADR-0032), if one did. Pending Refunds count with processed
     ones, so two in flight can't overshoot; failed ones don't."""
     if payment.status != "captured":
         return "PAYMENT_NOT_REFUNDABLE"
@@ -97,6 +99,8 @@ def refund_refusal(
         return "PAYMENT_DISPUTED"
     # A captured Payment never changes again, so it was last updated when captured.
     if now > payment.updated_at + window:
+        return "REFUND_WINDOW_CLOSED"
+    if window_ended_at is not None and now >= window_ended_at:
         return "REFUND_WINDOW_CLOSED"
     held = sum(r.amount.minor for r in earlier if r.status != "failed")
     if held + amount.minor > payment.amount.minor:

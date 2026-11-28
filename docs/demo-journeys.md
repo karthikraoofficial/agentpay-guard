@@ -419,12 +419,12 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 **Guard's answer:** Tracks each refund, and refunded money counts back towards the monthly limit.
 **Why it matters:** Limits reflect what Asha actually spent, not what was briefly charged.
 
-### H2. Refund too large or too late 🟢
+### H2. Refund too large or too late ✅
 **Story:** The wallet app tries to refund more than was paid, or to refund a payment taken more than 180 days ago.
 **Guard's answer:** Refused with the reason.
-**Why it matters:** Refunds follow the same discipline as payments.
+**Why it matters:** Refunds follow the same discipline as payments. *Demo control:* a "skip 180 days" fast-forward ends the Refund window now, since no demo Payment is half a year old.
 
-### H3. Refund fails at the bank 🟡
+### H3. Refund fails at the bank ✅
 **Story:** The bank fails to process a refund.
 **Guard's answer:** The refund is marked failed. Only refunds that actually went through count back towards the monthly limit, because Asha doesn't have this money yet.
 **Why it matters:** The books always match reality. *Demo control:* a "bank declining" switch. A deployment has no other way to make a refund fail: the hooks that do it are for tests only.
@@ -467,18 +467,17 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 | E. Asking Asha | 6 | 6 | 0 | 0 |
 | F. Paying | 9 | 9 | 0 | 0 |
 | G. Disputes | 12 | 12 | 0 | 0 |
-| H. Refunds and proof | 8 | 5 | 2 | 1 |
-| **Total** | **60** | **56** | **2** | **2** |
+| H. Refunds and proof | 8 | 7 | 1 | 0 |
+| **Total** | **60** | **58** | **1** | **1** |
 
-*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), D5, F8, F9 and H6 (#281), B1 to B9 (#277), A2, D1 to D4 and D6 (#279), G1, G8, G9, G10, G12 and H7 (#283), G2 to G7 and G11 (#284), C2 to C6 (#278), and F1, F2, F3 and F6 (#282).*
+*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), D5, F8, F9 and H6 (#281), B1 to B9 (#277), A2, D1 to D4 and D6 (#279), G1, G8, G9, G10, G12 and H7 (#283), G2 to G7 and G11 (#284), C2 to C6 (#278), F1, F2, F3 and F6 (#282), and H2 and H3 (#285), with H1 moved from journey 4 to a Scenario.*
 
 **What this means for the build:**
-- **2 journeys need no product changes.** They need a script (chat lines, inputs, expected outcome) and a place in the demo UI.
-- **2 journeys still need a Scenario on a demo-only control:**
-  1. **Fast-forward** (built for Consent requests, Payment windows, notice periods and Dispute deadlines, ADR-0032): still to come for a stale cart check (D7).
-  2. **Failure switches** (built, ADR-0032): bank declining is still to be shown in a refund (H3).
+- **1 journey needs no product changes** (H8). It needs a script (chat lines, inputs, expected outcome) and a place in the demo UI.
+- **1 journey still needs a Scenario on a demo-only control:**
+  1. **Fast-forward** (built for Consent requests, Payment windows, notice periods, Dispute deadlines and Refund windows, ADR-0032): still to come for a stale cart check (D7).
 
-  Both work only for the demo account on pretend money. The pretend bank already has "declines", "refused" and "times out" cards, so several bank failures need no new switch at all.
+  It works only for the demo account on pretend money. The pretend bank already has "declines", "refused" and "times out" cards, so several bank failures need no new switch at all.
 
 ---
 

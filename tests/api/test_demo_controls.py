@@ -469,3 +469,69 @@ def test_a_payment_the_worker_debited_can_be_refunded_through_the_api(api: Api) 
 
     assert refund.status_code in (200, 201, 202), refund.text
     assert refund.json()["status"] == "processed"
+
+
+def _captured(demo: Demo) -> dict[str, Any]:
+    """A Payment the mock rail captured, as mock settle would."""
+    decision = demo.decide(SMALL)
+    payment: dict[str, Any] = demo.api.post(
+        "/v1/payments", demo.headers, {"decision_id": decision["decision_id"]}
+    ).json()
+    demo.api.rail.settle(demo.tenant_id, payment["payment_id"])
+    demo.api.clock.advance(timedelta(minutes=2))
+    sweep(demo.api.store, demo.api.rail, demo.api.clock, timedelta(minutes=1))
+    return payment
+
+
+def _refund(demo: Demo, payment_id: str, headers: dict[str, str] | None = None) -> Any:
+    amount = {"minor": 500_00, "currency": "INR"}
+    return demo.api.post(
+        f"/v1/payments/{payment_id}/refunds", headers or demo.headers, {"amount": amount}
+    )
+
+
+def test_expire_now_closes_a_refund_window(demo: Demo) -> None:
+    payment = _captured(demo)
+    assert _refund(demo, payment["payment_id"]).status_code == 201
+
+    ended = demo.control(f"payments/{payment['payment_id']}/expire-refund-window")
+    late = _refund(demo, payment["payment_id"])
+
+    assert ended.status_code == 200, ended.text
+    body = ended.json()
+    assert (body["control"], body["target_id"]) == ("expire_refund_window", payment["payment_id"])
+    assert body["decision_id"] == payment["decision_id"]
+    assert late.status_code == 409
+    assert late.json()["code"] == "REFUND_WINDOW_CLOSED"
+    demo.api.assert_evidence_holds()
+
+
+def test_only_a_captured_payment_has_a_refund_window_to_close(demo: Demo) -> None:
+    decision = demo.decide(SMALL)
+    scheduled = demo.api.post(
+        "/v1/payments", demo.headers, {"decision_id": decision["decision_id"]}
+    ).json()
+
+    ended = demo.control(f"payments/{scheduled['payment_id']}/expire-refund-window")
+
+    assert ended.status_code == 409
+    assert ended.json()["code"] == "PAYMENT_NOT_REFUNDABLE"
+
+
+def test_another_tenants_payment_has_no_refund_window_to_close(demo: Demo) -> None:
+    payment = _captured(demo)
+    other = demo.api.new_tenant("Other")
+
+    elsewhere = demo.control(f"payments/{payment['payment_id']}/expire-refund-window", other)
+
+    assert elsewhere.status_code == 404
+    assert _refund(demo, payment["payment_id"]).status_code == 201
+
+
+def test_a_refund_window_control_is_ignored_once_the_tenant_isnt_the_demo_one(demo: Demo) -> None:
+    payment = _captured(demo)
+    demo.control(f"payments/{payment['payment_id']}/expire-refund-window")
+
+    demo.api.use_settings(make_settings(mock_settle_after_seconds=60))
+
+    assert _refund(demo, payment["payment_id"]).status_code == 201

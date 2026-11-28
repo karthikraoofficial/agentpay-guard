@@ -52,6 +52,7 @@ DemoControl = Literal[
     "expire_intent",
     "expire_notice",
     "expire_dispute",
+    "expire_refund_window",
     "expire_mandate",
     "settle_now",
     "ai_off",
@@ -120,7 +121,8 @@ class Setup(_Model):
 
 
 # An HTTP route as `METHOD /v1/path`; `{name}` is filled from the run: mandate_id,
-# agent_id, decision_id, audit_record_id, payment_id, consent_request_id or dispute_id.
+# agent_id, decision_id, audit_record_id, payment_id, refund_id, consent_request_id or
+# dispute_id.
 Route = Annotated[str, StringConstraints(pattern=r"^(GET|POST) /v1/\S+$")]
 # The Tenant step that registers another Agent, by the `name` in its body (B6).
 REGISTER_AGENT = "POST /v1/agents"
@@ -150,6 +152,10 @@ class AgentStep(_Model):
     until_status: list[str] | None = None
     # The error code the API answers with, when the journey shows a refusal.
     expect_refusal: str | None = None
+    # request_decision: the Outcome this Decision must have, for a journey whose answer
+    # changes during the run (H1: blocked, then allowed once refunds give the cap back).
+    # The expected result checks only the last Decision.
+    expect_outcome: Literal["allow", "step_up", "block"] | None = None
     # How many times ShopBot sends the call, each with the step's one idempotency key, as
     # a retry after a lost answer would (F3). Every send must get the first answer back.
     sends: int = Field(default=1, ge=1, le=3)
@@ -158,6 +164,12 @@ class AgentStep(_Model):
     def _tool_or_route(self) -> Self:
         if (self.tool is None) == (self.route is None):
             raise ValueError("an Agent step names exactly one of tool or route")
+        return self
+
+    @model_validator(mode="after")
+    def _only_decisions_expect_an_outcome(self) -> Self:
+        if self.expect_outcome is not None and self.tool != "request_decision":
+            raise ValueError("only a request_decision step expects an outcome")
         return self
 
     @model_validator(mode="after")
@@ -229,6 +241,7 @@ FastForward = Literal[
     "expire_payment_window",
     "expire_notice",
     "expire_dispute",
+    "expire_refund_window",
     "ai_off",
     "rail_declining",
     "lose_payment",

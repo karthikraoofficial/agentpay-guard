@@ -2,8 +2,9 @@
 
 `--scenario <id>` runs one Scenario from the catalogue (demo/scenarios/) through the step
 engine the Demo runner uses; `--journey 1..4` runs the original four journeys, of which
-journey 2 (a step-up the Payer approves) is now Scenario E1 and journey 3 (a disputed
-Payment, signed off and verified) Scenario G1.
+journey 2 (a step-up the Payer approves) is now Scenario E1, journey 3 (a disputed
+Payment, signed off and verified) Scenario G1, and journey 4 (a refund that gives the
+Monthly cap back) Scenario H1.
 
 The Demo Tenant's keys come from settings (AGENTPAY_DEMO_AGENT_KEY and
 AGENTPAY_DEMO_TENANT_KEY), never from the command line, and are never printed. The
@@ -24,8 +25,8 @@ from demo.journeys import Demo, StepFailed
 from demo.scenario import Scenario, catalogue
 
 JOURNEYS = ("1", "2", "3", "4")
-# Journeys that now run as a Scenario through the step engine (#276, #283).
-AS_SCENARIO = {"2": "E1", "3": "G1"}
+# Journeys that now run as a Scenario through the step engine (#276, #283, #285).
+AS_SCENARIO = {"2": "E1", "3": "G1", "4": "H1"}
 
 
 def main(argv: Sequence[str] | None = None, settings: Settings | None = None) -> int:
@@ -84,9 +85,7 @@ def main(argv: Sequence[str] | None = None, settings: Settings | None = None) ->
             agent_key=agent_key,
             tenant_key=tenant_key,
             say=lambda line: print(line, flush=True),
-            wait=lambda: time.sleep(args.interval),
             now=lambda: datetime.now(UTC),
-            patience=max(1, int(args.timeout / args.interval)),
         )
         for number in journeys:
             if number in AS_SCENARIO:

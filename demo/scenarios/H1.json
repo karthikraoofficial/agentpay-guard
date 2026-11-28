@@ -1,0 +1,97 @@
+{
+  "id": "H1",
+  "title": "A refund gives the allowance back",
+  "group": "H",
+  "playlists": ["payments-pm"],
+  "story": "Asha's monthly limit for ShopBot is INR 2,000. A INR 1,250 grocery order is paid, so a second INR 1,250 order is blocked: it would take her over. Part of the first order comes back, and the wallet app refunds INR 500, then the remaining INR 750. Refunded money counts back towards the limit, so the second order is now allowed.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 200000, "currency": "INR"},
+      "monthly_cap": {"minor": 200000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"},
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 125000, "currency": "INR"},
+      "expect_outcome": "allow",
+      "chat": [
+        {"speaker": "asha", "text": "Reorder my usual milk and bread, please."},
+        {"speaker": "shopbot", "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {"speaker": "shopbot", "text": "Allowed. Paying FreshMart INR 1,250 now."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": ["captured", "failed"],
+      "chat": [
+        {"speaker": "shopbot", "text": "Waiting for the bank to confirm the payment."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 125000, "currency": "INR"},
+      "expect_outcome": "block",
+      "chat": [
+        {"speaker": "asha", "text": "Order the same basket for my mother too."},
+        {"speaker": "shopbot", "text": "Another INR 1,250 at FreshMart. Checking with AgentPay Guard."}
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/payments/{payment_id}/refunds",
+      "body": {"amount": {"minor": 50000, "currency": "INR"}, "reason": "The bread came back"},
+      "chat": [
+        {"speaker": "shopbot", "text": "AgentPay Guard blocked it: that would go over your INR 2,000 for the month."},
+        {"speaker": "asha", "text": "The bread from the first order was stale. I've sent it back."}
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/payments/{payment_id}/refunds/{refund_id}",
+      "until_status": ["processed", "failed"]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/payments/{payment_id}/refunds",
+      "body": {"amount": {"minor": 75000, "currency": "INR"}, "reason": "The milk came back"},
+      "chat": [
+        {"speaker": "asha", "text": "And the milk was the wrong kind. That's going back too."}
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/payments/{payment_id}/refunds/{refund_id}",
+      "until_status": ["processed", "failed"]
+    },
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 125000, "currency": "INR"},
+      "expect_outcome": "allow",
+      "chat": [
+        {"speaker": "asha", "text": "Now can you order my mother's basket?"},
+        {"speaker": "shopbot", "text": "Asking AgentPay Guard again for the INR 1,250 order."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "allow",
+    "reason_codes": [],
+    "payment_status": "captured",
+    "refund_status": "processed"
+  },
+  "what_to_notice": "The second request is blocked with MONTHLY_CAP_EXCEEDED, because INR 1,250 already paid plus INR 1,250 is over INR 2,000. Each Refund is tracked on the Payment, which stays captured. Once both have gone through, Spent this month is back to zero and the same request is allowed. The third Decision's Audit record shows the refunded amount in its inputs."
+}

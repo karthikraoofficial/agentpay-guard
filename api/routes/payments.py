@@ -43,6 +43,7 @@ from api.errors import ApiError
 from api.idempotency import REPLAYED, request_hash, run_idempotent
 from api.payability import demo_tenant, payable_until
 from core.charges import apply_charge, record_payment
+from core.demo_controls import control_for
 from core.domain.decisions import DecisionId, PackRef, decision_time
 from core.domain.idempotency import IdempotencyKey, IdempotencyRecord
 from core.domain.mandates import MandateId
@@ -337,6 +338,7 @@ def create_refund(
     pack: PackDep,
     rail: RailDep,
     breaker: BreakerDep,
+    settings: SettingsDep,
     key: IdemKey,
 ) -> Response:
     fingerprint = request_hash(request, body)
@@ -359,6 +361,8 @@ def create_refund(
         if payment is None:
             raise RuntimeError(f"Payment {payment_id} vanished")
         dispute = tx.get_dispute_for_payment(payment.payment_id)
+        # The Demo Tenant's Refund window can be ended early by a Demo control (ADR-0032).
+        ended = control_for(tx, demo_tenant(settings), "expire_refund_window", payment.payment_id)
         refusal = refund_refusal(
             payment,
             None if dispute is None else dispute.status,
@@ -366,6 +370,7 @@ def create_refund(
             body.amount,
             pack.pack.refund_window,
             now,
+            None if ended is None else ended.at,
         )
         if refusal is not None:
             log.info("refund refused %s: Payment %s, Tenant %s", refusal, payment_id, tenant)

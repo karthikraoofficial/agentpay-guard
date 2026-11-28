@@ -357,3 +357,81 @@ async def test_journey_3_on_the_cli_is_scenario_g1(api: Api, keys: tuple[str, st
     assert operator.used, "the CLI never printed a Review link"
     assert any("strength strong" in line for line in out), out
     assert any("verify-pack: clean" in line for line in out), out
+
+
+async def test_a_decision_unlike_its_steps_expected_outcome_is_reported(
+    api: Api, keys: tuple[str, str]
+) -> None:
+    h1 = catalogue()["H1"]
+    steps = list(h1.steps)
+    steps[3] = steps[3].model_copy(update={"expect_outcome": "allow"})  # it is blocked
+    scenario = h1.model_copy(update={"steps": steps})
+    operator = Operator(api, [])
+    async with clients(api, keys) as (agent, tenant):
+        run = Run(scenario, agent=agent, tenant=tenant, now=api.clock.now, people="engine")
+
+        cards = await play(run, wait=operator.wait, patience=20)
+
+    assert cards[-1].mismatches == ["step 4 request_decision: expected allow, got block"]
+
+
+async def test_h1_refunds_in_two_parts_and_the_blocked_order_is_then_allowed(
+    api: Api, keys: tuple[str, str]
+) -> None:
+    operator = Operator(api, [])
+    async with clients(api, keys) as (agent, tenant):
+        run = Run(catalogue()["H1"], agent=agent, tenant=tenant, now=api.clock.now)
+
+        cards = await play(run, wait=operator.wait, patience=20)
+
+    outcomes = [card.decision.outcome for card in cards if card.decision is not None]
+    assert outcomes == ["allow", "block", "allow"]
+    refunds = [
+        card.call.response
+        for card in cards
+        if card.call and card.call.name.startswith("GET /v1/payments/{payment_id}/refunds/")
+    ]
+    assert [(r["amount"]["minor"], r["status"]) for r in refunds] == [
+        (50000, "processed"),
+        (75000, "processed"),
+    ]
+
+
+async def test_journey_4_on_the_cli_is_scenario_h1(api: Api, keys: tuple[str, str]) -> None:
+    out: list[str] = []
+    operator = Operator(api, out)
+    async with clients(api, keys) as (agent, tenant):
+        code = await run_scenario(
+            catalogue()[AS_SCENARIO["4"]],
+            agent=agent,
+            tenant=tenant,
+            say=out.append,
+            wait=operator.wait,
+            now=api.clock.now,
+            patience=20,
+        )
+
+    assert code == 0, "\n".join(out)
+    assert AS_SCENARIO["4"] == "H1"
+    assert any(
+        "request_decision: block (Reason codes: MONTHLY_CAP_EXCEEDED" in line for line in out
+    )
+    assert any(line.endswith(" processed") and "refunds" in line for line in out), out
+
+
+async def test_waiting_gives_up_and_says_on_what(api: Api, keys: tuple[str, str]) -> None:
+    out: list[str] = []
+    async with clients(api, keys) as (agent, tenant):
+        code = await run_scenario(
+            catalogue()["H1"],
+            agent=agent,
+            tenant=tenant,
+            say=out.append,
+            wait=lambda: None,  # no worker settles the Payment
+            now=api.clock.now,
+            patience=3,
+        )
+
+    assert code == 1
+    assert out[-1].startswith("Failed at 'get_payment")
+    assert out[-1].endswith("still waiting after 3 checks")
