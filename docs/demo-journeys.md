@@ -482,7 +482,7 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 
 ## 7. Suggested demo playlists
 
-Nobody watches 60 journeys. Group them into playlists for different audiences. Each playlist that the demo plays is a file in `demo/playlists/`: so far the 90-second pitch (#287), which the home page's "Try the demo" plays, with settle-now pressed in G1 so it doesn't wait for the bank.
+Nobody watches 60 journeys. Group them into playlists for different audiences. Each playlist that the demo plays is a file in `demo/playlists/`: so far the 90-second pitch (#287), which the home page's "Try the demo" plays, with settle-now pressed in A1, E1 and G1 so it doesn't wait for the bank.
 
 | Playlist | Length | Journeys | Story it tells |
 |---|---|---|---|

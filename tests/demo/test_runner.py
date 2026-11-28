@@ -78,6 +78,10 @@ async def play_through(client: httpx.AsyncClient, run_id: str, operator: Operato
         response = await client.post(f"/runs/{run_id}/next", json={"step": step})
         assert response.status_code == 200, response.text
         card = response.json()
+        if card["waiting"] and card["fast_forward"]:  # the visitor presses it, as on /demo
+            pressed = await client.post(f"/runs/{run_id}/next", json={"step": step, "press": True})
+            assert pressed.status_code == 200, pressed.text
+            card = pressed.json()
         cards.append(card)
         if card["finished"]:
             return cards
