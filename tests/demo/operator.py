@@ -4,6 +4,7 @@ link and approves, and the reviewer who opens a Review link and signs off). Shar
 demo CLI tests and the Scenario tests."""
 
 import re
+from collections.abc import Mapping
 from datetime import timedelta
 
 from adapters.memory.rail import MockRail
@@ -15,8 +16,10 @@ from core.domain.disputes import DisputeId
 from core.domain.evidence import EvidenceBundle
 from core.domain.parties import TenantId
 from core.evidence import ModelNarrative, NarrativeWriter, build_evidence_pack, template_narrative
+from core.ports import WebhookSender
 from core.reconcile import sweep
 from core.relay import relay_once
+from demo.webhook_inbox import BadSignature, WebhookInbox
 from tests.api.conftest import Api, tenant_webhooks
 from tests.conftest import make_settings
 
@@ -24,6 +27,41 @@ SETTLE_AFTER = timedelta(seconds=60)
 # The hosted demo's card-like debit (#280): booked now, debited after this notice period.
 NOTICE = timedelta(seconds=120)
 LINK = re.compile(r"https?://\S+#(\S+)")
+# Where the Demo Tenant's endpoint points in tests: the Demo runner's receiver.
+RECEIVER = "https://demo-runner.test/webhooks"
+
+
+class InboxSender:
+    """Delivers each Tenant webhook straight into a webhook inbox, answering as the Demo
+    runner's receiver does: 200 for a delivery that verifies, 400 for one that doesn't."""
+
+    def __init__(self, inbox: WebhookInbox) -> None:
+        self.inbox = inbox
+
+    def post(self, url: str, body: bytes, headers: Mapping[str, str]) -> int:
+        try:
+            self.inbox.receive(body, headers)
+        except BadSignature:
+            return 400
+        return 200
+
+
+def register_receiver(api: Api, tenant_key: str) -> str:
+    """Point the Demo Tenant's endpoint at the receiver, as the provision wizard does, and
+    return the signing secret the API shows that once."""
+    registered = api.client.post(
+        "/v1/webhook-endpoint",
+        headers={"Authorization": f"Bearer {tenant_key}", "Idempotency-Key": "inbox-endpoint"},
+        json={"url": RECEIVER},
+    )
+    assert registered.status_code == 201, registered.text
+    secret: str = registered.json()["secret"]
+    return secret
+
+
+def webhook_inbox(api: Api, tenant_key: str) -> WebhookInbox:
+    """An inbox holding the secret of the Demo Tenant's newly registered endpoint."""
+    return WebhookInbox(register_receiver(api, tenant_key), now=api.clock.now)
 
 
 def stand_in_writer(tenant_id: TenantId, bundle: EvidenceBundle) -> ModelNarrative:
@@ -35,9 +73,10 @@ def stand_in_writer(tenant_id: TenantId, bundle: EvidenceBundle) -> ModelNarrati
 class Operator:
     """Everything outside the CLI: the worker, the Payer and the reviewer."""
 
-    def __init__(self, api: Api, out: list[str]) -> None:
+    def __init__(self, api: Api, out: list[str], sender: WebhookSender | None = None) -> None:
         self.api = api
         self.out = out
+        self.sender = sender
         self.used: set[str] = set()
         self.waits = 0
 
@@ -74,7 +113,9 @@ class Operator:
         demo_tenant = None if demo is None else TenantId(demo)
         run_debit_step(api.store, SettlingMockRail(api.store), api.clock, demo_tenant)
         sweep(api.store, SettlingMockRail(api.store), api.clock, SETTLE_AFTER)
-        relay_once(api.store, api.workflow, api.clock, tenant_webhooks(api.store, api.clock))
+        relay_once(
+            api.store, api.workflow, api.clock, tenant_webhooks(api.store, api.clock, self.sender)
+        )
         # As the worker does, the AI-off Demo control keeps the model out (ADR-0032).
         writer: NarrativeWriter = stand_in_writer
         if demo_tenant is not None:

@@ -479,6 +479,19 @@ if [[ -n "$agent_key" && -n "$tenant_key" ]]; then
   else
     SKIPPED+=("AGENTPAY_DEMO_CONTROLS_TENANT_ID in $PROD: set it to the Demo Tenant's id")
   fi
+  # The Demo Tenant's Tenant webhooks go to the Demo runner, which checks each signature
+  # so Scenario H8 can show them (#286). The API shows the secret once: it goes straight
+  # into $PROD, never to the screen.
+  if [[ -z "$(ENV_FILE=$PROD _existing AGENTPAY_DEMO_RUNNER_WEBHOOK_SECRET || true)" ]] ||      confirm "Point the Demo Tenant's webhooks at the Demo runner again (rotates the secret)?"; then
+    hooked=$(uv run python -m demo_runner.webhook_setup --base-url "https://$API_HOST" | sed -n 's/^secret: //p')
+    if [[ -n "$hooked" ]]; then
+      prod_write AGENTPAY_DEMO_RUNNER_WEBHOOK_SECRET "$hooked"
+      say "The Demo Tenant's webhooks go to the Demo runner. Its secret is in $PROD and was not shown."
+    else
+      SKIPPED+=("the Demo Tenant's webhook endpoint (uv run python -m demo_runner.webhook_setup)")
+    fi
+    unset hooked
+  fi
   scp -i "$SSH_KEY" -q "$PROD" "$VM_USER@$VM_IP:agentpay-guard/.env"
   vm 'chmod 600 agentpay-guard/.env'
   if vm "cd agentpay-guard && $COMPOSE up -d api worker demo-runner" &&      curl -fsS --max-time 10 "https://$API_HOST/demo-runner/healthz" >/dev/null 2>&1; then

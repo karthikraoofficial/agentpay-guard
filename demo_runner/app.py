@@ -9,6 +9,11 @@
   again later.
 - `POST /runs/{run_id}/verify`: the inspector's Verify / Replay button (#275). Replays this
   run's Decision and walks the Demo Tenant's Audit chain, at most 10 times a run.
+- `POST /webhooks`: the Demo Tenant's Tenant webhook endpoint (#286). A delivery whose
+  signature checks out against `AGENTPAY_DEMO_RUNNER_WEBHOOK_SECRET` is kept for the run
+  it is about (200); any other is refused (400 `BAD_SIGNATURE`). Without the secret the
+  route doesn't exist, and a Scenario that shows webhooks (H8) can't start (409
+  `WEBHOOKS_OFF`).
 - `GET /status`: whether a simulated rail outage is running, for the banner on /demo
   (ADR-0032). Read from the API at most every 5 seconds.
 - `GET /healthz`.
@@ -38,8 +43,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from core.settings import DemoRunnerSettings
-from demo.engine import Card, Run, StepFailed, Verification, WrongStep
+from demo.engine import Card, Run, StepFailed, Verification, WrongStep, needs_webhooks
 from demo.scenario import Scenario, catalogue
+from demo.webhook_inbox import BadSignature, WebhookInbox
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +56,8 @@ _BUSY_RETRY_SECONDS = 30
 _VERIFIES_PER_RUN = 10
 # Every open /demo page polls the status, so the API is asked at most this often.
 _STATUS_CACHE_SECONDS = 5.0
+# A Tenant webhook body holds ids, statuses and times only: anything bigger isn't one.
+_WEBHOOK_MAX_BYTES = 64 * 1024
 
 
 class StartBody(BaseModel):
@@ -116,6 +124,8 @@ def create_app(
     starts: dict[str, deque[float]] = {}
     ttl = settings.demo_runner_run_ttl_seconds
     status_read: tuple[float, DemoStatus] | None = None
+    secret = settings.demo_runner_webhook_secret
+    inbox = None if secret is None else WebhookInbox(secret.get_secret_value(), now=now)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -167,6 +177,8 @@ def create_app(
         scenario = known.get(body.scenario)
         if scenario is None:
             return _problem(404, "SCENARIO_NOT_FOUND", f"No Scenario {body.scenario}.")
+        if needs_webhooks(scenario) and inbox is None:
+            return _problem(409, "WEBHOOKS_OFF", "This demo has no Tenant webhook receiver set up.")
         at = seconds()
         forget_old(at)
         ip = request.client.host if request.client else "unknown"
@@ -179,7 +191,7 @@ def create_app(
             return _problem(429, "RUNNER_BUSY", "The demo is busy.", _BUSY_RETRY_SECONDS)
         window.append(at)
         run_id = secrets.token_urlsafe(24)
-        run = Run(scenario, agent=agent, tenant=tenant, now=now)
+        run = Run(scenario, agent=agent, tenant=tenant, now=now, inbox=inbox)
         runs[run_id] = _Live(run, at)
         log.info("run=%s scenario=%s started", run_id[:8], scenario.id)
         return Started(run_id=run_id, scenario=scenario.id, steps=run.total)
@@ -207,6 +219,23 @@ def create_app(
             card.waiting,
         )
         return card
+
+    if inbox is not None:
+
+        @app.post("/webhooks")
+        async def webhooks(request: Request) -> JSONResponse:
+            """The API's worker posts here, not a browser: CORS doesn't apply. Only the
+            event's id and type are logged, never its body or signature."""
+            raw = await request.body()
+            if len(raw) > _WEBHOOK_MAX_BYTES:
+                return _problem(413, "TOO_LARGE", "That isn't a Tenant webhook.")
+            try:
+                event = inbox.receive(raw, request.headers)
+            except BadSignature:
+                log.info("a webhook delivery was refused: its signature didn't verify")
+                return _problem(400, "BAD_SIGNATURE", "The signature didn't verify.")
+            log.info("webhook %s %s received", event.event_type, event.event_id)
+            return JSONResponse({"received": event.event_id})
 
     @app.post("/runs/{run_id}/verify", response_model=Verification)
     async def verify(run_id: str) -> Verification | JSONResponse:

@@ -423,6 +423,32 @@
           ],
           "default": null,
           "title": "Visa Code"
+        },
+        "webhook_events": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "consent_request.created",
+                  "consent_request.resolved",
+                  "payment.captured",
+                  "payment.failed",
+                  "dispute.in_review",
+                  "dispute.ready",
+                  "dispute.expired",
+                  "refund.processed",
+                  "refund.failed"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Webhook Events"
         }
       },
       "title": "Expected",
@@ -806,6 +832,50 @@
       ],
       "title": "VisitorStep",
       "type": "object"
+    },
+    "WebhookStep": {
+      "additionalProperties": false,
+      "description": "The wallet app's own systems: the Tenant webhooks the Guard sent about this run, as\nthe Demo runner's receiver checked and kept them (H8). The step waits until every\nevent type listed has arrived. Only the Demo runner has a receiver, so the CLI\nrefuses a Scenario with this step.",
+      "properties": {
+        "actor": {
+          "const": "webhooks",
+          "title": "Actor",
+          "type": "string"
+        },
+        "chat": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ChatLine"
+          },
+          "title": "Chat",
+          "type": "array"
+        },
+        "until_events": {
+          "items": {
+            "enum": [
+              "consent_request.created",
+              "consent_request.resolved",
+              "payment.captured",
+              "payment.failed",
+              "dispute.in_review",
+              "dispute.ready",
+              "dispute.expired",
+              "refund.processed",
+              "refund.failed"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Until Events",
+          "type": "array"
+        }
+      },
+      "required": [
+        "actor",
+        "until_events"
+      ],
+      "title": "WebhookStep",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -889,7 +959,8 @@
             "payer": "#/$defs/HumanStep",
             "reviewer": "#/$defs/HumanStep",
             "tenant": "#/$defs/TenantStep",
-            "visitor": "#/$defs/VisitorStep"
+            "visitor": "#/$defs/VisitorStep",
+            "webhooks": "#/$defs/WebhookStep"
           },
           "propertyName": "actor"
         },
@@ -905,6 +976,9 @@
           },
           {
             "$ref": "#/$defs/VisitorStep"
+          },
+          {
+            "$ref": "#/$defs/WebhookStep"
           }
         ]
       },

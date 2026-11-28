@@ -449,10 +449,10 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 **Guard's answer:** Checks the pack's fingerprint (hash) against the sign-off, and confirms every claim points to a real record.
 **Why it matters:** Nobody can swap the evidence after approval.
 
-### H8. Keeping the wallet app informed 🟢
+### H8. Keeping the wallet app informed ✅
 **Story:** Every time a request steps up, a payment completes or fails, or a dispute changes, the wallet app's own systems need to know.
 **Guard's answer:** Sends a signed notification (webhook) for each event, retrying until it's delivered.
-**Why it matters:** The business can update its own app and customer support in real time, and can verify the messages really came from the Guard.
+**Why it matters:** The business can update its own app and customer support in real time, and can verify the messages really came from the Guard. *On the demo:* the Demo runner is the wallet app's receiver and checks each signature, so H8 plays only on `/demo`, not from the command line.
 
 ---
 
@@ -467,13 +467,12 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 | E. Asking Asha | 6 | 6 | 0 | 0 |
 | F. Paying | 9 | 9 | 0 | 0 |
 | G. Disputes | 12 | 12 | 0 | 0 |
-| H. Refunds and proof | 8 | 7 | 1 | 0 |
-| **Total** | **60** | **58** | **1** | **1** |
+| H. Refunds and proof | 8 | 8 | 0 | 0 |
+| **Total** | **60** | **59** | **0** | **1** |
 
-*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), D5, F8, F9 and H6 (#281), B1 to B9 (#277), A2, D1 to D4 and D6 (#279), G1, G8, G9, G10, G12 and H7 (#283), G2 to G7 and G11 (#284), C2 to C6 (#278), F1, F2, F3 and F6 (#282), and H2 and H3 (#285), with H1 moved from journey 4 to a Scenario.*
+*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), D5, F8, F9 and H6 (#281), B1 to B9 (#277), A2, D1 to D4 and D6 (#279), G1, G8, G9, G10, G12 and H7 (#283), G2 to G7 and G11 (#284), C2 to C6 (#278), F1, F2, F3 and F6 (#282), H2 and H3 (#285), with H1 moved from journey 4 to a Scenario, and H8 (#286).*
 
 **What this means for the build:**
-- **1 journey needs no product changes** (H8). It needs a script (chat lines, inputs, expected outcome) and a place in the demo UI.
 - **1 journey still needs a Scenario on a demo-only control:**
   1. **Fast-forward** (built for Consent requests, Payment windows, notice periods, Dispute deadlines and Refund windows, ADR-0032): still to come for a stale cart check (D7).
 

@@ -37,7 +37,9 @@ from demo.scenario import (
     Scenario,
     TenantStep,
     VisitorStep,
+    WebhookStep,
 )
+from demo.webhook_inbox import ReceivedEvent, WebhookInbox
 from guard_mcp.server import call
 from guard_mcp.tools import TOOLS
 
@@ -75,6 +77,7 @@ _CHECKED = {
     "missing_evidence",
     "narrative_source",
     "pack_clean",
+    "webhook_events",
 }
 _FAST_FORWARDS = set(get_args(FastForward))
 # Each fast-forward's Demo control route (ADR-0032) and the run's id it ends.
@@ -251,6 +254,9 @@ class Card(BaseModel):
     # The step is waiting on the worker or a person: ask for the same step again.
     waiting: bool = False
     finished: bool = False
+    # A webhooks step: every Tenant webhook about this run the receiver checked and kept,
+    # in the order they arrived (H8).
+    webhooks: list[ReceivedEvent] | None = None
     # Set on the last Card: how the run differs from the Scenario's expected result.
     mismatches: list[str] = []
 
@@ -275,9 +281,16 @@ def _problem(response: httpx.Response) -> str:
     return f"HTTP {response.status_code}"
 
 
-def check_supported(scenario: Scenario) -> None:
-    """Raise Unsupported if this engine can't run the Scenario yet."""
+def needs_webhooks(scenario: Scenario) -> bool:
+    """Whether the Scenario shows Tenant webhooks, which only the Demo runner receives."""
+    return any(isinstance(step, WebhookStep) for step in scenario.steps)
+
+
+def check_supported(scenario: Scenario, inbox: WebhookInbox | None = None) -> None:
+    """Raise Unsupported if this engine can't run the Scenario here."""
     problems = []
+    if needs_webhooks(scenario) and inbox is None:
+        problems.append("a Tenant webhook receiver, which only the Demo runner has")
     for step in scenario.steps:
         if isinstance(step, AgentStep) and step.tool is not None:
             if step.tool not in _AGENT_TOOLS:
@@ -299,8 +312,12 @@ class Run:
         tenant: httpx.AsyncClient,
         now: Callable[[], datetime],
         people: People = "visitor",
+        inbox: WebhookInbox | None = None,
     ) -> None:
-        check_supported(scenario)
+        check_supported(scenario, inbox)
+        self._inbox = inbox
+        # Every id this run made or was given, so it reads only its own Tenant webhooks.
+        self._ids: set[str] = set()
         self.scenario = scenario
         self._agent = agent
         self._tenant = tenant
@@ -364,6 +381,8 @@ class Run:
                 card = await self._payer_step(index, scenario_step)
             elif isinstance(scenario_step, VisitorStep):
                 card = await self._fast_forward(index, scenario_step, press)
+            elif isinstance(scenario_step, WebhookStep):
+                card = self._webhook_step(index, scenario_step)
             elif isinstance(scenario_step, AgentStep) and scenario_step.tool is not None:
                 card = await self._tool_step(index, scenario_step)
             else:
@@ -439,8 +458,17 @@ class Run:
         found = step_up.get("consent_request_id")
         return str(found) if found else None
 
+    def _note_ids(self, body: Json) -> None:
+        self._ids.update(
+            value for name, value in body.items() if name.endswith("_id") and isinstance(value, str)
+        )
+        step_up = body.get("step_up")
+        if isinstance(step_up, dict):
+            self._note_ids(step_up)
+
     def _remember(self, body: Json) -> DecisionView | None:
         """Keep what the run needs from an answer; the Decision's view if it is one."""
+        self._note_ids(body)
         if "outcome" in body:
             self.decision = body
             return _decision_view(body)
@@ -556,6 +584,7 @@ class Run:
             },
         }
         mandate = await self._post(step, "/v1/mandates", mandate_body, f"{key}-mandate")
+        self._note_ids(mandate)
         self.mandate_id = mandate["mandate_id"]
         self.agent_id = agent["agent_id"]
         for i, prior in enumerate(setup.history):
@@ -962,6 +991,24 @@ class Run:
             consent=consent,
         )
 
+    # --- Tenant webhooks: what the wallet app's own systems were told (H8) ------------------
+
+    def received(self) -> list[ReceivedEvent]:
+        """The Tenant webhooks about this run that the receiver kept, in arrival order."""
+        return [] if self._inbox is None else self._inbox.for_ids(self._ids)
+
+    def _webhook_step(self, index: int, step: WebhookStep) -> Card:
+        events = self.received()
+        arrived = {event.event_type for event in events}
+        return Card(
+            step=index,
+            actor="webhooks",
+            chat=step.chat,
+            call=None,
+            webhooks=events,
+            waiting=not set(step.until_events) <= arrived,
+        )
+
     # --- The expected result ----------------------------------------------------------------
 
     def mismatches(self) -> list[str]:
@@ -997,6 +1044,9 @@ class Run:
         check("missing evidence", expected.missing_evidence, assessment.get("missing"))
         check("narrative source", expected.narrative_source, pack.get("narrative_source"))
         check("pack clean", expected.pack_clean, (self.pack_check or {}).get("clean"))
+        if expected.webhook_events is not None:
+            want = sorted(set(expected.webhook_events))
+            check("webhook events", want, sorted({e.event_type for e in self.received()}))
         return found
 
 

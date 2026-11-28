@@ -4,7 +4,7 @@ in-process app; the browser never sees a key."""
 
 import json
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -12,12 +12,13 @@ import httpx
 import pytest
 from pydantic import SecretStr, ValidationError
 
+from core.domain.webhooks import EVENT_ID_HEADER, SIGNATURE_HEADER, body, signature
 from core.settings import DemoRunnerSettings
 from demo_runner.__main__ import main
 from demo_runner.app import create_app
 from tests.api.conftest import Api
 from tests.demo.conftest import BASE_URL, transport_to
-from tests.demo.operator import Operator
+from tests.demo.operator import RECEIVER, Operator, register_receiver
 
 pytestmark = pytest.mark.anyio
 
@@ -418,3 +419,109 @@ async def test_fast_forward_waits_for_the_visitors_press(api: Api, keys: tuple[s
     assert not pressed["waiting"]
     assert pressed["call"]["name"].startswith("POST /v1/demo/consent-requests/")
     assert pressed["consent"]["status"] == "expired"
+
+
+class RunnerSender:
+    """The worker's Tenant webhook sender, posting to the runner's receiver in-process."""
+
+    def __init__(self, app: Any) -> None:
+        from fastapi.testclient import TestClient
+
+        self.client = TestClient(app)
+
+    def post(self, url: str, body: bytes, headers: Mapping[str, str]) -> int:
+        assert url == RECEIVER
+        return self.client.post("/webhooks", content=body, headers=dict(headers)).status_code
+
+
+def _signed(
+    secret: str, api: Api, event_type: str = "payment.captured"
+) -> tuple[bytes, dict[str, str]]:
+    raw = body("evt_x", event_type, api.clock.now(), {"payment_id": "pay_x"})
+    sent = int(api.clock.now().timestamp())
+    return raw, {SIGNATURE_HEADER: signature(secret, sent, raw), EVENT_ID_HEADER: "evt_x"}
+
+
+async def test_the_receiver_keeps_a_signed_webhook_and_refuses_any_other(
+    api: Api, keys: tuple[str, str], caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    secret = "whsec_runner_test"  # noqa: S105 - a test-only signing secret
+    raw, headers = _signed(secret, api)
+    async with runner(api, keys, demo_runner_webhook_secret=SecretStr(secret)) as client:
+        kept = await client.post("/webhooks", content=raw, headers=headers)
+        forged = await client.post(
+            "/webhooks", content=raw, headers={**headers, SIGNATURE_HEADER: "t=1,v1=00"}
+        )
+        unsigned = await client.post("/webhooks", content=raw)
+
+    assert kept.status_code == 200, kept.text
+    assert (forged.status_code, forged.json()["code"]) == (400, "BAD_SIGNATURE")
+    assert unsigned.status_code == 400
+    assert secret not in caplog.text and "pay_x" not in caplog.text
+
+
+async def test_without_a_webhook_secret_there_is_no_receiver_and_h8_says_so(
+    api: Api, keys: tuple[str, str]
+) -> None:
+    raw, headers = _signed("whsec_any", api)
+    async with runner(api, keys) as client:
+        posted = await client.post("/webhooks", content=raw, headers=headers)
+        started = await start(client, "H8")
+
+    assert posted.status_code == 404
+    assert (started.status_code, started.json()["code"]) == (409, "WEBHOOKS_OFF")
+
+
+async def test_h8_shows_each_signed_webhook_the_run_was_sent(
+    api: Api, keys: tuple[str, str], caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    secret = register_receiver(api, keys[1])
+    app = create_app(
+        runner_settings(keys, demo_runner_webhook_secret=SecretStr(secret)),
+        transport=transport_to(api),
+        now=api.clock.now,
+        seconds=Seconds(),
+    )
+    operator = Operator(api, [], RunnerSender(app))
+    browser = httpx.ASGITransport(app=app, client=("203.0.113.7", 50000))
+    async with httpx.AsyncClient(transport=browser, base_url="http://runner.test") as client:
+        run_id = (await start(client, "H8")).json()["run_id"]
+        cards = await play_through_as_asha(client, run_id, operator)
+
+    assert cards[-1]["finished"] and cards[-1]["mismatches"] == []
+    shown = [c for c in cards if c["actor"] == "webhooks" and not c["waiting"]]
+    last = shown[-1]["webhooks"]
+    assert [e["event_type"] for e in last] == [
+        "consent_request.created",
+        "consent_request.resolved",
+        "payment.captured",
+        "dispute.in_review",
+    ]
+    assert {e["signature"] for e in last} == {"verified"}
+    assert secret not in json.dumps(cards) and secret not in caplog.text
+
+
+async def play_through_as_asha(
+    client: httpx.AsyncClient, run_id: str, operator: Operator
+) -> list[Any]:
+    """Play every step, approving on the Consent link as Asha when a Payer step waits."""
+    cards: list[Any] = []
+    step = 0
+    for _ in range(60):
+        card = (await client.post(f"/runs/{run_id}/next", json={"step": step})).json()
+        cards.append(card)
+        if card.get("finished"):
+            return cards
+        if card.get("waiting"):
+            if card["actor"] == "payer" and card["link"]:
+                token = card["link"].split("#", 1)[1]
+                operator.api.client.post(
+                    "/v1/consent-link/approve",
+                    headers={"Consent-Link": token, "Idempotency-Key": f"tap-{token[:8]}"},
+                )
+            operator.wait()
+        else:
+            step += 1
+    raise AssertionError(f"the run never finished: {cards[-1]}")

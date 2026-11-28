@@ -76,6 +76,13 @@ def main(argv: Sequence[str] | None = None, settings: Settings | None = None) ->
         if scenario is None:
             print(f"No Scenario {args.scenario}.", file=sys.stderr)
             return 2
+        if engine.needs_webhooks(scenario):
+            print(
+                f"Scenario {scenario.id} shows Tenant webhooks, which only the Demo runner "
+                "receives: play it on the web app's /demo page.",
+                file=sys.stderr,
+            )
+            return 2
         return play_scenario(scenario)
 
     journeys = JOURNEYS if args.journey == "all" else (args.journey,)
