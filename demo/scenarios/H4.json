@@ -2,7 +2,9 @@
   "id": "H4",
   "title": "\"Why did you decide that?\" Replaying a decision",
   "group": "H",
-  "playlists": [],
+  "playlists": [
+    "risk-compliance"
+  ],
   "story": "ShopBot's INR 1,250 payment is allowed. Later, someone asks why. The Guard re-runs the Decision from its Audit record, on the exact Policy pack it was made with, and checks the answer matches byte for byte.",
   "setup": {
     "mandate": {

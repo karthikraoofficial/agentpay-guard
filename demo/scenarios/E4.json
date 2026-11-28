@@ -2,7 +2,9 @@
   "id": "E4",
   "title": "Things changed while Asha was deciding",
   "group": "E",
-  "playlists": [],
+  "playlists": [
+    "risk-compliance"
+  ],
   "story": "A request steps up. Before Asha opens the link, she cancels ShopBot's permission from another device, forgets, then opens the link and taps Approve. On approval the Guard re-checks everything, so the result is blocked, not approved.",
   "setup": {
     "mandate": {

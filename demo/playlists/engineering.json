@@ -1,0 +1,18 @@
+{
+  "id": "engineering",
+  "title": "Engineering deep dive",
+  "audience": "An engineer",
+  "length": "about 8 minutes",
+  "story": "Strictest-wins rule logic, idempotency, reconciliation, circuit breaker, AI fallback, signed evidence.",
+  "journeys": [
+    "C5",
+    "C6",
+    "D5",
+    "F2",
+    "F3",
+    "F8",
+    "F9",
+    "G8",
+    "H7"
+  ]
+}

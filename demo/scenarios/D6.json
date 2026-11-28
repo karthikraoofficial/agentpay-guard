@@ -2,7 +2,9 @@
   "id": "D6",
   "title": "The price crept up",
   "group": "D",
-  "playlists": [],
+  "playlists": [
+    "payments-pm"
+  ],
   "story": "The cart check was done at INR 2,500 and matched. By the time ShopBot pays, a delivery fee has appeared and the amount is INR 2,700, 8% more. Up to 2% extra is tolerated, so the Guard asks Asha.",
   "setup": {
     "mandate": {

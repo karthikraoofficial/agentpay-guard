@@ -2,7 +2,9 @@
   "id": "C1",
   "title": "A big payment",
   "group": "C",
-  "playlists": [],
+  "playlists": [
+    "payments-pm"
+  ],
   "story": "ShopBot wants to pay INR 6,000 for a party order. That's over Asha's \"ask me\" amount of INR 5,000, so the Guard steps up: Asha opens the link, sees the amount and shop, and approves. Then ShopBot pays. Large payments get a human look without being forbidden.",
   "setup": {
     "mandate": {

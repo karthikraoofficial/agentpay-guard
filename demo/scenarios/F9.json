@@ -2,7 +2,9 @@
   "id": "F9",
   "title": "The bank is down",
   "group": "F",
-  "playlists": [],
+  "playlists": [
+    "engineering"
+  ],
   "story": "The pretend bank stops answering for a minute. The Guard's circuit breaker trips, so a payment is refused at once with a time to retry instead of hanging. Decisions keep working throughout, because they never depend on the bank.",
   "setup": {
     "mandate": {

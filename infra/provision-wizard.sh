@@ -509,16 +509,16 @@ pause
 
 # ── 11 ─────────────────────────────────────────────────────────────────────
 stage "Check it's live"
-say "Demo journey 1 against the hosted API (no model call):"
-if uv run python -m demo --base-url "https://$API_HOST" --journey 1; then
-  printf '  %s✓ journey 1 ran on the hosted demo%s\n' "$GREEN" "$RESET"
+say "Scenario A1 against the hosted API (no model call):"
+if uv run python -m demo --base-url "https://$API_HOST" --scenario A1; then
+  printf '  %s✓ Scenario A1 ran on the hosted demo%s\n' "$GREEN" "$RESET"
 else
-  SKIPPED+=("demo journey 1 against https://$API_HOST")
+  SKIPPED+=("Scenario A1 against https://$API_HOST")
 fi
 open_url "$WEB_URL/ops"
 step "The Ops console should show 203 Decision cases (not 'Sample data')."
 open_url "$AGENTPAY_LANGFUSE_HOST"
-step "Langfuse → your project → Tracing: a 'decision' trace from journey 1 should appear within a minute."
+step "Langfuse → your project → Tracing: a 'decision' trace from Scenario A1 should appear within a minute."
 if confirm "Do you see the decision trace in Langfuse?"; then
   note_write LANGFUSE_TRACES_SEEN "yes"
 else

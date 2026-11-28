@@ -2,7 +2,9 @@
   "id": "H6",
   "title": "Catching a tampered record",
   "group": "H",
-  "playlists": [],
+  "playlists": [
+    "risk-compliance"
+  ],
   "story": "Someone alters one Decision record in a copy of the Audit chain. Verify runs on the copy and points to exactly the record that was changed. The real records are never touched.",
   "setup": {
     "mandate": {

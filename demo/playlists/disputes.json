@@ -1,0 +1,16 @@
+{
+  "id": "disputes",
+  "title": "Disputes and operations",
+  "audience": "A disputes or operations lead",
+  "length": "about 6 minutes",
+  "story": "Honest evidence strength, network reason codes, human sign-off, deadlines.",
+  "journeys": [
+    "G1",
+    "G2",
+    "G3",
+    "G6",
+    "G7",
+    "G9",
+    "G11"
+  ]
+}

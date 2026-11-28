@@ -2,7 +2,9 @@
   "id": "G3",
   "title": "\"I was charged the wrong amount\"",
   "group": "G",
-  "playlists": [],
+  "playlists": [
+    "disputes"
+  ],
   "story": "Asha tells her bank FreshMart charged her more than she agreed to for her INR 1,250 weekly basket. The Guard compares the amount taken with the amount it allowed and with the cart's Quoted total. All three are INR 1,250, so the evidence is strong.",
   "setup": {
     "mandate": {

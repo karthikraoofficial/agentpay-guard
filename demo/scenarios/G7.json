@@ -2,7 +2,9 @@
   "id": "G7",
   "title": "Already refunded",
   "group": "G",
-  "playlists": [],
+  "playlists": [
+    "disputes"
+  ],
   "story": "ShopBot pays FreshMart INR 1,250 for Asha's weekly groceries. The groceries don't come, and the wallet app refunds the whole INR 1,250. Asha disputes the payment with her bank anyway, as never received. The Guard rates the evidence strong: the records show she already has her money back.",
   "setup": {
     "mandate": {
