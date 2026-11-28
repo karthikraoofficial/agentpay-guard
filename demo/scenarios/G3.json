@@ -3,7 +3,7 @@
   "title": "\"I was charged the wrong amount\"",
   "group": "G",
   "playlists": [],
-  "story": "Asha tells her bank FreshMart charged her more than she agreed to for her usual INR 1,250 basket. The Guard compares the amount taken with the amount it allowed and with the cart's Quoted total. All three are INR 1,250, so the evidence is strong.",
+  "story": "Asha tells her bank FreshMart charged her more than she agreed to for her INR 1,250 weekly basket. The Guard compares the amount taken with the amount it allowed and with the cart's Quoted total. All three are INR 1,250, so the evidence is strong.",
   "setup": {
     "mandate": {
       "per_txn_cap": {
@@ -34,16 +34,16 @@
         "minor": 125000,
         "currency": "INR"
       },
-      "instruction": "Reorder my usual milk and bread.",
-      "item": "Usual milk and bread",
+      "instruction": "Order this week's groceries: milk, eggs, bread and fruit, around 1,250 rupees.",
+      "item": "Weekly groceries: milk, eggs, bread, fruit",
       "chat": [
         {
           "speaker": "asha",
-          "text": "Reorder my usual milk and bread, please."
+          "text": "Order this week's groceries, please: milk, eggs, bread and fruit, around 1,250 rupees."
         },
         {
           "speaker": "shopbot",
-          "text": "Your usual basket at FreshMart is INR 1,250. Getting the cart checked."
+          "text": "This week's basket at FreshMart is INR 1,250. Getting the cart checked."
         }
       ]
     },
@@ -57,7 +57,7 @@
       "chat": [
         {
           "speaker": "shopbot",
-          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+          "text": "This week's basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
         }
       ]
     },

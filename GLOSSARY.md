@@ -351,7 +351,7 @@ Journeys strung together for one audience, played in order: one file in `demo/pl
 _Avoid_: Tour, reel, collection
 
 **Scripted reply**:
-The model reply a Scenario writes down for each cart check (Intent check) that reaches the model: for an Intent check, its verdict (`match`, `mismatch` or `unknown`). In CI the fake model gateway answers with it, so CI makes no paid call. The demo page and the CLI ask the real model, show the scripted verdict beside the live one, and flag a live verdict that differs; the run then carries on with the live answer, so what is shown is what happened. A check made after the AI is switched off (D5) reaches no model and has none.
+The model reply a Scenario writes down for each cart check (Intent check) that reaches the model: for an Intent check, its verdict (`match`, `mismatch` or `unknown`). In CI the fake model gateway answers with it, so CI makes no paid call. The demo page and the CLI ask the real model, show the scripted verdict beside the live one, and flag a live verdict that differs; the run then carries on with the live answer, so what is shown is what happened. A check made after the AI is switched off (D5) reaches no model and has none. A scripted `match` holds most reliably on the real model when the Payer's request names what to buy and roughly what it costs: "my usual milk and bread" gets `unknown`, because the model can't see what the usual was, and a test refuses that wording.
 _Avoid_: Mock reply, canned answer, expected verdict (the Scenario's expected result is the Decision's)
 
 **Demo runner**:

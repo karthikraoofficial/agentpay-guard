@@ -81,6 +81,22 @@ def test_scripted_verdicts_skip_a_check_made_with_the_ai_off() -> None:
     assert scenarios["D6"].scripted_verdicts() == {0: "match"}
 
 
+def test_a_cart_check_scripted_to_match_doesnt_lean_on_the_payers_history() -> None:
+    # The live model can't see what "the usual" was, so it answers unknown (as the
+    # Intent eval's ambiguous-same-as-last case expects) and the hosted run differs.
+    vague = ("usual", "last time")
+    leaning = [
+        (scenario.id, step.instruction)
+        for scenario in catalogue().values()
+        for index, verdict in scenario.scripted_verdicts().items()
+        if verdict == "match"
+        and (step := scenario.steps[index]).instruction
+        and any(word in step.instruction.lower() for word in vague)
+    ]
+
+    assert leaning == []
+
+
 def test_a_reviewer_does_only_what_the_dispute_viewer_offers(tmp_path: Path) -> None:
     g1 = json.loads(Path("demo/scenarios/G1.json").read_text(encoding="utf-8"))
     reviewer = next(step for step in g1["steps"] if step["actor"] == "reviewer")
