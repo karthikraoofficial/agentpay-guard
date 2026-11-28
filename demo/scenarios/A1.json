@@ -2,42 +2,89 @@
   "id": "A1",
   "title": "A normal grocery top-up",
   "group": "A",
-  "playlists": ["pitch"],
+  "playlists": [
+    "pitch"
+  ],
   "story": "Asha tells ShopBot \"reorder my usual milk and bread.\" The cart comes to INR 1,250 at FreshMart. The Guard allows it: ShopBot pays, and the payment is scheduled, then taken. The Guard must stay invisible for normal, small, expected spending.",
   "setup": {
     "mandate": {
-      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
-      "monthly_cap": {"minor": 5000000, "currency": "INR"},
-      "allowed_mccs": ["5411", "5812"]
+      "per_txn_cap": {
+        "minor": 1000000,
+        "currency": "INR"
+      },
+      "monthly_cap": {
+        "minor": 5000000,
+        "currency": "INR"
+      },
+      "allowed_mccs": [
+        "5411",
+        "5812"
+      ]
     },
-    "merchant": {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"},
+    "merchant": {
+      "id": "m_freshmart",
+      "name": "FreshMart",
+      "mcc": "5411"
+    },
     "card": "token_mock_captures"
   },
   "steps": [
     {
       "actor": "agent",
       "tool": "request_decision",
-      "amount": {"minor": 125000, "currency": "INR"},
+      "amount": {
+        "minor": 125000,
+        "currency": "INR"
+      },
       "chat": [
-        {"speaker": "asha", "text": "Reorder my usual milk and bread, please."},
-        {"speaker": "shopbot", "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."}
+        {
+          "speaker": "asha",
+          "text": "Reorder my usual milk and bread, please."
+        },
+        {
+          "speaker": "shopbot",
+          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+        }
       ]
     },
     {
       "actor": "agent",
       "tool": "create_payment",
       "chat": [
-        {"speaker": "shopbot", "text": "Allowed. Paying FreshMart now."}
+        {
+          "speaker": "shopbot",
+          "text": "Allowed. Paying FreshMart now."
+        }
+      ]
+    },
+    {
+      "actor": "visitor",
+      "control": "settle_now",
+      "label": "Skip the bank's wait",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The bank takes a couple of minutes to confirm a card payment."
+        }
       ]
     },
     {
       "actor": "agent",
       "tool": "get_payment",
-      "until_status": ["captured", "failed"],
+      "until_status": [
+        "captured",
+        "failed"
+      ],
       "chat": [
-        {"speaker": "shopbot", "text": "The payment is scheduled. I'll let you know once the money is taken."}
+        {
+          "speaker": "shopbot",
+          "text": "The payment is scheduled. I'll let you know once the money is taken."
+        }
       ]
     }
+  ],
+  "demo_controls": [
+    "settle_now"
   ],
   "expected": {
     "outcome": "allow",
