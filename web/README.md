@@ -61,7 +61,10 @@ To try it locally:
 
 ## The demo page (`/demo`)
 
-A visitor picks a journey, grouped A–H, and watches it play. The page has three panes,
+A visitor picks a playlist or a journey, grouped A–H, and watches it play. A playlist
+(`/demo?playlist=pitch`, the home page's "Try the demo") plays its journeys in order and
+shows which one of how many is playing; a fast-forward it stops on carries on playing
+once pressed. `/demo?scenario=<id>` opens one journey. The page has three panes,
 which become tabs at phone width:
 - **Chat:** Asha's and ShopBot's scripted lines. After each Guard call comes a tool-call
   card (the MCP tool name or HTTP route, with the request and response) and, for a

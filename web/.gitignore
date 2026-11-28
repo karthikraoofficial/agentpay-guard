@@ -45,3 +45,4 @@ next-env.d.ts
 /src/data/eval-report.json
 # The /demo page's copy of the Scenario catalogue, written by scripts/sync-scenarios.mjs
 /src/data/scenarios.json
+/src/data/playlists.json

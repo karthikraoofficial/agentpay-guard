@@ -535,3 +535,64 @@ def test_a_refund_window_control_is_ignored_once_the_tenant_isnt_the_demo_one(de
     demo.api.use_settings(make_settings(mock_settle_after_seconds=60))
 
     assert _refund(demo, payment["payment_id"]).status_code == 201
+
+
+def _sweep(demo: Demo, demo_tenant: TenantId | None = None) -> None:
+    sweep(
+        demo.api.store,
+        SettlingMockRail(demo.api.store),
+        demo.api.clock,
+        timedelta(seconds=60),
+        demo_tenant=demo.tenant_id if demo_tenant is None else demo_tenant,
+    )
+
+
+def test_settle_now_debits_and_captures_a_payment_without_waiting(api: Api) -> None:
+    demo = _noticed(api)
+    payment = _pay(demo)
+
+    settled = demo.control(f"payments/{payment['payment_id']}/settle-now")
+    _debit_step(demo)
+    _sweep(demo)  # Mock settle's 60 s haven't passed: only the control settles it
+
+    assert settled.status_code == 200, settled.text
+    assert settled.json()["control"] == "settle_now"
+    read = _read(demo, payment["payment_id"])
+    assert read["status"] == "captured"
+    assert read["debit_after"] == payment["debit_after"]  # the Payment wasn't edited
+    demo.api.assert_evidence_holds()
+
+
+def test_without_settle_now_the_sweep_waits_for_mock_settle(api: Api) -> None:
+    demo = _noticed(api)
+    payment = _pay(demo)
+    demo.control(f"payments/{payment['payment_id']}/expire-notice")
+    _debit_step(demo)
+
+    _sweep(demo)
+
+    assert _read(demo, payment["payment_id"])["status"] == "scheduled"
+
+
+def test_only_a_scheduled_payment_can_be_settled_now(api: Api) -> None:
+    demo = _noticed(api)
+    payment = _pay(demo)
+    demo.control(f"payments/{payment['payment_id']}/settle-now")
+    _debit_step(demo)
+    _sweep(demo)
+
+    again = demo.control(f"payments/{payment['payment_id']}/settle-now")
+
+    assert again.status_code == 409
+    assert again.json()["code"] == "PAYMENT_NOT_SCHEDULED"
+
+
+def test_the_sweep_ignores_settle_now_for_any_tenant_but_the_demo_one(api: Api) -> None:
+    demo = _noticed(api)
+    payment = _pay(demo)
+    demo.control(f"payments/{payment['payment_id']}/settle-now")
+    _debit_step(demo)
+
+    _sweep(demo, demo_tenant=TenantId("tnt_someone_else"))
+
+    assert _read(demo, payment["payment_id"])["status"] == "scheduled"

@@ -19,6 +19,9 @@ or the control's time if that came first".
 - `POST /v1/demo/payments/{id}/expire-refund-window`: the captured Payment's Refund window
   ends now, so a later refund is refused with `REFUND_WINDOW_CLOSED` (#285). A Payment
   that isn't captured answers 409 `PAYMENT_NOT_REFUNDABLE`.
+- `POST /v1/demo/payments/{id}/settle-now`: Mock settle's delay ends now for a scheduled
+  Payment (#287): the worker debits it if its notice period is running, then captures it
+  on its next pass. A Payment that isn't scheduled answers 409 `PAYMENT_NOT_SCHEDULED`.
 - `POST /v1/demo/disputes/{id}/expire`: the Dispute's response deadline passes now, so it
   is `expired` through the same transition the deadline runs (#284). A closed Dispute
   answers 409 `DISPUTE_CLOSED`.
@@ -201,6 +204,34 @@ def expire_refund_window(
         control = record_control(
             tx, "expire_refund_window", payment.payment_id, payment.decision_id, now
         )
+        return 200, _out(control)
+
+    with store.transaction(tenant) as tx:
+        return run_idempotent(tx, key, request_hash(request, None), clock, write)
+
+
+@router.post("/payments/{payment_id}/settle-now", response_model=DemoControlOut)
+def settle_now(
+    request: Request,
+    payment_id: str,
+    tenant: ManageTenant,
+    store: StoreDep,
+    clock: ClockDep,
+    settings: SettingsDep,
+    key: IdemKey,
+) -> Response:
+    _demo_only(tenant, settings, f"Payment {payment_id}")
+
+    def write(read_at: datetime) -> tuple[int, DemoControlOut]:
+        now = decision_time(read_at)
+        payment = tx.lock_payment(PaymentId(payment_id))
+        if payment is None:
+            raise ApiError(404, "NOT_FOUND", f"No Payment {payment_id}.")
+        if payment.rail != "mock":
+            raise ApiError(409, "NOT_MOCK_RAIL", _NOT_MOCK_RAIL)
+        if payment.status != "scheduled":
+            raise ApiError(409, "PAYMENT_NOT_SCHEDULED", "This Payment has already settled.")
+        control = record_control(tx, "settle_now", payment.payment_id, payment.decision_id, now)
         return 200, _out(control)
 
     with store.transaction(tenant) as tx:

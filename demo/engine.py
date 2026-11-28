@@ -80,6 +80,8 @@ _CHECKED = {
     "webhook_events",
 }
 _FAST_FORWARDS = set(get_args(FastForward))
+# The controls that force a failure; the rest end a wait now (ADR-0032).
+_SWITCHES = {"ai_off", "rail_declining", "lose_payment", "rail_down", "tamper_copy"}
 # Each fast-forward's Demo control route (ADR-0032) and the run's id it ends.
 _CONTROL_ROUTES = {
     "expire_consent": "POST /v1/demo/consent-requests/{consent_request_id}/expire",
@@ -87,6 +89,7 @@ _CONTROL_ROUTES = {
     "expire_notice": "POST /v1/demo/payments/{payment_id}/expire-notice",
     "expire_dispute": "POST /v1/demo/disputes/{dispute_id}/expire",
     "expire_refund_window": "POST /v1/demo/payments/{payment_id}/expire-refund-window",
+    "settle_now": "POST /v1/demo/payments/{payment_id}/settle-now",
     "ai_off": "POST /v1/demo/mandates/{mandate_id}/ai-off",
     "rail_declining": "POST /v1/demo/mandates/{mandate_id}/rail-declining",
     "lose_payment": "POST /v1/demo/mandates/{mandate_id}/lose-payment",
@@ -967,7 +970,7 @@ class Run:
                 chat=step.chat,
                 call=None,
                 fast_forward=step.label,
-                switch=not step.control.startswith("expire_"),
+                switch=step.control in _SWITCHES,
                 waiting=True,
             )
         route = _CONTROL_ROUTES[step.control]

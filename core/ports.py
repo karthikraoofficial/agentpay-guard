@@ -603,7 +603,14 @@ class TenantDirectory(Protocol):
 
     def notice_ended_by_control(self, tenant_id: TenantId) -> list[PaymentId]:
         """This Tenant's Payments not debited yet whose notice period a Demo control ended
-        (ADR-0032). The debit step asks only for the configured Demo Tenant."""
+        (`expire_notice` or `settle_now`, ADR-0032). The debit step asks only for the
+        configured Demo Tenant."""
+        ...
+
+    def settled_now_by_control(self, tenant_id: TenantId) -> list[PaymentId]:
+        """This Tenant's debited Payments, still scheduled, that a `settle_now` Demo control
+        names (#287): the sweep settles them without waiting out Mock settle's delay. It
+        asks only for the configured Demo Tenant."""
         ...
 
     def payment_tenant(self, payment_id: PaymentId) -> TenantId | None:

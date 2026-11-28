@@ -2,7 +2,7 @@
   "id": "D2",
   "title": "Cart doesn't match",
   "group": "D",
-  "playlists": [],
+  "playlists": ["pitch"],
   "story": "Asha asks for groceries for the week, but the cart ShopBot builds is six bottles of premium whisky. The shop type and amount look fine, yet the cart check says mismatch, so the Guard asks Asha. Her consent screen says plainly that the cart doesn't match what she asked for, and she declines.",
   "setup": {
     "mandate": {

@@ -193,7 +193,9 @@ async def sweep_forever(
                     debits.errors,
                 )
             older_than = sweep_age(settings, name)
-            result += await asyncio.to_thread(sweep, store, rail, clock, older_than, name)
+            result += await asyncio.to_thread(
+                sweep, store, rail, clock, older_than, name, demo_tenant
+            )
         report_sweep(telemetry, result)
         if result.checked:
             log.info(

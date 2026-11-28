@@ -29,6 +29,7 @@ from core.ports import (
     RailCharge,
     RailRefund,
     TenantDirectory,
+    TenantId,
     UnitOfWork,
 )
 from core.refunds import record_refund
@@ -69,12 +70,19 @@ def sweep(
     clock: Clock,
     older_than: timedelta,
     on_rail: RailName | None = None,
+    demo_tenant: TenantId | None = None,
 ) -> SweepResult:
     """Reconcile the Payments and Refunds on `on_rail` (every rail if None) with `rail`,
-    which must be the rail they are on (ADR-0033)."""
+    which must be the rail they are on (ADR-0033). `demo_tenant` is
+    `AGENTPAY_DEMO_CONTROLS_TENANT_ID`: its debited mock Payments that a settle-now Demo
+    control names are settled now, however young (#287, ADR-0032)."""
     now = decision_time(clock.now())
     # Never sooner than the rail can see a new charge, or it would fail one it just made.
     due = store.scheduled_payments(now - max(older_than, rail.lookup_lag), now, on_rail)
+    if demo_tenant is not None and on_rail in (None, "mock"):
+        listed = set(due)
+        named = store.settled_now_by_control(demo_tenant)
+        due += [(demo_tenant, p) for p in named if (demo_tenant, p) not in listed]
     errors = 0
     for tenant_id, payment_id in due:
         try:

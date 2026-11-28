@@ -1,0 +1,59 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "audience": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Audience",
+      "type": "string"
+    },
+    "id": {
+      "enum": [
+        "pitch",
+        "payments-pm",
+        "risk-compliance",
+        "engineering",
+        "disputes"
+      ],
+      "title": "Id",
+      "type": "string"
+    },
+    "journeys": {
+      "items": {
+        "pattern": "^[A-H][0-9]{1,2}$",
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Journeys",
+      "type": "array"
+    },
+    "length": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Length",
+      "type": "string"
+    },
+    "story": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Story",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "title",
+    "audience",
+    "length",
+    "story",
+    "journeys"
+  ],
+  "title": "Playlist",
+  "type": "object"
+}

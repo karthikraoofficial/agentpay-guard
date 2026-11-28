@@ -1,0 +1,8 @@
+{
+  "id": "pitch",
+  "title": "The 90-second pitch",
+  "audience": "A recruiter, or anyone landing on the home page",
+  "length": "about 90 seconds",
+  "story": "Normal spending flows; a hijacked assistant is stopped; a wrong cart goes to the human; the human approves; a dispute is won with proof.",
+  "journeys": ["A1", "B4", "D2", "E1", "G1"]
+}

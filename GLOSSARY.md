@@ -346,6 +346,10 @@ _Avoid_: Journey script, demo case, Golden case (that is an engine input with it
 Every Scenario file, one per journey, in `demo/scenarios/`, read by the web app, `python -m demo --scenario` and the Demo runner. Its format is one Pydantic model (`demo/scenario.py`) with a committed JSON Schema that CI checks for staleness.
 _Avoid_: Journey list (that is `docs/demo-journeys.md`), scenario library
 
+**Playlist**:
+Journeys strung together for one audience, played in order: one file in `demo/playlists/` listing Scenario ids, as `docs/demo-journeys.md` section 7 suggests them. The 90-second pitch (A1, B4, D2, E1, G1) is what the home page's "Try the demo" plays. CI fails a playlist that names a journey with no Scenario file, or that disagrees with the Scenarios' own playlist tags.
+_Avoid_: Tour, reel, collection
+
 **Scripted reply**:
 The model reply a Scenario writes down for each cart check (Intent check) that reaches the model: for an Intent check, its verdict (`match`, `mismatch` or `unknown`). In CI the fake model gateway answers with it, so CI makes no paid call. The demo page and the CLI ask the real model, show the scripted verdict beside the live one, and flag a live verdict that differs; the run then carries on with the live answer, so what is shown is what happened. A check made after the AI is switched off (D5) reaches no model and has none.
 _Avoid_: Mock reply, canned answer, expected verdict (the Scenario's expected result is the Decision's)
@@ -355,5 +359,5 @@ The small server beside the API (`python -m demo_runner`) that plays Scenarios f
 _Avoid_: Demo server, demo backend, demo proxy
 
 **Demo control**:
-An action, for the Demo Tenant only, that either ends one timer now (a Consent request, a Payment window, a Pre-debit notice period, a Dispute's response deadline or a Payment's Refund window) or forces a failure (a **switch**: AI off, rail declining, lose a payment, rail down, tamper with a copy). A timer's deadline becomes the real one or the control's time, whichever is first. Each control appends its own `demo_controls` row and Audit record, except tamper with a copy, which only reads. None moves a clock or edits a Mandate, Decision or Audit record (ADR-0032). A control that touches the rail acts on mock-rail Payments only, and refuses a Mandate or Payment on a real rail (ADR-0033).
+An action, for the Demo Tenant only, that either ends one timer now (a Consent request, a Payment window, a Pre-debit notice period, a Dispute's response deadline, a Payment's Refund window or Mock settle's delay for one Payment, settle-now) or forces a failure (a **switch**: AI off, rail declining, lose a payment, rail down, tamper with a copy). A timer's deadline becomes the real one or the control's time, whichever is first. Each control appends its own `demo_controls` row and Audit record, except tamper with a copy, which only reads. None moves a clock or edits a Mandate, Decision or Audit record (ADR-0032). A control that touches the rail acts on mock-rail Payments only, and refuses a Mandate or Payment on a real rail (ADR-0033).
 _Avoid_: Time travel, clock override, debug switch
