@@ -107,3 +107,12 @@ def test_only_a_read_waits(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="only a GET route can wait"):
         catalogue(tmp_path)
+
+
+def test_only_a_decision_step_expects_an_outcome(tmp_path: Path) -> None:
+    f2 = json.loads(Path("demo/scenarios/F2.json").read_text(encoding="utf-8"))
+    f2["steps"][1]["expect_outcome"] = "allow"  # create_payment makes no Decision
+    (tmp_path / "F2.json").write_text(json.dumps(f2), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="only a request_decision step expects an outcome"):
+        catalogue(tmp_path)

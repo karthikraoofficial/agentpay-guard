@@ -167,7 +167,7 @@ Money returned to the Payer on a captured Payment, in full or in parts, never mo
 _Avoid_: Void (that releases a Decision that was never paid), reversal, chargeback (that is the Payer's network dispute)
 
 **Refund window**:
-How long after capture a Payment may be refunded, set in the Policy pack (180 days from `default@1.5.0`; earlier packs read as the same).
+How long after capture a Payment may be refunded, set in the Policy pack (180 days from `default@1.5.0`; earlier packs read as the same). On the Demo Tenant a Demo control can end it early (ADR-0032).
 _Avoid_: Refund period, expiry
 
 **Tenant webhook**:
@@ -355,5 +355,5 @@ The small server beside the API (`python -m demo_runner`) that plays Scenarios f
 _Avoid_: Demo server, demo backend, demo proxy
 
 **Demo control**:
-An action, for the Demo Tenant only, that either ends one timer now (a Consent request, a Payment window, a Pre-debit notice period or a Dispute's response deadline) or forces a failure (a **switch**: AI off, rail declining, lose a payment, rail down, tamper with a copy). A timer's deadline becomes the real one or the control's time, whichever is first. Each control appends its own `demo_controls` row and Audit record, except tamper with a copy, which only reads. None moves a clock or edits a Mandate, Decision or Audit record (ADR-0032). A control that touches the rail acts on mock-rail Payments only, and refuses a Mandate or Payment on a real rail (ADR-0033).
+An action, for the Demo Tenant only, that either ends one timer now (a Consent request, a Payment window, a Pre-debit notice period, a Dispute's response deadline or a Payment's Refund window) or forces a failure (a **switch**: AI off, rail declining, lose a payment, rail down, tamper with a copy). A timer's deadline becomes the real one or the control's time, whichever is first. Each control appends its own `demo_controls` row and Audit record, except tamper with a copy, which only reads. None moves a clock or edits a Mandate, Decision or Audit record (ADR-0032). A control that touches the rail acts on mock-rail Payments only, and refuses a Mandate or Payment on a real rail (ADR-0033).
 _Avoid_: Time travel, clock override, debug switch

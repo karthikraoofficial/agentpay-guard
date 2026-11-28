@@ -42,6 +42,23 @@
           "title": "Chat",
           "type": "array"
         },
+        "expect_outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "allow",
+                "step_up",
+                "block"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expect Outcome"
+        },
         "expect_refusal": {
           "anyOf": [
             {
@@ -765,6 +782,7 @@
             "expire_payment_window",
             "expire_notice",
             "expire_dispute",
+            "expire_refund_window",
             "ai_off",
             "rail_declining",
             "lose_payment",
@@ -801,6 +819,7 @@
           "expire_intent",
           "expire_notice",
           "expire_dispute",
+          "expire_refund_window",
           "expire_mandate",
           "settle_now",
           "ai_off",

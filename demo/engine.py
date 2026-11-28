@@ -83,6 +83,7 @@ _CONTROL_ROUTES = {
     "expire_payment_window": "POST /v1/demo/decisions/{decision_id}/expire-payment-window",
     "expire_notice": "POST /v1/demo/payments/{payment_id}/expire-notice",
     "expire_dispute": "POST /v1/demo/disputes/{dispute_id}/expire",
+    "expire_refund_window": "POST /v1/demo/payments/{payment_id}/expire-refund-window",
     "ai_off": "POST /v1/demo/mandates/{mandate_id}/ai-off",
     "rail_declining": "POST /v1/demo/mandates/{mandate_id}/rail-declining",
     "lose_payment": "POST /v1/demo/mandates/{mandate_id}/lose-payment",
@@ -406,6 +407,7 @@ class Run:
             "decision_id": (self.decision or {}).get("decision_id"),
             "audit_record_id": (self.decision or {}).get("audit_record_id"),
             "payment_id": (self.payment or {}).get("payment_id"),
+            "refund_id": (self.refund or {}).get("refund_id"),
             "consent_request_id": self._consent_request_id(),
             "dispute_id": (self.dispute or {}).get("dispute_id"),
         }
@@ -670,6 +672,11 @@ class Run:
         elif step.expect_refusal:
             raise StepFailed(tool, f"expected {step.expect_refusal}, but it was allowed")
         decision = await self._with_rules(self._remember(body) if refused is None else None)
+        if step.expect_outcome is not None and decision is not None:
+            if decision.outcome != step.expect_outcome:
+                self._problems.append(
+                    f"step {index} {tool}: expected {step.expect_outcome}, got {decision.outcome}"
+                )
         intent = None
         if tool == "check_intent" and refused is None:
             intent = await self._intent_view(index, str(body["intent_id"]))

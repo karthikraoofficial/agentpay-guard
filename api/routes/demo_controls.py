@@ -16,6 +16,9 @@ or the control's time if that came first".
   (`PAYMENT_WINDOW_CLOSED`).
 - `POST /v1/demo/payments/{id}/expire-notice`: the worker's debit step debits the Payment
   on its next run, or fails it if the Mandate no longer allows it.
+- `POST /v1/demo/payments/{id}/expire-refund-window`: the captured Payment's Refund window
+  ends now, so a later refund is refused with `REFUND_WINDOW_CLOSED` (#285). A Payment
+  that isn't captured answers 409 `PAYMENT_NOT_REFUNDABLE`.
 - `POST /v1/demo/disputes/{id}/expire`: the Dispute's response deadline passes now, so it
   is `expired` through the same transition the deadline runs (#284). A closed Dispute
   answers 409 `DISPUTE_CLOSED`.
@@ -166,6 +169,38 @@ def expire_notice(
                 409, "NOTICE_NOT_RUNNING", "This Payment isn't waiting out a notice period."
             )
         control = record_control(tx, "expire_notice", payment.payment_id, payment.decision_id, now)
+        return 200, _out(control)
+
+    with store.transaction(tenant) as tx:
+        return run_idempotent(tx, key, request_hash(request, None), clock, write)
+
+
+@router.post("/payments/{payment_id}/expire-refund-window", response_model=DemoControlOut)
+def expire_refund_window(
+    request: Request,
+    payment_id: str,
+    tenant: ManageTenant,
+    store: StoreDep,
+    clock: ClockDep,
+    settings: SettingsDep,
+    key: IdemKey,
+) -> Response:
+    _demo_only(tenant, settings, f"Payment {payment_id}")
+
+    def write(read_at: datetime) -> tuple[int, DemoControlOut]:
+        now = decision_time(read_at)
+        payment = tx.lock_payment(PaymentId(payment_id))
+        if payment is None:
+            raise ApiError(404, "NOT_FOUND", f"No Payment {payment_id}.")
+        if payment.rail != "mock":
+            raise ApiError(409, "NOT_MOCK_RAIL", _NOT_MOCK_RAIL)
+        if payment.status != "captured":
+            raise ApiError(
+                409, "PAYMENT_NOT_REFUNDABLE", "Only a captured Payment has a Refund window."
+            )
+        control = record_control(
+            tx, "expire_refund_window", payment.payment_id, payment.decision_id, now
+        )
         return 200, _out(control)
 
     with store.transaction(tenant) as tx:

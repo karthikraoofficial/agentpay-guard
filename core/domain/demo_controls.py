@@ -11,6 +11,8 @@ the one configured Demo Tenant on the mock rail.
   then debits it, or fails it if the Mandate no longer allows it.
 - `expire_dispute`: the Dispute's response deadline passes now. The control runs the
   deadline's transition, so the Dispute is `expired`; `respond_by` is left as it was.
+- `expire_refund_window`: the captured Payment's Refund window ends now, so a refund
+  asked for after it is refused with `REFUND_WINDOW_CLOSED` (#285).
 
 The switches force a failure, and run before any Decision, so they have no `decision_id`:
 
@@ -33,6 +35,7 @@ DemoControlKind = Literal[
     "expire_payment_window",
     "expire_notice",
     "expire_dispute",
+    "expire_refund_window",
     "ai_off",
     "rail_declining",
     "lose_payment",

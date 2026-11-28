@@ -1,0 +1,76 @@
+{
+  "id": "H2",
+  "title": "Refund too large or too late",
+  "group": "H",
+  "playlists": [],
+  "story": "ShopBot pays INR 1,250 for Asha's groceries. The wallet app then tries to refund INR 2,000, more than was paid, and the Guard refuses it. Later, after the Refund window has closed (180 days on the live product; here a fast-forward ends it now), the wallet app tries to refund INR 500, and the Guard refuses that too.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
+      "monthly_cap": {"minor": 5000000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"},
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 125000, "currency": "INR"},
+      "chat": [
+        {"speaker": "asha", "text": "Reorder my usual milk and bread, please."},
+        {"speaker": "shopbot", "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {"speaker": "shopbot", "text": "Allowed. Paying FreshMart INR 1,250 now."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": ["captured", "failed"],
+      "chat": [
+        {"speaker": "shopbot", "text": "Waiting for the bank to confirm the payment."}
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/payments/{payment_id}/refunds",
+      "body": {"amount": {"minor": 200000, "currency": "INR"}, "reason": "Order returned"},
+      "expect_refusal": "REFUND_EXCEEDS_CAPTURED",
+      "chat": [
+        {"speaker": "asha", "text": "I returned the order. Please refund INR 2,000."}
+      ]
+    },
+    {
+      "actor": "visitor",
+      "control": "expire_refund_window",
+      "label": "Skip 180 days",
+      "chat": [
+        {"speaker": "asha", "text": "Half a year later, I found more bread from that order I never used."}
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/payments/{payment_id}/refunds",
+      "body": {"amount": {"minor": 50000, "currency": "INR"}, "reason": "Unused bread"},
+      "expect_refusal": "REFUND_WINDOW_CLOSED",
+      "chat": [
+        {"speaker": "asha", "text": "Can I get INR 500 back for it?"}
+      ]
+    }
+  ],
+  "demo_controls": ["expire_refund_window"],
+  "expected": {
+    "outcome": "allow",
+    "reason_codes": [],
+    "payment_status": "captured",
+    "refusal_code": "REFUND_WINDOW_CLOSED"
+  },
+  "what_to_notice": "The first refund is refused with REFUND_EXCEEDS_CAPTURED: only INR 1,250 was captured. The second is refused with REFUND_WINDOW_CLOSED, because the Policy pack's Refund window counts from capture. The fast-forward is a Demo control: it writes its own Audit record and ends the window now, without moving a clock or editing the Payment. Neither refusal reaches the bank, and the Payment stays captured with nothing refunded."
+}
