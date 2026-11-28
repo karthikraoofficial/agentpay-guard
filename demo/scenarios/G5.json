@@ -3,7 +3,7 @@
   "title": "\"I had cancelled this\"",
   "group": "G",
   "playlists": [],
-  "story": "ShopBot pays FreshMart INR 1,250 for Asha's usual groceries. Afterwards Asha cancels ShopBot's permission, then tells her bank the payment came after she had cancelled. The Guard checks the timestamps: the permission was active when the Decision was made, so the evidence is strong.",
+  "story": "ShopBot pays FreshMart INR 1,250 for Asha's weekly groceries. Afterwards Asha cancels ShopBot's permission, then tells her bank the payment came after she had cancelled. The Guard checks the timestamps: the permission was active when the Decision was made, so the evidence is strong.",
   "setup": {
     "mandate": {
       "per_txn_cap": {
@@ -34,16 +34,16 @@
         "minor": 125000,
         "currency": "INR"
       },
-      "instruction": "Reorder my usual milk and bread.",
-      "item": "Usual milk and bread",
+      "instruction": "Order this week's groceries: milk, eggs, bread and fruit, around 1,250 rupees.",
+      "item": "Weekly groceries: milk, eggs, bread, fruit",
       "chat": [
         {
           "speaker": "asha",
-          "text": "Reorder my usual milk and bread, please."
+          "text": "Order this week's groceries, please: milk, eggs, bread and fruit, around 1,250 rupees."
         },
         {
           "speaker": "shopbot",
-          "text": "Your usual basket at FreshMart is INR 1,250. Getting the cart checked."
+          "text": "This week's basket at FreshMart is INR 1,250. Getting the cart checked."
         }
       ]
     },
@@ -57,7 +57,7 @@
       "chat": [
         {
           "speaker": "shopbot",
-          "text": "Your usual basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
+          "text": "This week's basket at FreshMart comes to INR 1,250. Checking with AgentPay Guard before I pay."
         }
       ]
     },

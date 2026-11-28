@@ -42,12 +42,12 @@
         "minor": 250000,
         "currency": "INR"
       },
-      "instruction": "Order this week's vegetables and fruit.",
-      "item": "Vegetables and fruit for the week",
+      "instruction": "Order this week's vegetables and fruit: tomatoes, onions, spinach, bananas and apples, around 2,500 rupees.",
+      "item": "Weekly vegetables and fruit: tomatoes, onions, spinach, bananas, apples",
       "chat": [
         {
           "speaker": "asha",
-          "text": "Order this week's vegetables and fruit."
+          "text": "Order this week's vegetables and fruit: tomatoes, onions, spinach, bananas and apples, around 2,500 rupees."
         },
         {
           "speaker": "shopbot",
