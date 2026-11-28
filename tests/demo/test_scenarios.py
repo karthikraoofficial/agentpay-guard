@@ -13,7 +13,7 @@ from demo.scenario import Scenario, catalogue
 from tests.api.conftest import Api
 from tests.conftest import make_settings
 from tests.demo.conftest import clients
-from tests.demo.operator import Operator
+from tests.demo.operator import InboxSender, Operator, webhook_inbox
 
 pytestmark = pytest.mark.anyio
 
@@ -30,11 +30,15 @@ def script_the_model(api: Api, scenario: Scenario) -> None:
 async def test_each_scenario_ends_with_its_expected_result(
     api: Api, keys: tuple[str, str], scenario: Scenario
 ) -> None:
-    operator = Operator(api, [])
+    # The Demo Tenant's webhooks go to a receiver, as on the hosted demo (H8).
+    inbox = webhook_inbox(api, keys[1])
+    operator = Operator(api, [], InboxSender(inbox))
     script_the_model(api, scenario)
     async with clients(api, keys) as (agent, tenant):
         # In CI the engine plays Asha; on the demo page a visitor does.
-        run = Run(scenario, agent=agent, tenant=tenant, now=api.clock.now, people="engine")
+        run = Run(
+            scenario, agent=agent, tenant=tenant, now=api.clock.now, people="engine", inbox=inbox
+        )
 
         cards = await play(run, wait=operator.wait, patience=20)
 
@@ -89,6 +93,17 @@ def test_the_cli_refuses_an_unknown_scenario(capsys: pytest.CaptureFixture[str])
 
     assert code == 2
     assert "No Scenario Z9" in capsys.readouterr().err
+
+
+def test_the_cli_refuses_h8_which_needs_the_demo_runners_receiver(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    keys = {"demo_agent_key": "apg_test_a", "demo_tenant_key": "apg_test_b"}
+
+    code = main(["--base-url", "http://localhost:8000", "--scenario", "H8"], make_settings(**keys))
+
+    assert code == 2
+    assert "H8 shows Tenant webhooks" in capsys.readouterr().err
 
 
 async def test_e6_a_double_tap_records_one_approval(api: Api, keys: tuple[str, str]) -> None:

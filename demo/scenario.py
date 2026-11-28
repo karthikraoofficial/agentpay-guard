@@ -30,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 from core.domain.decisions import Merchant
 from core.domain.intents import IntentVerdict
 from core.domain.money import Money
+from core.domain.webhooks import TenantEventType
 
 CATALOGUE = Path(__file__).parent / "scenarios"
 SCHEMA = Path(__file__).parent / "scenario.schema.json"
@@ -262,7 +263,20 @@ class VisitorStep(_Model):
     chat: list[ChatLine] = []
 
 
-Step = Annotated[AgentStep | TenantStep | HumanStep | VisitorStep, Field(discriminator="actor")]
+class WebhookStep(_Model):
+    """The wallet app's own systems: the Tenant webhooks the Guard sent about this run, as
+    the Demo runner's receiver checked and kept them (H8). The step waits until every
+    event type listed has arrived. Only the Demo runner has a receiver, so the CLI
+    refuses a Scenario with this step."""
+
+    actor: Literal["webhooks"]
+    until_events: list[TenantEventType] = Field(min_length=1)
+    chat: list[ChatLine] = []
+
+
+Step = Annotated[
+    AgentStep | TenantStep | HumanStep | VisitorStep | WebhookStep, Field(discriminator="actor")
+]
 
 
 class Expected(_Model):
@@ -295,6 +309,8 @@ class Expected(_Model):
     # Whether a verify-pack step found every pack version matching the Audit chain and
     # its Sign-off, and the chain clean (H7).
     pack_clean: bool | None = None
+    # The Tenant webhook event types the run received, in any order (H8).
+    webhook_events: list[TenantEventType] | None = None
 
 
 class ModelReply(_Model):

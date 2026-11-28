@@ -24,7 +24,14 @@ from api.admin import create_key, create_tenant, replay_record, verify_chain
 from api.main import create_app
 from core.domain.parties import ALL_SCOPES, ApiKeyScope, hash_api_key
 from core.domain.rails import RailName
-from core.ports import Clock, PaymentRail, TenantId, UnitOfWork, WebhookUnreachable
+from core.ports import (
+    Clock,
+    PaymentRail,
+    TenantId,
+    UnitOfWork,
+    WebhookSender,
+    WebhookUnreachable,
+)
 from core.settings import Settings
 from core.tenant_webhooks import TenantWebhooks
 from tests.conftest import make_settings
@@ -205,7 +212,7 @@ class RecordingSender:
 
 
 def tenant_webhooks(
-    store: UnitOfWork, clock: Clock, sender: RecordingSender | None = None
+    store: UnitOfWork, clock: Clock, sender: WebhookSender | None = None
 ) -> TenantWebhooks:
     """Tenant webhook delivery for a relay in tests, with the test settings' key."""
     return TenantWebhooks(store, secret_box(make_settings()), sender or RecordingSender(), clock)

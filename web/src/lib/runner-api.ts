@@ -8,7 +8,7 @@ export type Json = Record<string, unknown>;
 
 export type Card = {
   step: number;
-  actor: "agent" | "tenant" | "payer" | "reviewer" | "visitor";
+  actor: "agent" | "tenant" | "payer" | "reviewer" | "visitor" | "webhooks";
   chat: ChatLine[];
   call: { kind: "tool" | "route"; name: string; request: Json | null; response: Json } | null;
   decision: {
@@ -46,9 +46,23 @@ export type Card = {
   fast_forward: string | null;
   // That control forces a failure (a switch) rather than ending a timer.
   switch: boolean;
+  // A webhooks step: every Tenant webhook about this run that the Demo runner's receiver
+  // checked and kept, in the order they arrived (H8).
+  webhooks: ReceivedWebhook[] | null;
   waiting: boolean;
   finished: boolean;
   mismatches: string[];
+};
+
+// A Tenant webhook as the receiver kept it. Only deliveries whose signature verified are
+// kept. `data` holds ids, statuses, codes and times only.
+export type ReceivedWebhook = {
+  event_id: string;
+  event_type: string;
+  created_at: string;
+  data: Json;
+  signed_at: string;
+  signature: "verified";
 };
 
 export type DisputeView = {

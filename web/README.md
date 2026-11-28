@@ -65,7 +65,9 @@ A visitor picks a journey, grouped A–H, and watches it play. The page has thre
 which become tabs at phone width:
 - **Chat:** Asha's and ShopBot's scripted lines. After each Guard call comes a tool-call
   card (the MCP tool name or HTTP route, with the request and response) and, for a
-  Decision, a verdict card with the Outcome and every Reason code in plain words.
+  Decision, a verdict card with the Outcome and every Reason code in plain words. In H8 a
+  webhooks card lists each Tenant webhook the wallet app received about the run, each
+  with its signature verified by the Demo runner's receiver.
 - **Asha's phone:** on a step_up, the real consent screen in a phone frame, opened on the
   run's Consent link (`/consent#<token>`, ADR-0008). The visitor approves or declines as
   Asha, and the chat carries on with her answer, including a blocked approval's reason.

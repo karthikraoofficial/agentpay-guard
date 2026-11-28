@@ -17,6 +17,7 @@ import {
   type IntentVerdict,
   type Json,
   type PackCheck,
+  type ReceivedWebhook,
   type Verification,
 } from "@/lib/runner-api";
 import { GROUPS, SCENARIOS, SPEAKER_NAMES, type Scenario } from "@/lib/scenarios";
@@ -47,6 +48,7 @@ const ACTOR = {
   payer: "Asha",
   reviewer: "Reviewer",
   visitor: "Demo control",
+  webhooks: "Wallet app's systems",
 } as const;
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -395,6 +397,7 @@ function Chat({
           {card.intent && <CartCheck intent={card.intent} />}
           {card.dispute && <DisputeCard dispute={card.dispute} />}
           {card.pack_check && <PackCheckCard check={card.pack_check} />}
+          {card.webhooks && <WebhooksCard events={card.webhooks} />}
           {card.decision && <Verdict decision={card.decision} />}
           {card.actor === "payer" && card.consent && <Answer consent={card.consent} />}
         </li>
@@ -432,7 +435,9 @@ function Chat({
                 ? "Waiting for the bank to take the money…"
                 : waiting.dispute
                   ? "Waiting for the Evidence pack to be built…"
-                  : "Waiting…"}
+                  : waiting.actor === "webhooks"
+                    ? "Waiting for the Guard's webhooks to reach the wallet app…"
+                    : "Waiting…"}
         </li>
       )}
     </ol>
@@ -563,6 +568,34 @@ function DisputeCard({ dispute }: { dispute: DisputeView }) {
           ⚑ Written by code from a template: the AI writer was unavailable. Every claim still cites its record.
         </p>
       )}
+    </div>
+  );
+}
+
+// H8: the Tenant webhooks the wallet app's systems received about this run.
+function WebhooksCard({ events }: { events: ReceivedWebhook[] }) {
+  return (
+    <div className="rounded-md border border-neutral-300 p-2 text-sm dark:border-neutral-700">
+      <div className="font-semibold">Webhooks the wallet app received</div>
+      {events.length === 0 ? (
+        <p className="text-xs text-neutral-500">None yet.</p>
+      ) : (
+        <ul className="mt-1 flex flex-col gap-1">
+          {events.map((event) => (
+            <li key={event.event_id} className="text-xs">
+              <span className="text-emerald-700 dark:text-emerald-400">✓ signature verified</span>{" "}
+              <code className="font-semibold">{event.event_type}</code>{" "}
+              <span className="text-neutral-500">
+                {event.event_id}, signed {new Date(event.signed_at).toLocaleTimeString()}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-1 text-xs text-neutral-500">
+        Each is signed with the wallet app&apos;s own secret (X-AgentPay-Signature). The receiver keeps only
+        those whose signature checks out, and each event once.
+      </p>
     </div>
   );
 }

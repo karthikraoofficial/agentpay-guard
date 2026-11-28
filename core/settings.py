@@ -255,6 +255,11 @@ class DemoRunnerSettings(BaseSettings):
     # How long a run is kept after it starts. A restart ends every run in progress.
     demo_runner_run_ttl_seconds: int = Field(default=1800, gt=0, le=6 * 3600)
     demo_runner_http_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    # The signing secret of the Demo Tenant's Tenant webhook endpoint, which the provision
+    # wizard points at this runner's `/webhooks` (#286). The runner checks each delivery
+    # with it, so a run can show the webhooks it was sent (H8). Unset: no receiver, and
+    # H8 can't be played.
+    demo_runner_webhook_secret: SecretStr | None = None
 
     @field_validator("demo_agent_key", "demo_tenant_key")
     @classmethod

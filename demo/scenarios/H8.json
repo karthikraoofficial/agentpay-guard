@@ -1,0 +1,97 @@
+{
+  "id": "H8",
+  "title": "Keeping the wallet app informed",
+  "group": "H",
+  "playlists": [],
+  "story": "ShopBot's INR 6,000 party order needs Asha's approval. She approves, the payment is taken, and later she disputes it. At every turn the Guard sends the wallet app's own systems a signed Tenant webhook, so its app and support team know without asking. The wallet app checks each signature before trusting the message.",
+  "setup": {
+    "mandate": {
+      "per_txn_cap": {"minor": 1000000, "currency": "INR"},
+      "monthly_cap": {"minor": 5000000, "currency": "INR"},
+      "allowed_mccs": ["5411", "5812"]
+    },
+    "merchant": {"id": "m_freshmart", "name": "FreshMart", "mcc": "5411"},
+    "card": "token_mock_captures"
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "tool": "request_decision",
+      "amount": {"minor": 600000, "currency": "INR"},
+      "chat": [
+        {"speaker": "asha", "text": "Order the party food from FreshMart for Saturday."},
+        {"speaker": "shopbot", "text": "The party order at FreshMart comes to INR 6,000. Checking with AgentPay Guard before I pay."}
+      ]
+    },
+    {
+      "actor": "webhooks",
+      "until_events": ["consent_request.created"],
+      "chat": [
+        {"speaker": "shopbot", "text": "This one needs your approval, Asha. The wallet app has been told a request is waiting."}
+      ]
+    },
+    {
+      "actor": "payer",
+      "action": "approve",
+      "chat": [
+        {"speaker": "shopbot", "text": "I've sent it to your phone."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "create_payment",
+      "chat": [
+        {"speaker": "shopbot", "text": "Asha approved. Paying FreshMart INR 6,000 now."}
+      ]
+    },
+    {
+      "actor": "agent",
+      "tool": "get_payment",
+      "until_status": ["captured", "failed"],
+      "chat": [
+        {"speaker": "shopbot", "text": "The payment is scheduled. I'll let you know once the money is taken."}
+      ]
+    },
+    {
+      "actor": "webhooks",
+      "until_events": ["consent_request.resolved", "payment.captured"],
+      "chat": [
+        {"speaker": "shopbot", "text": "The money is taken, and the wallet app heard about the approval and the payment."}
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "POST /v1/disputes",
+      "body": {"payment_id": "{payment_id}", "reason": "unauthorised"},
+      "respond_in_days": 10,
+      "chat": [
+        {"speaker": "asha", "text": "My bank says there's a charge from FreshMart I don't recognise. I'm disputing it."}
+      ]
+    },
+    {
+      "actor": "tenant",
+      "route": "GET /v1/disputes/{dispute_id}",
+      "until_status": ["in_review"]
+    },
+    {
+      "actor": "webhooks",
+      "until_events": ["dispute.in_review"],
+      "chat": [
+        {"speaker": "shopbot", "text": "The wallet app's support team has been told the Evidence pack is ready for review."}
+      ]
+    }
+  ],
+  "expected": {
+    "outcome": "step_up",
+    "consent_status": "approved",
+    "payment_status": "captured",
+    "dispute_status": "in_review",
+    "webhook_events": [
+      "consent_request.created",
+      "consent_request.resolved",
+      "payment.captured",
+      "dispute.in_review"
+    ]
+  },
+  "what_to_notice": "Each webhook carries ids, statuses and times only: never Asha's contact details or a card reference. Each is signed with the wallet app's own secret (X-AgentPay-Signature, an HMAC over the time and the body), and the receiver keeps only those whose signature checks out. Delivery is at least once, so the receiver keeps each event once, by its id."
+}

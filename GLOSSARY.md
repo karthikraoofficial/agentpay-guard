@@ -351,7 +351,7 @@ The model reply a Scenario writes down for each cart check (Intent check) that r
 _Avoid_: Mock reply, canned answer, expected verdict (the Scenario's expected result is the Decision's)
 
 **Demo runner**:
-The small server beside the API (`python -m demo_runner`) that plays Scenarios for the web app's /demo page, one step per browser request, each step answered with a card. It holds the Demo Tenant's keys so the browser never does, talks to the API over HTTP only, makes no model call of its own, grants each run its own Payer, Agent and Mandate, and is rate-limited per client IP and overall (ADR-0031).
+The small server beside the API (`python -m demo_runner`) that plays Scenarios for the web app's /demo page, one step per browser request, each step answered with a card. It holds the Demo Tenant's keys so the browser never does, talks to the API over HTTP only, makes no model call of its own, grants each run its own Payer, Agent and Mandate, and is rate-limited per client IP and overall (ADR-0031). It is also the Demo Tenant's Tenant webhook endpoint, keeping each delivery whose signature verifies for the run it is about (H8).
 _Avoid_: Demo server, demo backend, demo proxy
 
 **Demo control**:
