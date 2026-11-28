@@ -2,7 +2,9 @@
   "id": "H7",
   "title": "Proving the evidence pack sent is the one signed",
   "group": "H",
-  "playlists": [],
+  "playlists": [
+    "engineering"
+  ],
   "story": "A disputed INR 1,250 payment's Evidence pack is signed off by a reviewer. Later someone asks whether the pack sent to the bank is the one the reviewer approved. Verify-pack rebuilds the evidence from the Audit chain, checks the pack's hash against the Sign-off, and walks the chain.",
   "setup": {
     "mandate": {

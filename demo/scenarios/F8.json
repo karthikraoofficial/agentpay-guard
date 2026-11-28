@@ -2,7 +2,9 @@
   "id": "F8",
   "title": "The bank never heard of the payment",
   "group": "F",
-  "playlists": [],
+  "playlists": [
+    "engineering"
+  ],
   "story": "ShopBot pays, but the payment never reaches the bank. It sits as scheduled until the Guard's regular check asks the bank, finds no record, and fails it rather than charging Asha late.",
   "setup": {
     "mandate": {

@@ -2,7 +2,9 @@
   "id": "G8",
   "title": "The AI writer is unavailable",
   "group": "G",
-  "playlists": [],
+  "playlists": [
+    "engineering"
+  ],
   "story": "The AI is switched off just as Asha disputes an INR 1,250 payment. The Evidence pack's narrative can't be written by the model, so code writes it from a template instead, flagged as such. The Dispute still goes to review and is signed off on time.",
   "setup": {
     "mandate": {

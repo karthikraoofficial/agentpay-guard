@@ -2,7 +2,9 @@
   "id": "A2",
   "title": "A medium-sized order with a matching cart",
   "group": "A",
-  "playlists": [],
+  "playlists": [
+    "payments-pm"
+  ],
   "story": "Asha asks ShopBot for this week's groceries for a family of four. The cart is INR 3,200 of groceries at FreshMart, where she has shopped before, and the cart check says it matches. The Guard allows it, and ShopBot pays.",
   "setup": {
     "mandate": {

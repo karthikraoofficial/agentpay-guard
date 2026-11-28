@@ -106,7 +106,7 @@ Each journey has:
 - **Guard's answer**: what AgentPay Guard does.
 - **Why it matters**: the real-world risk this protects against.
 - **Demo status**:
-  - ✅ **In today's demo**: already runs, as a Scenario in `demo/scenarios/` or a `python -m demo` journey.
+  - ✅ **In today's demo**: already runs, as a Scenario in `demo/scenarios/`, on the `/demo` page and with `python -m demo --scenario <id>`.
   - 🟢 **Ready in the code**: the product already handles it; the demo just needs a script for it.
   - 🟡 **Needs a demo control**: the product handles it, but showing it live needs either a "fast-forward the clock" button (for things that normally take minutes or hours) or a "make the bank fail" switch. These controls would work only on the demo account, on pretend money.
 
@@ -470,7 +470,7 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 | H. Refunds and proof | 8 | 8 | 0 | 0 |
 | **Total** | **60** | **59** | **0** | **1** |
 
-*The original 4 command-line journeys touch 7 of these entries, because some cover more than one; the Scenario catalogue adds E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), D5, F8, F9 and H6 (#281), B1 to B9 (#277), A2, D1 to D4 and D6 (#279), G1, G8, G9, G10, G12 and H7 (#283), G2 to G7 and G11 (#284), C2 to C6 (#278), F1, F2, F3 and F6 (#282), H2 and H3 (#285), with H1 moved from journey 4 to a Scenario, and H8 (#286).*
+*Every ✅ journey is a Scenario. The original 4 command-line journeys became A1, E1, G1 and H1 (the numbered `--journey` was retired in #288); the catalogue added E2, E4, E5 and E6 (#276), B10, E3, F4, F5 and F7 (#280), H4 and H5 (#275), D5, F8, F9 and H6 (#281), B1 to B9 (#277), A2, D1 to D4 and D6 (#279), G1, G8, G9, G10, G12 and H7 (#283), G2 to G7 and G11 (#284), C2 to C6 (#278), F1, F2, F3 and F6 (#282), H2 and H3 (#285), with H1 moved from journey 4 to a Scenario, and H8 (#286).*
 
 **What this means for the build:**
 - **1 journey still needs a Scenario on a demo-only control:**
@@ -482,7 +482,7 @@ Each type of complaint maps to the official card-network reason codes (Visa and 
 
 ## 7. Suggested demo playlists
 
-Nobody watches 60 journeys. Group them into playlists for different audiences. Each playlist that the demo plays is a file in `demo/playlists/`: so far the 90-second pitch (#287), which the home page's "Try the demo" plays, with settle-now pressed in A1, E1 and G1 so it doesn't wait for the bank.
+Nobody watches 60 journeys. Group them into playlists for different audiences. Each is a file in `demo/playlists/`: the 90-second pitch (#287), which the home page's "Try the demo" plays, with settle-now pressed in A1, E1 and G1 so it doesn't wait for the bank, and the four below it (#288). The `/demo` page lists them all and `/demo?playlist=<id>` plays one; `python -m demo --playlist <id>` plays one from the terminal. The lengths are rough: a journey that waits for Asha or a reviewer takes as long as they do.
 
 | Playlist | Length | Journeys | Story it tells |
 |---|---|---|---|

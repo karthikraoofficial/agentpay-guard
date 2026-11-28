@@ -347,7 +347,7 @@ Every Scenario file, one per journey, in `demo/scenarios/`, read by the web app,
 _Avoid_: Journey list (that is `docs/demo-journeys.md`), scenario library
 
 **Playlist**:
-Journeys strung together for one audience, played in order: one file in `demo/playlists/` listing Scenario ids, as `docs/demo-journeys.md` section 7 suggests them. The 90-second pitch (A1, B4, D2, E1, G1) is what the home page's "Try the demo" plays. CI fails a playlist that names a journey with no Scenario file, or that disagrees with the Scenarios' own playlist tags.
+Journeys strung together for one audience, played in order: one file in `demo/playlists/` listing Scenario ids, as `docs/demo-journeys.md` section 7 suggests them. There are five: the 90-second pitch (A1, B4, D2, E1, G1), which the home page's "Try the demo" plays, and one each for a payments product manager, risk and compliance, an engineering deep dive, and disputes and operations. The `/demo` page and `python -m demo --playlist <id>` play any of them. CI fails a playlist that names a journey with no Scenario file, or that disagrees with the Scenarios' own playlist tags.
 _Avoid_: Tour, reel, collection
 
 **Scripted reply**:

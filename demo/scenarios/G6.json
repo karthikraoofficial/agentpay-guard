@@ -2,7 +2,9 @@
   "id": "G6",
   "title": "\"It never arrived\"",
   "group": "G",
-  "playlists": [],
+  "playlists": [
+    "disputes"
+  ],
   "story": "ShopBot pays FreshMart INR 1,250 for Asha's weekly groceries, with a cart check that matched. Asha tells her bank the groceries never arrived. The Guard builds the pack, but says openly it is not strong: it knows what was agreed and paid, not what was delivered.",
   "setup": {
     "mandate": {

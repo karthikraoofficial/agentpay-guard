@@ -2,7 +2,9 @@
   "id": "G2",
   "title": "\"I never authorised this\" with weak evidence",
   "group": "G",
-  "playlists": [],
+  "playlists": [
+    "disputes"
+  ],
   "story": "ShopBot's cart for Asha's weekly groceries is six bottles of premium whisky. The cart check says mismatch, so the Guard asks Asha, and she approves it anyway. Later she tells her bank she never authorised it. The Guard rates its own evidence weak and says why: the records show she approved a cart the check had flagged.",
   "setup": {
     "mandate": {

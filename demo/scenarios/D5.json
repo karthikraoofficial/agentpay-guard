@@ -2,7 +2,10 @@
   "id": "D5",
   "title": "The AI service is down",
   "group": "D",
-  "playlists": [],
+  "playlists": [
+    "risk-compliance",
+    "engineering"
+  ],
   "story": "The AI that compares ShopBot's cart with Asha's request is switched off for this run. The check comes back unsure, so the Guard asks Asha instead of guessing. Nothing stops working, and nothing gets less safe.",
   "setup": {
     "mandate": {

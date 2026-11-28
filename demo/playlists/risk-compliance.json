@@ -1,0 +1,18 @@
+{
+  "id": "risk-compliance",
+  "title": "Risk and compliance",
+  "audience": "A risk or compliance reviewer",
+  "length": "about 5 minutes",
+  "story": "Fails safe, can't approve itself, honours the RBI notice rule, every decision replayable, records tamper-evident.",
+  "journeys": [
+    "B4",
+    "C3",
+    "D5",
+    "E4",
+    "E5",
+    "F7",
+    "H4",
+    "H5",
+    "H6"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "payments-pm",
+  "title": "Payments product manager",
+  "audience": "A payments product manager",
+  "length": "about 5 minutes",
+  "story": "Limits, warning signs, drip pricing, silent consent, retries, the notice period, duplicates and refunds: the real operational edge cases.",
+  "journeys": [
+    "A2",
+    "B1",
+    "C1",
+    "C4",
+    "D6",
+    "E3",
+    "F3",
+    "F5",
+    "G4",
+    "H1"
+  ]
+}

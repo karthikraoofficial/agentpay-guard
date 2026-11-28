@@ -2,7 +2,9 @@
   "id": "G9",
   "title": "The reviewer asks for a rewrite",
   "group": "G",
-  "playlists": [],
+  "playlists": [
+    "disputes"
+  ],
   "story": "The reviewer finds the Evidence pack's summary unclear and presses Regenerate. The Guard builds version 2. Signing off version 1 is now refused, because a Sign-off always applies to one exact version, the latest. The reviewer signs off version 2.",
   "setup": {
     "mandate": {

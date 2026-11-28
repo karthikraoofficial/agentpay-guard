@@ -2,7 +2,9 @@
   "id": "H5",
   "title": "Checking the diary hasn't been tampered with",
   "group": "H",
-  "playlists": [],
+  "playlists": [
+    "risk-compliance"
+  ],
   "story": "Every Decision is written to an append-only Audit chain, where each record carries a hash of the one before it. After ShopBot's INR 1,250 payment is allowed, the wallet app walks the demo account's whole chain and checks that nothing is missing, edited or out of place.",
   "setup": {
     "mandate": {

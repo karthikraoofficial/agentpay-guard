@@ -30,6 +30,21 @@ def test_the_pitch_plays_a1_b4_d2_e1_g1() -> None:
     assert pitch.journeys == ["A1", "B4", "D2", "E1", "G1"]
 
 
+@pytest.mark.parametrize(
+    ("playlist", "journeys"),
+    [
+        ("payments-pm", ["A2", "B1", "C1", "C4", "D6", "E3", "F3", "F5", "G4", "H1"]),
+        ("risk-compliance", ["B4", "C3", "D5", "E4", "E5", "F7", "H4", "H5", "H6"]),
+        ("engineering", ["C5", "C6", "D5", "F2", "F3", "F8", "F9", "G8", "H7"]),
+        ("disputes", ["G1", "G2", "G3", "G6", "G7", "G9", "G11"]),
+    ],
+)
+def test_each_audience_playlist_plays_the_journeys_section_7_lists(
+    playlist: str, journeys: list[str]
+) -> None:
+    assert load_playlists()[playlist].journeys == journeys
+
+
 def test_a_playlist_naming_a_journey_with_no_scenario_fails(tmp_path: Path) -> None:
     folder = _write(tmp_path / "p", {**PITCH, "journeys": ["A1", "Z9"]})
 

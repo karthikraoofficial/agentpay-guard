@@ -7,7 +7,7 @@ Each time a run waits, the test plays the worker and the people, as the demo CLI
 import pytest
 
 from core.ports import ModelSpendCapReached
-from demo.__main__ import AS_SCENARIO, main, run_scenario
+from demo.__main__ import main, run_scenario
 from demo.engine import Run, play
 from demo.scenario import Scenario, catalogue
 from tests.api.conftest import Api
@@ -352,13 +352,15 @@ async def test_a_visitor_reviewer_signs_off_in_the_dispute_viewer(
     assert after.dispute is not None and after.dispute.status == "ready"
 
 
-async def test_journey_3_on_the_cli_is_scenario_g1(api: Api, keys: tuple[str, str]) -> None:
+async def test_the_cli_plays_g1_signed_off_through_the_review_link(
+    api: Api, keys: tuple[str, str]
+) -> None:
     out: list[str] = []
     operator = Operator(api, out)  # signs off through the Review link the CLI prints
     script_the_model(api, catalogue()["G1"])
     async with clients(api, keys) as (agent, tenant):
         code = await run_scenario(
-            catalogue()[AS_SCENARIO["3"]],
+            catalogue()["G1"],
             agent=agent,
             tenant=tenant,
             say=out.append,
@@ -368,7 +370,6 @@ async def test_journey_3_on_the_cli_is_scenario_g1(api: Api, keys: tuple[str, st
         )
 
     assert code == 0, "\n".join(out)
-    assert AS_SCENARIO["3"] == "G1"
     assert operator.used, "the CLI never printed a Review link"
     assert any("strength strong" in line for line in out), out
     assert any("verify-pack: clean" in line for line in out), out
@@ -412,12 +413,12 @@ async def test_h1_refunds_in_two_parts_and_the_blocked_order_is_then_allowed(
     ]
 
 
-async def test_journey_4_on_the_cli_is_scenario_h1(api: Api, keys: tuple[str, str]) -> None:
+async def test_the_cli_plays_h1_and_prints_each_refund(api: Api, keys: tuple[str, str]) -> None:
     out: list[str] = []
     operator = Operator(api, out)
     async with clients(api, keys) as (agent, tenant):
         code = await run_scenario(
-            catalogue()[AS_SCENARIO["4"]],
+            catalogue()["H1"],
             agent=agent,
             tenant=tenant,
             say=out.append,
@@ -427,7 +428,6 @@ async def test_journey_4_on_the_cli_is_scenario_h1(api: Api, keys: tuple[str, st
         )
 
     assert code == 0, "\n".join(out)
-    assert AS_SCENARIO["4"] == "H1"
     assert any(
         "request_decision: block (Reason codes: MONTHLY_CAP_EXCEEDED" in line for line in out
     )

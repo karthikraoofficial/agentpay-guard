@@ -3,7 +3,8 @@
   "title": "\"I never authorised this\" with strong evidence",
   "group": "G",
   "playlists": [
-    "pitch"
+    "pitch",
+    "disputes"
   ],
   "story": "ShopBot buys Asha's INR 1,250 weekly groceries, inside her permission and with a cart check that matched. Later Asha tells her bank she never authorised it. The Guard builds an Evidence pack rated strong: the permission she gave, the matching cart check, the Decision. A reviewer reads it in the dispute viewer and signs it off, and the pack is verified as unaltered.",
   "setup": {

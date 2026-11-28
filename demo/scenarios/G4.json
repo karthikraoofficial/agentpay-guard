@@ -2,7 +2,9 @@
   "id": "G4",
   "title": "\"I was charged twice\"",
   "group": "G",
-  "playlists": [],
+  "playlists": [
+    "payments-pm"
+  ],
   "story": "ShopBot pays FreshMart INR 1,250 for Asha's groceries, and a little later pays FreshMart INR 1,250 again. Asha sees two identical charges and disputes the second as a duplicate. The Guard finds the other Payment, same shop, same amount, within 24 hours, and rates the evidence weak.",
   "setup": {
     "mandate": {

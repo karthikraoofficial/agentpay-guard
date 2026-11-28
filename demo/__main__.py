@@ -1,42 +1,37 @@
-"""`uv run python -m demo --base-url <api>`: run the demo journeys against a deployment.
+"""`uv run python -m demo --base-url <api>`: play demo journeys against a deployment.
 
-`--scenario <id>` runs one Scenario from the catalogue (demo/scenarios/) through the step
-engine the Demo runner uses; `--journey 1..4` runs the original four journeys, of which
-journey 2 (a step-up the Payer approves) is now Scenario E1, journey 3 (a disputed
-Payment, signed off and verified) Scenario G1, and journey 4 (a refund that gives the
-Monthly cap back) Scenario H1.
+`--scenario <id>` plays one Scenario from the catalogue (demo/scenarios/), and
+`--playlist <id>` plays a playlist (demo/playlists/) journey by journey, stopping at the
+first that doesn't end as expected. Both go through the step engine the Demo runner uses.
+H8 (Tenant webhooks) needs the Demo runner's receiver, so the CLI refuses it.
 
 The Demo Tenant's keys come from settings (AGENTPAY_DEMO_AGENT_KEY and
 AGENTPAY_DEMO_TENANT_KEY), never from the command line, and are never printed. The
-deployment must use the mock rail; journeys 3 and 4 also need mock settle on and a worker."""
+deployment must use the mock rail; journeys that wait for the bank also need mock settle
+on and a worker."""
 
 import argparse
 import sys
 import time
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
+from functools import partial
 
 import anyio
 import httpx
 
 from core.settings import Settings, get_settings
 from demo import engine
-from demo.journeys import Demo, StepFailed
+from demo.playlist import Playlist, load_playlists
 from demo.scenario import Scenario, catalogue
-
-JOURNEYS = ("1", "2", "3", "4")
-# Journeys that now run as a Scenario through the step engine (#276, #283, #285).
-AS_SCENARIO = {"2": "E1", "3": "G1", "4": "H1"}
 
 
 def main(argv: Sequence[str] | None = None, settings: Settings | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m demo", description=__doc__)
     parser.add_argument("--base-url", required=True, help="the API, e.g. https://api.example")
-    which = parser.add_mutually_exclusive_group()
-    which.add_argument(
-        "--journey", choices=(*JOURNEYS, "all"), default="all", help="one journey, or all four"
-    )
+    which = parser.add_mutually_exclusive_group(required=True)
     which.add_argument("--scenario", help="one Scenario from the catalogue, e.g. A1")
+    which.add_argument("--playlist", help="a playlist, e.g. pitch")
     parser.add_argument("--interval", type=float, default=3.0, help="seconds between checks")
     parser.add_argument("--timeout", type=float, default=600.0, help="seconds to wait for a step")
     args = parser.parse_args(argv)
@@ -50,32 +45,24 @@ def main(argv: Sequence[str] | None = None, settings: Settings | None = None) ->
         )
         return 2
 
-    agent_key = settings.demo_agent_key.get_secret_value()
-    tenant_key = settings.demo_tenant_key.get_secret_value()
-
-    def play_scenario(scenario: Scenario) -> int:
-        async def go() -> int:
-            async with (
-                _client(args.base_url, agent_key) as agent,
-                _client(args.base_url, tenant_key) as tenant,
-            ):
-                return await run_scenario(
-                    scenario,
-                    agent=agent,
-                    tenant=tenant,
-                    say=lambda line: print(line, flush=True),
-                    wait=lambda: time.sleep(args.interval),
-                    now=lambda: datetime.now(UTC),
-                    patience=max(1, int(args.timeout / args.interval)),
-                )
-
-        return anyio.run(go)
-
-    if args.scenario is not None:
+    playlist: Playlist | None = None
+    if args.playlist is not None:
+        playlists = load_playlists()
+        playlist = playlists.get(args.playlist)
+        if playlist is None:
+            print(
+                f"No playlist {args.playlist}. There are: {', '.join(sorted(playlists))}.",
+                file=sys.stderr,
+            )
+            return 2
+        scenarios = [catalogue()[journey] for journey in playlist.journeys]
+    else:
         scenario = catalogue().get(args.scenario)
         if scenario is None:
             print(f"No Scenario {args.scenario}.", file=sys.stderr)
             return 2
+        scenarios = [scenario]
+    for scenario in scenarios:
         if engine.needs_webhooks(scenario):
             print(
                 f"Scenario {scenario.id} shows Tenant webhooks, which only the Demo runner "
@@ -83,32 +70,30 @@ def main(argv: Sequence[str] | None = None, settings: Settings | None = None) ->
                 file=sys.stderr,
             )
             return 2
-        return play_scenario(scenario)
 
-    journeys = JOURNEYS if args.journey == "all" else (args.journey,)
-    with httpx.Client(base_url=args.base_url, timeout=30.0) as client:
-        demo = Demo(
-            client=client,
-            agent_key=agent_key,
-            tenant_key=tenant_key,
-            say=lambda line: print(line, flush=True),
-            now=lambda: datetime.now(UTC),
-        )
-        for number in journeys:
-            if number in AS_SCENARIO:
-                if play_scenario(catalogue()[AS_SCENARIO[number]]) != 0:
-                    return 1
-                print()
-                continue
-            try:
-                getattr(demo, f"journey_{number}")()
-            except StepFailed as failed:
-                failure = f"Journey {number} failed at '{failed.step}': {failed.detail}"
-                print(failure, file=sys.stderr)
-                return 1
-            print()
-    print("Done.")
-    return 0
+    agent_key = settings.demo_agent_key.get_secret_value()
+    tenant_key = settings.demo_tenant_key.get_secret_value()
+
+    async def go() -> int:
+        async with (
+            _client(args.base_url, agent_key) as agent,
+            _client(args.base_url, tenant_key) as tenant,
+        ):
+            play = (
+                partial(run_playlist, playlist)
+                if playlist is not None
+                else partial(run_scenario, scenarios[0])
+            )
+            return await play(
+                agent=agent,
+                tenant=tenant,
+                say=lambda line: print(line, flush=True),
+                wait=lambda: time.sleep(args.interval),
+                now=lambda: datetime.now(UTC),
+                patience=max(1, int(args.timeout / args.interval)),
+            )
+
+    return anyio.run(go)
 
 
 def _client(base_url: str, key: str) -> httpx.AsyncClient:
@@ -191,10 +176,13 @@ async def run_scenario(
     wait: Callable[[], None],
     now: Callable[[], datetime],
     patience: int,
+    people: engine.People = "visitor",
 ) -> int:
-    """Play a Scenario, printing each step: 0 if it ended as expected, 1 if not."""
+    """Play a Scenario, printing each step: 0 if it ended as expected, 1 if not. With
+    `people="visitor"` a person answers each Consent and Review link the CLI prints; with
+    `"engine"` the engine answers as the Scenario scripts, as in CI."""
     say(f"Scenario {scenario.id}: {scenario.title}")
-    run = engine.Run(scenario, agent=agent, tenant=tenant, now=now)
+    run = engine.Run(scenario, agent=agent, tenant=tenant, now=now, people=people)
     told: set[int] = set()
     waits = 0
     while True:
@@ -235,6 +223,43 @@ async def run_scenario(
             say(f"Not as expected: {mismatch}")
         return 1
     say(f"As expected. What to notice: {scenario.what_to_notice}")
+    return 0
+
+
+async def run_playlist(
+    playlist: Playlist,
+    *,
+    agent: httpx.AsyncClient,
+    tenant: httpx.AsyncClient,
+    say: Callable[[str], None],
+    wait: Callable[[], None],
+    now: Callable[[], datetime],
+    patience: int,
+    people: engine.People = "visitor",
+) -> int:
+    """Play a playlist's journeys in order, as `run_scenario` plays each: 0 if every one
+    ended as expected, 1 at the first that didn't (the rest don't play)."""
+    count = len(playlist.journeys)
+    say(f"Playlist {playlist.id}: {playlist.title} ({count} journeys)")
+    scenarios = catalogue()
+    for number, journey in enumerate(playlist.journeys, 1):
+        say("")
+        say(f"Journey {number} of {count}: {journey}")
+        code = await run_scenario(
+            scenarios[journey],
+            agent=agent,
+            tenant=tenant,
+            say=say,
+            wait=wait,
+            now=now,
+            patience=patience,
+            people=people,
+        )
+        if code != 0:
+            say(f"Playlist {playlist.id} stopped at journey {number} of {count}, {journey}.")
+            return 1
+    say("")
+    say(f"Playlist {playlist.id}: all {count} journeys as expected.")
     return 0
 
 
