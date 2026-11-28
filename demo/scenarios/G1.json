@@ -74,6 +74,17 @@
       ]
     },
     {
+      "actor": "visitor",
+      "control": "settle_now",
+      "label": "Skip the bank's wait",
+      "chat": [
+        {
+          "speaker": "shopbot",
+          "text": "The bank takes a couple of minutes to confirm a card payment."
+        }
+      ]
+    },
+    {
       "actor": "agent",
       "tool": "get_payment",
       "until_status": [
@@ -117,6 +128,9 @@
       "actor": "tenant",
       "route": "GET /v1/disputes/{dispute_id}/verify-pack"
     }
+  ],
+  "demo_controls": [
+    "settle_now"
   ],
   "expected": {
     "outcome": "allow",

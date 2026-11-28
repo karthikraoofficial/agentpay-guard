@@ -20,13 +20,17 @@ import {
   type ReceivedWebhook,
   type Verification,
 } from "@/lib/runner-api";
-import { GROUPS, SCENARIOS, SPEAKER_NAMES, type Scenario } from "@/lib/scenarios";
+import { PLAYLISTS, playlistById, playlistScenarios, type Playlist } from "@/lib/playlists";
+import { SCENARIOS, SPEAKER_NAMES, type Scenario } from "@/lib/scenarios";
+
+import { JourneyPicker } from "../journey-picker";
 
 const STEP_PAUSE_MS = 1200; // between turns while playing
 const POLL_MS = 2000; // while a step waits on the worker or a person
 const MAX_POLLS = 120; // about four minutes, for the worker
 const HUMAN_POLLS = 330; // about eleven minutes: past a Consent request's 10-minute TTL
 const STATUS_POLL_MS = 10000; // how often the page checks for a simulated rail outage
+const NEXT_JOURNEY_PAUSE_MS = 2500; // in a playlist, before the next journey starts
 
 type Pane = "chat" | "phone" | "inspector";
 
@@ -39,7 +43,11 @@ type Run = {
   busy: boolean;
   waiting: Card | null;
   playing: boolean;
+  // A fast-forward stopped Play: pressing it carries on playing.
+  resume: boolean;
   failure: Failure | null;
+  // Playlist mode (#287): the playlist and which of its journeys this is.
+  playlist: { playlist: Playlist; index: number } | null;
 };
 
 const ACTOR = {
@@ -118,7 +126,7 @@ function Studio() {
     if (current.current) current.current = { ...current.current, ...change };
   }
 
-  function choose(scenario: Scenario | null) {
+  function choose(scenario: Scenario | null, playlist: Run["playlist"] = null) {
     generation.current += 1;
     setPane("chat");
     const fresh: Run | null =
@@ -131,11 +139,45 @@ function Studio() {
         busy: false,
         waiting: null,
         playing: false,
+        resume: false,
         failure: null,
+        playlist,
       };
     current.current = fresh;
     setRun(fresh);
   }
+
+  // A playlist from its first journey, playing at once.
+  function startPlaylist(playlist: Playlist) {
+    const first = playlistScenarios(playlist)[0];
+    if (!first) return;
+    choose(first, { playlist, index: 0 });
+    void play();
+  }
+
+  // The next journey of the playlist, if there is one.
+  function nextInPlaylist(): { scenario: Scenario; playlist: NonNullable<Run["playlist"]> } | null {
+    const at = current.current?.playlist;
+    if (!at) return null;
+    const scenario = playlistScenarios(at.playlist)[at.index + 1];
+    return scenario ? { scenario, playlist: { playlist: at.playlist, index: at.index + 1 } } : null;
+  }
+
+  // /demo?playlist=pitch plays that playlist (the home page's "Try the demo"), and
+  // /demo?scenario=A1 opens that journey.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const playlist = playlistById(params.get("playlist"));
+    const scenario = SCENARIOS.find((s) => s.id === params.get("scenario"));
+    // After the first render, which prerendered the picker without the URL.
+    const opened = window.setTimeout(() => {
+      if (playlist) startPlaylist(playlist);
+      else if (scenario) choose(scenario);
+    }, 0);
+    return () => window.clearTimeout(opened);
+    // Once, on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // One turn: start the run if needed, then run the next step, polling while it waits.
   // Returns false when the run can't go on (finished, failed or left).
@@ -172,8 +214,8 @@ function Studio() {
         return !card.finished;
       }
       if (card.fast_forward) {
-        // The visitor's turn: Play stops here until they press the button.
-        update(gen, { busy: false, waiting: card, playing: false });
+        // The visitor's turn: Play stops here until they press the button, then carries on.
+        update(gen, { busy: false, waiting: card, playing: false, resume: r.playing });
         return false;
       }
       update(gen, { waiting: card });
@@ -194,15 +236,33 @@ function Studio() {
 
   async function play() {
     const gen = generation.current;
-    update(gen, { playing: true });
+    update(gen, { playing: true, resume: false });
     while (current.current?.playing && gen === generation.current) {
       if (!(await turn(gen))) break;
       await sleep(STEP_PAUSE_MS);
     }
+    const finished = current.current?.cards.at(-1)?.finished ?? false;
     update(gen, { playing: false });
+    // In a playlist, a journey that ended as it should leads on to the next one.
+    const next = finished ? nextInPlaylist() : null;
+    if (next && gen === generation.current) {
+      await sleep(NEXT_JOURNEY_PAUSE_MS);
+      if (gen !== generation.current) return;
+      choose(next.scenario, next.playlist);
+      void play();
+    }
   }
 
-  if (run === null) return <Picker onChoose={choose} />;
+  // The visitor presses a fast-forward. If it stopped Play, Play carries on after it.
+  async function press() {
+    const gen = generation.current;
+    const resume = current.current?.resume ?? false;
+    const ok = await turn(gen, true);
+    if (resume && ok && gen === generation.current) void play();
+  }
+
+  if (run === null) return <Picker onChoose={(s) => choose(s)} onPlaylist={startPlaylist} />;
+  const upNext = run.playlist ? playlistScenarios(run.playlist.playlist)[run.playlist.index + 1] : undefined;
 
   const finished = run.cards.at(-1)?.finished ?? false;
   const decision = [...run.cards].reverse().find((c) => c.decision)?.decision ?? null;
@@ -215,6 +275,9 @@ function Studio() {
         <button type="button" onClick={() => choose(null)} className="self-start text-sm underline">
           ← All journeys
         </button>
+        {run.playlist && (
+          <PlaylistProgress playlist={run.playlist.playlist} index={run.playlist.index} />
+        )}
         <h1 className="text-xl font-semibold">
           {run.scenario.id}. {run.scenario.title}
         </h1>
@@ -249,6 +312,18 @@ function Studio() {
           <span className="text-xs text-neutral-500 tabular-nums">
             Turn {Math.min(run.cards.length, run.steps)} of {run.steps}
           </span>
+          {finished && upNext && run.playlist && !run.playing && (
+            <button
+              type="button"
+              onClick={() => {
+                choose(upNext, { playlist: run.playlist!.playlist, index: run.playlist!.index + 1 });
+                void play();
+              }}
+              className="rounded-md border border-sky-700 px-3 py-1.5 text-sm text-sky-800 dark:text-sky-300"
+            >
+              Next: {upNext.id} →
+            </button>
+          )}
         </div>
         {run.failure && (
           <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-2 text-sm dark:border-amber-800 dark:bg-amber-950">
@@ -282,7 +357,7 @@ function Studio() {
             cards={run.cards}
             waiting={run.waiting}
             busy={run.busy}
-            onPress={() => void turn(generation.current, true)}
+            onPress={() => void press()}
           />
           {finished && <Ending scenario={run.scenario} card={run.cards.at(-1)!} />}
         </section>
@@ -305,7 +380,13 @@ function Studio() {
   );
 }
 
-function Picker({ onChoose }: { onChoose: (s: Scenario) => void }) {
+function Picker({
+  onChoose,
+  onPlaylist,
+}: {
+  onChoose: (s: Scenario) => void;
+  onPlaylist: (p: Playlist) => void;
+}) {
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-4 py-10">
       <header className="flex flex-col gap-2">
@@ -325,38 +406,59 @@ function Picker({ onChoose }: { onChoose: (s: Scenario) => void }) {
           </Link>
         </p>
       </header>
-      {SCENARIOS.length === 0 && <p>No journeys in this build.</p>}
-      {GROUPS.map((group) => {
-        const inGroup = SCENARIOS.filter((s) => s.group === group.id);
-        return (
-          <section key={group.id} className="flex flex-col gap-2">
-            <h2 className="font-semibold">
-              {group.id}. {group.name}
-            </h2>
-            {inGroup.length === 0 ? (
-              <p className="text-sm text-neutral-500">Coming soon.</p>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {inGroup.map((s) => (
-                  <li key={s.id}>
-                    <button
-                      type="button"
-                      onClick={() => onChoose(s)}
-                      className="w-full rounded-md border border-neutral-300 p-3 text-left hover:border-neutral-500 dark:border-neutral-700"
-                    >
-                      <span className="font-medium">
-                        {s.id}. {s.title}
-                      </span>
-                      <span className="mt-1 block text-sm text-neutral-600 dark:text-neutral-400">{s.story}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        );
-      })}
+      {PLAYLISTS.length > 0 && (
+        <section className="flex flex-col gap-2" aria-label="Playlists">
+          <h2 className="font-semibold">Playlists</h2>
+          <ul className="flex flex-col gap-2">
+            {PLAYLISTS.map((p) => (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  onClick={() => onPlaylist(p)}
+                  className="w-full rounded-md border border-sky-300 bg-sky-50 p-3 text-left hover:border-sky-500 dark:border-sky-800 dark:bg-sky-950"
+                >
+                  <span className="font-medium">▶ {p.title}</span>{" "}
+                  <span className="text-sm text-neutral-600 dark:text-neutral-400">
+                    ({p.length}; {p.journeys.join(" → ")})
+                  </span>
+                  <span className="mt-1 block text-sm text-neutral-600 dark:text-neutral-400">{p.story}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      <JourneyPicker onChoose={onChoose} />
     </main>
+  );
+}
+
+// Playlist mode: which journey of the playlist is playing, and the ones around it.
+function PlaylistProgress({ playlist, index }: { playlist: Playlist; index: number }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm" aria-label="Playlist progress">
+      <span className="font-medium">
+        {playlist.title}: journey {index + 1} of {playlist.journeys.length}
+      </span>
+      <ol className="flex flex-wrap gap-1">
+        {playlist.journeys.map((id, i) => (
+          <li
+            key={id}
+            aria-current={i === index ? "step" : undefined}
+            className={`rounded-full border px-2 py-0.5 text-xs tabular-nums ${
+              i === index
+                ? "border-sky-700 bg-sky-700 text-white"
+                : i < index
+                  ? "border-emerald-600 text-emerald-700 dark:text-emerald-400"
+                  : "border-neutral-300 text-neutral-500 dark:border-neutral-700"
+            }`}
+          >
+            {i < index ? "✓ " : ""}
+            {id}
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 

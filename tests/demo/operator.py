@@ -112,7 +112,9 @@ class Operator:
         demo = api.client.app.state.settings.demo_controls_tenant_id  # type: ignore[attr-defined]
         demo_tenant = None if demo is None else TenantId(demo)
         run_debit_step(api.store, SettlingMockRail(api.store), api.clock, demo_tenant)
-        sweep(api.store, SettlingMockRail(api.store), api.clock, SETTLE_AFTER)
+        sweep(
+            api.store, SettlingMockRail(api.store), api.clock, SETTLE_AFTER, demo_tenant=demo_tenant
+        )
         relay_once(
             api.store, api.workflow, api.clock, tenant_webhooks(api.store, api.clock, self.sender)
         )

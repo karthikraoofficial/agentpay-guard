@@ -119,9 +119,11 @@ def _still_due(
         payment = tx.get_payment(payment_id)
         if payment is None or payment.debit_after is None:
             return None
-        # The notice period's end: the real one, or a Demo control's if that came first.
+        # The notice period's end: the real one, or a Demo control's if that came first
+        # (expire-now, or settle-now, which ends the notice too).
         notice_ends = ends(
-            payment.debit_after, control_for(tx, demo_tenant, "expire_notice", payment_id)
+            ends(payment.debit_after, control_for(tx, demo_tenant, "expire_notice", payment_id)),
+            control_for(tx, demo_tenant, "settle_now", payment_id),
         )
         undebited = payment.status == "scheduled" and payment.rail_payment_id is None
         if not undebited or notice_ends > now:

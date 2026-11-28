@@ -243,6 +243,7 @@ FastForward = Literal[
     "expire_notice",
     "expire_dispute",
     "expire_refund_window",
+    "settle_now",
     "ai_off",
     "rail_declining",
     "lose_payment",
@@ -419,11 +420,16 @@ def schema_text() -> str:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m demo.scenario")
-    parser.add_argument("--write-schema", action="store_true", help=f"rewrite {SCHEMA.name}")
+    parser.add_argument(
+        "--write-schema", action="store_true", help=f"rewrite {SCHEMA.name} and the playlist one"
+    )
     args = parser.parse_args(argv)
     if args.write_schema:
+        from demo.playlist import PLAYLIST_SCHEMA, playlist_schema_text
+
         SCHEMA.write_text(schema_text(), encoding="utf-8", newline="\n")
-        print(f"Wrote {SCHEMA}")
+        PLAYLIST_SCHEMA.write_text(playlist_schema_text(), encoding="utf-8", newline="\n")
+        print(f"Wrote {SCHEMA} and {PLAYLIST_SCHEMA}")
         return 0
     for scenario_id in catalogue():
         print(scenario_id)

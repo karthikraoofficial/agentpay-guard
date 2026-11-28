@@ -1052,9 +1052,27 @@ class PostgresStore:
             .join(demo_controls, (c.tenant_id == p.tenant_id) & (c.target_id == p.payment_id))
             .where(
                 p.tenant_id == tenant_id,
-                c.kind == "expire_notice",
+                c.kind.in_(("expire_notice", "settle_now")),
                 p.status == "scheduled",
                 p.rail_payment_id.is_(None),
+            )
+            .distinct()
+            .order_by(p.payment_id)
+        )
+        with self._engine.connect() as conn:
+            rows = conn.execute(query).all()
+        return [PaymentId(i) for (i,) in rows]
+
+    def settled_now_by_control(self, tenant_id: TenantId) -> list[PaymentId]:
+        p, c = payments.c, demo_controls.c
+        query = (
+            select(p.payment_id)
+            .join(demo_controls, (c.tenant_id == p.tenant_id) & (c.target_id == p.payment_id))
+            .where(
+                p.tenant_id == tenant_id,
+                c.kind == "settle_now",
+                p.status == "scheduled",
+                p.rail_payment_id.is_not(None),
             )
             .distinct()
             .order_by(p.payment_id)

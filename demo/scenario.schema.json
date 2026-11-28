@@ -809,6 +809,7 @@
             "expire_notice",
             "expire_dispute",
             "expire_refund_window",
+            "settle_now",
             "ai_off",
             "rail_declining",
             "lose_payment",

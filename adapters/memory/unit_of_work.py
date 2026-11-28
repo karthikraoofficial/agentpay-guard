@@ -612,12 +612,25 @@ class InMemoryUnitOfWork:
         data = self._tenants.get(tenant_id)
         if data is None:
             return []
-        ended = {c.target_id for c in data.demo_controls if c.kind == "expire_notice"}
+        ended = {
+            c.target_id for c in data.demo_controls if c.kind in ("expire_notice", "settle_now")
+        }
         return [
             p.payment_id
             for p in data.payments.values()
             if p.payment_id in ended and p.status == "scheduled" and p.rail_payment_id is None
         ]
+
+    def settled_now_by_control(self, tenant_id: TenantId) -> list[PaymentId]:
+        data = self._tenants.get(tenant_id)
+        if data is None:
+            return []
+        named = {c.target_id for c in data.demo_controls if c.kind == "settle_now"}
+        return sorted(
+            p.payment_id
+            for p in data.payments.values()
+            if p.payment_id in named and p.status == "scheduled" and p.rail_payment_id is not None
+        )
 
     def expired_unresolved_consents(self, expired_before: datetime) -> int:
         return sum(
